@@ -1,25 +1,42 @@
-from ingestion.pipeline import assemble_document, ingest_ticket, ingest_ticket_payload
-from ingestion.ticket_ingestion_service import (
+from ingestion.chunk_pipeline import (
+    ingest_ticket_chunks,
+    ingest_ticket_chunks_payload,
+)
+from ingestion.idea_card import IdeaCard, resolve_idea_card
+from ingestion.pipeline import (
+    IngestionMode,
+    IngestionResult,
+    ingest_ticket,
+    ingest_ticket_payload,
+)
+from ingestion.service import (
     IngestionDeps,
     TicketIngestionContext,
     ingest_one_ticket,
     ingest_single_ticket,
 )
-from ingestion.attachment_routing import (
-    route_attachments,
-    get_routing_candidates,
-    build_routing_artifact,
+from ingestion.summary_pipeline import (
+    ingest_ticket_summary,
+    ingest_ticket_summary_payload,
 )
 
 __all__ = [
-    "assemble_document",
+    # Router (mode-based)
     "ingest_ticket",
     "ingest_ticket_payload",
+    "IngestionMode",
+    "IngestionResult",
+    # Direct pipelines
+    "ingest_ticket_summary",
+    "ingest_ticket_summary_payload",
+    "ingest_ticket_chunks",
+    "ingest_ticket_chunks_payload",
+    # Shared primitives
+    "IdeaCard",
+    "resolve_idea_card",
+    # Service wrappers
     "TicketIngestionContext",
     "IngestionDeps",
     "ingest_single_ticket",
     "ingest_one_ticket",
-    "route_attachments",
-    "get_routing_candidates",
-    "build_routing_artifact",
 ]

@@ -1,4 +1,9 @@
-from src.clients.jira import JiraValueStreamClient
+from jira.ticket_client import (
+    JiraTicketClient,
+    JiraValueStreamClient,
+    TicketFetcher,
+    ValueStreamFetcher,
+)
 from typing import Any
 
 
@@ -15,6 +20,9 @@ class JiraTicketExtractionService:
         return await self._jira_client.get_ticket_data(ticket_id, config=cfg)
 
 __all__ = [
+    "JiraTicketClient",
     "JiraValueStreamClient",
     "JiraTicketExtractionService",
+    "TicketFetcher",
+    "ValueStreamFetcher",
 ]

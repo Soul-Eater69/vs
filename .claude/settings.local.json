@@ -5,7 +5,21 @@
       "Bash(python3 -c \"import sys; sys.path.insert\\(0, '/d/projects/vs'\\); from core.constants import RAG_PROMPTS_PATH; print\\(RAG_PROMPTS_PATH\\)\")",
       "Bash(grep -n \"RAG_PROMPTS_PATH\\\\s*=\" /d/projects/vs/**/*.py)",
       "Bash(find /d/projects/vs -type f -name \"__init__.py\" -path \"*/core/*\" -exec grep -l \"RAG_PROMPTS_PATH\\\\|CANONICAL\" {} \\\\;)",
-      "Bash(find /d/projects/vs -name \"*.py\" -type f -exec grep -l \"select_value_streams\\\\|generate_value_streams_rag\" {} \\\\;)"
+      "Bash(find /d/projects/vs -name \"*.py\" -type f -exec grep -l \"select_value_streams\\\\|generate_value_streams_rag\" {} \\\\;)",
+      "Bash(wc -l d:/projects/vs/ingestion/*.py)",
+      "Bash(wc -l /d/projects/vs/jira/*.py)",
+      "Bash(wc -l /d/projects/vs/ingestion_v2/*.py)",
+      "Bash(wc -l /d/projects/vs/ingestion/*.py)",
+      "Bash([ -f \"/d/projects/vs/$dir/__init__.py\" ])",
+      "Read(//tmp/**)",
+      "Bash(cat)",
+      "Bash(bash /tmp/analyze.sh)",
+      "Bash(file rag-summary *)",
+      "Bash(ls -la rag-summary/.git)",
+      "Bash(python -c ' *)",
+      "Bash(py -3 -c ' *)",
+      "Bash(py -3 -c \"import ast, pathlib; [ast.parse\\(pathlib.Path\\(p\\).read_text\\(encoding='utf-8'\\), filename=p\\) for p in ['ingestion/summary_pipeline.py', 'ingestion/chunk_pipeline.py', 'jira/value_stream/theme_extraction.py']]; print\\('OK'\\)\")",
+      "Bash(ls d:/projects/vs/*.py)"
     ]
   }
 }

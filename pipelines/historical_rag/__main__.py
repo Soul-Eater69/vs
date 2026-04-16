@@ -5,17 +5,29 @@ import json
 from pathlib import Path
 
 from pipelines.historical_rag.pipeline import run_historical_rag_pipeline
+from processing.extraction import extract_idea_card_text
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the merged historical RAG value-stream pipeline on an idea-card text file.",
+        description="Run the merged historical RAG value-stream pipeline on a local idea-card file or doc_id.",
     )
     parser.add_argument(
         "--input-file",
-        required=True,
         metavar="FILE",
-        help="Path to a text file containing the idea-card content to classify.",
+        help="Path to an idea-card file (.txt, .md, .pdf, .pptx, .docx, etc.) to classify.",
+    )
+    parser.add_argument(
+        "--doc-id",
+        default=None,
+        metavar="ID",
+        help="Optional doc_id to resolve from --idea-cards-dir using the legacy {doc_id}.* lookup.",
+    )
+    parser.add_argument(
+        "--idea-cards-dir",
+        default="idea_cards",
+        metavar="DIR",
+        help="Directory used with --doc-id lookup (default: idea_cards).",
     )
     parser.add_argument(
         "--fetch-count",
@@ -38,7 +50,14 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    query_text = Path(args.input_file).read_text(encoding="utf-8")
+    if not args.input_file and not args.doc_id:
+        parser.error("Provide either --input-file or --doc-id")
+
+    query_text = extract_idea_card_text(
+        args.input_file,
+        doc_id=args.doc_id,
+        idea_cards_dir=args.idea_cards_dir,
+    )
     result = run_historical_rag_pipeline(
         query_text,
         fetch_count=args.fetch_count,

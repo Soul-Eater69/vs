@@ -149,6 +149,8 @@ async def run_batch(
     enable_llm: bool,
     enable_embeddings: bool,
     mode: str,
+    build_faiss: bool = False,
+    faiss_dir: Optional[Path] = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -228,6 +230,18 @@ async def run_batch(
     if errors:
         dump_json(errors, output_dir / "_errors.json")
 
+    faiss_result: Optional[dict] = None
+    if build_faiss:
+        try:
+            from sinks.faiss_store import build_local_faiss_indexes
+
+            faiss_result = build_local_faiss_indexes(
+                output_dir=output_dir,
+                index_dir=faiss_dir or (output_dir / "_faiss"),
+            )
+        except Exception as exc:
+            logger.warning("Local FAISS build failed: %s", exc)
+
     # --- Summary print ---
     print("-" * 80)
     print(f"BATCH COMPLETE — mode={mode}")
@@ -238,6 +252,11 @@ async def run_batch(
         print(f"  Summaries : {output_dir / '_all_summaries.json'} ({len(all_summaries)} docs)")
     if mode in ("chunks", "both"):
         print(f"  Chunks    : {output_dir / '_all_chunks.json'} ({len(all_chunks)} docs)")
+    if faiss_result:
+        print(
+            f"  FAISS     : {faiss_result['index_dir']} "
+            f"({faiss_result['summary_doc_count']} summaries, {faiss_result['chunk_doc_count']} chunks)"
+        )
     for ticket_id, summary, chunks, err in results:
         if err:
             print(f"  [{ticket_id}] ERROR: {err}")
@@ -325,6 +344,17 @@ Examples:
         default=ENABLE_EMBEDDINGS,
         help="Disable embedding generation.",
     )
+    parser.add_argument(
+        "--build-faiss",
+        action="store_true",
+        help="Build local LangChain FAISS indexes from the produced summary/chunk JSON artifacts.",
+    )
+    parser.add_argument(
+        "--faiss-dir",
+        default=None,
+        metavar="DIR",
+        help="Output directory for local FAISS indexes (default: <output-dir>/_faiss).",
+    )
 
     args = parser.parse_args()
     tickets = [t.upper() for t in args.ticket_ids] if args.ticket_ids else DEFAULT_TICKETS
@@ -337,6 +367,8 @@ Examples:
         enable_llm=args.enable_llm,
         enable_embeddings=args.enable_embeddings,
         mode=args.mode,
+        build_faiss=args.build_faiss,
+        faiss_dir=Path(args.faiss_dir) if args.faiss_dir else None,
     )
 
 

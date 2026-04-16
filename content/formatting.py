@@ -29,28 +29,10 @@ def extract_substantive_comments(comment_field: dict, max_comments: int = 3) -> 
     Return the top N substantive human comments.
     Strips bot noise and chatter.
     """
-    from jira.text.text_processing import (
-        extract_comment_texts,
-        is_bot_author,
-        is_comment_chatter,
-    )
+    from jira.text.text_processing import extract_comment_texts
 
     comments_data = comment_field if isinstance(comment_field, dict) else {}
-    raw_comments = comments_data.get("comments", []) or []
-
-    result: list[str] = []
-    for c in raw_comments:
-        if is_bot_author(c):
-            continue
-        body = c.get("body", "")
-        text = _adf_or_str(body)
-        if not text or is_comment_chatter(text):
-            continue
-        result.append(text.strip())
-        if len(result) >= max_comments:
-            break
-
-    return result
+    return extract_comment_texts(comments_data, max_comments=max_comments)
 
 
 def clean_text(text: str) -> str:

@@ -18,8 +18,10 @@ from .markitdown import extract_markdown, word_count
 
 logger = logging.getLogger(__name__)
 
-# MarkItDown slide boundary marker
-_SLIDE_MARKER = re.compile(r"")
+# Common slide boundary markers emitted by markdown exporters.
+_SLIDE_MARKER = re.compile(
+    r"(?im)^\s*(?:<!--\s*slide(?:\s+number)?\s*:\s*(\d+)\s*-->|#{1,6}\s*slide\s+(\d+)\b.*)$"
+)
 
 # Boilerplate slide title patterns
 _BOILERPLATE_TITLE_RE = re.compile(
@@ -136,17 +138,23 @@ def cheap_peek_pptx(file_bytes: bytes) -> dict:
 
 def _parse_slides(md_text: str, max_slides: int) -> list[tuple[int, str]]:
     """Split MarkItDown output on slide markers and return (slide_num, text) pairs."""
-    parts = _SLIDE_MARKER.split(md_text)
-    # parts = ['preamble', '1', 'slide1 text', '2', 'slide2 text', ...]
     slides: list[tuple[int, str]] = []
+    matches = list(_SLIDE_MARKER.finditer(md_text or ""))
 
-    for i in range(1, len(parts), 2):
-        slide_num = int(parts[i])
-        if slide_num > max_slides:
-            break
-        text = parts[i + 1].strip() if i + 1 < len(parts) else ""
-        if text:
-            slides.append((slide_num, text))
+    if matches:
+        for idx, match in enumerate(matches):
+            slide_num_raw = next((group for group in match.groups() if group), "")
+            try:
+                slide_num = int(slide_num_raw)
+            except ValueError:
+                continue
+            if slide_num > max_slides:
+                break
+            start = match.end()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(md_text)
+            text = md_text[start:end].strip()
+            if text:
+                slides.append((slide_num, text))
 
     # Fallback: MarkItDown didn't emit markers - treat whole text as one slide
     if not slides and md_text.strip():

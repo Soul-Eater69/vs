@@ -119,8 +119,10 @@ def classify_description(
     return "rich", {"text": text, "chunk_strategy": "split_paragraphs", "word_count": word_count}
 
 
-def is_bot_author(author: str) -> bool:
-    return any(marker in (author or "").lower() for marker in _BOT_AUTHOR_MARKERS)
+def is_bot_author(author: Any) -> bool:
+    if isinstance(author, dict):
+        author = author.get("displayName") or author.get("name") or ""
+    return any(marker in str(author or "").lower() for marker in _BOT_AUTHOR_MARKERS)
 
 
 def is_comment_chatter(text: str, *, min_words: int = 10) -> bool:

@@ -1,3 +1,7 @@
-from content.schemas import TicketSummaryDocument, SourceQuality
+from content.schemas import ChunkDocument, HierarchicalTicketResult, TicketSummaryDocument
 
-__all__ = ["TicketSummaryDocument", "SourceQuality"]
+__all__ = [
+    "ChunkDocument",
+    "HierarchicalTicketResult",
+    "TicketSummaryDocument",
+]

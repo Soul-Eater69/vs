@@ -151,9 +151,9 @@ async def run_batch(
         skip_llm_derived=not enable_llm,
     )
 
-    llm_client = try_build_llm(enable_llm, model="gpt-5-mini-idp")
+    llm_client = try_build_llm(enable=enable_llm, model="gpt-5-mini-idp")
     embedding_client = try_build_embedding_client(
-        enable_embeddings,
+        enable=enable_embeddings,
         model=EMBEDDING_MODEL,
         dimension=EMBEDDING_DIMENSION,
     )

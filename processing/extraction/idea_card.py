@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from processing.extraction.markitdown import extract_markdown
-from text import clean_ppt_text
+from .markitdown import extract_markdown
+from .text_cleaning import clean_extracted_text
 
 
 def resolve_idea_card_path(
@@ -63,7 +63,7 @@ def extract_idea_card_text(
     else:
         raw_text = extract_markdown(path.read_bytes(), path.name)
 
-    text = clean_ppt_text(raw_text)
+    text = clean_extracted_text(raw_text)
     if not text.strip():
         raise ValueError(f"No text could be extracted from {path}")
 

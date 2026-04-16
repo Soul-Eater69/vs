@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 ChunkLevel = Literal["section", "chunk"]
 ChunkSource = Literal[
@@ -111,6 +111,10 @@ class ChunkDocument:
     doc_role: str           # primary_idea_card | supporting_doc | description | comment
 
     # Position within attachment
+    attachment_name: str = ""
+    attachment_type: str = ""
+    header_hierarchy: str = ""
+    source_url: str = ""
     chunk_index: int = 0
     slide_num: Optional[int] = None
     page_num: Optional[int] = None
@@ -127,18 +131,33 @@ class ChunkDocument:
 
     # Vector
     embedding: list[float] = field(default_factory=list)
+    chunk_provenance: dict[str, Any] = field(default_factory=dict)
 
     def to_index_doc(self) -> dict:
+        chunk_provenance = self.chunk_provenance or {
+            "chunkId": self.chunk_uid,
+            "chunkIndex": self.chunk_index,
+            "sourceType": self.source,
+            "attachmentId": self.attachment_id,
+            "attachmentName": self.attachment_name,
+            "attachmentType": self.attachment_type,
+            "pageRange": self.page_range or ([self.page_num] if self.page_num is not None else []),
+            "slideRange": self.slide_range or ([self.slide_num] if self.slide_num is not None else []),
+        }
         return {
             "chunk_uid": self.chunk_uid,
             "ticket_id": self.ticket_id,
             "level": self.level,
             "parent_uid": self.parent_uid,
             "attachment_id": self.attachment_id,
+            "attachment_name": self.attachment_name,
+            "attachment_type": self.attachment_type,
             "section_uid": self.section_uid,
             "text": self.text,
             "source": self.source,
             "section_title": self.section_title,
+            "header_hierarchy": self.header_hierarchy,
+            "source_url": self.source_url,
             "doc_role": self.doc_role,
             "chunk_index": self.chunk_index,
             "slide_num": self.slide_num,
@@ -151,6 +170,7 @@ class ChunkDocument:
             "value_stream_ids": self.value_stream_ids,
             "value_stream_names": self.value_stream_names,
             "embedding": self.embedding,
+            "chunkProvenance": chunk_provenance,
         }
 
     @staticmethod

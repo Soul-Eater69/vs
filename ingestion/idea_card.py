@@ -20,6 +20,7 @@ from typing import Any, Literal, Optional
 logger = logging.getLogger(__name__)
 
 IdeaCardOrigin = Literal["attachment", "description_link", "none"]
+_SUPPORTED_CARD_EXTENSIONS = {"pptx", "ppt", "pdf", "docx", "doc"}
 
 
 @dataclass
@@ -52,14 +53,32 @@ async def resolve_idea_card(
     Always returns an IdeaCard; check `.is_present` before using file_bytes.
     """
     fields = ticket_data.get("fields", {}) or {}
-    attachments = ticket_data.get("attachments", []) or fields.get("attachment", []) or []
+    api_attachments = fields.get("attachment", []) or [
+        att for att in (ticket_data.get("attachments", []) or [])
+        if not att.get("is_description_link")
+    ]
+    description_links = ticket_data.get("description_attachments", []) or [
+        att for att in (ticket_data.get("attachments", []) or [])
+        if att.get("is_description_link")
+    ]
     ticket_summary = str(fields.get("summary") or "")
 
-    card = await _from_attachments(attachments, ticket_summary, jira_client)
+    # Prefer first-party Jira attachments. Description links are useful, but if
+    # a SharePoint "Idea Card Link" is selected first and isn't downloadable in
+    # this runtime, we would incorrectly fall all the way back to ticket body.
+    card = await _from_attachments(api_attachments, ticket_summary, jira_client)
     if card.is_present:
         return card
 
-    return await _from_description_links(fields.get("description"), jira_client)
+    card = await _from_description_links(
+        fields.get("description"),
+        jira_client,
+        links=description_links,
+    )
+    if card.is_present:
+        return card
+
+    return IdeaCard(origin="none")
 
 
 async def _from_attachments(
@@ -70,10 +89,7 @@ async def _from_attachments(
     if not attachments:
         return IdeaCard(origin="none")
 
-    from processing.attachment_routing import route_attachments
-
-    async def _download(att: dict) -> bytes:
-        return await jira_client.download_attachment(att)
+    from processing.attachment_routing import get_routing_candidates, route_attachments
 
     # route_attachments expects a sync download_fn; we pre-download candidates in Layer2
     # via a small adapter that blocks only because route_attachments is already sync.
@@ -83,31 +99,58 @@ async def _from_attachments(
         ticket_summary=ticket_summary,
         download_fn=None,
     )
-    if not primary:
-        return IdeaCard(origin="none")
 
-    try:
-        file_bytes = await jira_client.download_attachment(primary)
-    except Exception as exc:
-        logger.warning("Primary attachment download failed: %s", exc)
-        return IdeaCard(origin="none")
+    candidate_pool = []
+    if primary:
+        candidate_pool.append(primary)
+    candidate_pool.extend(get_routing_candidates(_artifact))
+    if not candidate_pool:
+        candidate_pool = list(attachments)
 
-    if not file_bytes:
-        return IdeaCard(origin="none")
+    seen_ids: set[str] = set()
+    for candidate in candidate_pool:
+        att_id = _attachment_id(candidate)
+        if att_id in seen_ids:
+            continue
+        seen_ids.add(att_id)
 
-    return IdeaCard(
-        origin="attachment",
-        attachment=primary,
-        file_bytes=file_bytes,
-        filename=str(primary.get("filename") or ""),
-        ext=str(primary.get("ext") or _ext_of(primary.get("filename", ""))),
-    )
+        ext = str(candidate.get("ext") or _ext_of(candidate.get("filename", ""))).lower()
+        if ext not in _SUPPORTED_CARD_EXTENSIONS:
+            continue
+
+        try:
+            file_bytes = await jira_client.download_attachment(candidate)
+        except Exception as exc:
+            logger.info(
+                "Idea-card candidate download skipped (%s): %s",
+                candidate.get("filename"),
+                exc,
+            )
+            continue
+
+        if not file_bytes:
+            continue
+
+        return IdeaCard(
+            origin="attachment",
+            attachment=candidate,
+            file_bytes=file_bytes,
+            filename=str(candidate.get("filename") or ""),
+            ext=ext,
+        )
+
+    return IdeaCard(origin="none")
 
 
-async def _from_description_links(description: Any, jira_client: Any) -> IdeaCard:
+async def _from_description_links(
+    description: Any,
+    jira_client: Any,
+    *,
+    links: Optional[list[dict]] = None,
+) -> IdeaCard:
     from jira.attachments.description_links import extract_description_link_attachments
 
-    links = extract_description_link_attachments(description)
+    links = list(links or extract_description_link_attachments(description))
     if not links:
         return IdeaCard(origin="none")
 
@@ -143,3 +186,7 @@ async def _from_description_links(description: Any, jira_client: Any) -> IdeaCar
 def _ext_of(filename: str) -> str:
     name = (filename or "").lower()
     return name.rsplit(".", 1)[-1] if "." in name else ""
+
+
+def _attachment_id(att: dict) -> str:
+    return str(att.get("id") or att.get("attachment_id") or att.get("filename") or "")

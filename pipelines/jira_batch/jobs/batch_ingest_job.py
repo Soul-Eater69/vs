@@ -77,7 +77,13 @@ async def process_ticket(
         if summary_ready and chunks_ready:
             logger.info("%s already processed — skipping (use --force to reprocess)", ticket_id)
             summary = json.loads(summary_file.read_text("utf-8")) if need_summary else None
-            chunks = json.loads(chunks_file.read_text("utf-8")).get("documents") if need_chunks else None
+            if need_chunks:
+                chunks_payload = json.loads(chunks_file.read_text("utf-8"))
+                leaf_docs = list(chunks_payload.get("documents") or [])
+                section_docs = list(chunks_payload.get("sections") or [])
+                chunks = section_docs + leaf_docs
+            else:
+                chunks = None
             return summary, chunks
 
     # --- Fetch once from Jira ---
@@ -110,6 +116,8 @@ async def process_ticket(
             embedding_client=deps.embedding_client,
             cfg=cfg,
         )
+        section_docs = [doc.to_index_doc() for doc in result.sections]
+        leaf_chunk_docs = [doc.to_index_doc() for doc in result.chunks]
         chunk_docs = result.all_documents()
         dump_json(
             {
@@ -119,7 +127,8 @@ async def process_ticket(
                 "label_source": result.label_source,
                 "section_count": len(result.sections),
                 "chunk_count": len(result.chunks),
-                "documents": chunk_docs,
+                "documents": leaf_chunk_docs,
+                "sections": section_docs,
             },
             chunks_file,
         )

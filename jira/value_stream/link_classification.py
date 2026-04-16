@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from jira.value_stream.helpers import clean_value_stream_name
@@ -12,39 +13,41 @@ from jira.value_stream.helpers import clean_value_stream_name
 
 LINK_TYPE_MAP: dict[str, str] = {
     # Value stream links (ground truth - goes to supervision view)
-    "Value Stream": "vs",
+    "value stream": "vs",
     "value-stream": "vs",
-    "VS Link": "vs",
-    "Implements Value Stream": "vs",
+    "vs link": "vs",
+    "implements value stream": "vs",
     # Product / System Links
-    "Product": "product",
-    "Affects Product": "product",
-    "Impacts System": "product",
+    "product": "product",
+    "affects product": "product",
+    "impacts system": "product",
     # Dependency links
-    "Depends On": "dependency",
-    "Blocks": "dependency",
-    "Is Blocked By": "dependency",
+    "depends on": "dependency",
+    "blocks": "dependency",
+    "is blocked by": "dependency",
     "blocks": "dependency",
     "is blocked by": "dependency",
     "depends on": "dependency",
     # Hierarchy links
-    "Epic Link": "parent",
-    "Parent": "parent",
-    "Sub-task": "parent",
+    "epic link": "parent",
+    "parent": "parent",
+    "sub-task": "parent",
     "is child of": "parent",
     "is parent of": "parent",
     # Related Ideas
-    "Relates To": "related",
     "relates to": "related",
-    "Duplicates": "related",
+    "relates to": "related",
     "duplicates": "related",
-    "Clones": "related",
+    "duplicates": "related",
+    "clones": "related",
     "clones": "related",
     # Implementation links
-    "Implements": "implementation",
-    "Story Link": "implementation",
+    "implements": "implementation",
+    "story link": "implementation",
     "is implemented by": "implementation",
 }
+
+_VS_TOKEN_RE = re.compile(r"\bvalue[\s-]*stream\b|\bvs\b", re.IGNORECASE)
 
 
 def classify_links(issue_links: list[dict]) -> dict[str, list[dict]]:
@@ -68,8 +71,9 @@ def classify_links(issue_links: list[dict]) -> dict[str, list[dict]]:
         if not linked:
             continue
 
-        link_type_name = (link.get("type") or {}).get("name", "")
-        category = LINK_TYPE_MAP.get(link_type_name, "unknown")
+        link_type = link.get("type") or {}
+        link_type_name = str(link_type.get("name") or "")
+        category = _categorize_link_type(link_type)
 
         raw_summary = (linked.get("fields") or {}).get("summary", "")
         entry: dict[str, Any] = {
@@ -85,3 +89,32 @@ def classify_links(issue_links: list[dict]) -> dict[str, list[dict]]:
         classified[category].append(entry)
 
     return classified
+
+
+def _categorize_link_type(link_type: dict[str, Any]) -> str:
+    descriptors = [
+        str(link_type.get("name") or "").strip(),
+        str(link_type.get("outward") or "").strip(),
+        str(link_type.get("inward") or "").strip(),
+    ]
+    normalized = [value.lower() for value in descriptors if value]
+
+    for value in normalized:
+        category = LINK_TYPE_MAP.get(value)
+        if category:
+            return category
+
+    joined = " | ".join(normalized)
+    if _VS_TOKEN_RE.search(joined):
+        return "vs"
+    if "implement" in joined:
+        return "implementation"
+    if any(token in joined for token in ("epic", "parent", "child", "sub-task")):
+        return "parent"
+    if any(token in joined for token in ("block", "depend")):
+        return "dependency"
+    if any(token in joined for token in ("relate", "duplicate", "clone")):
+        return "related"
+    if "product" in joined or "system" in joined:
+        return "product"
+    return "unknown"

@@ -11,34 +11,21 @@ logger = logging.getLogger(__name__)
 
 
 def extract_themes(issuelinks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Extract themes from "Implements" / "is implemented by" issue links.
+    """Extract themes from implementation-style issue links.
 
     Returns a list of theme dicts with keys: key, summary, summary_raw, status.
     """
     themes: List[Dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
 
     for link in issuelinks:
-        link_type = link.get("type", {})
+        link_type = link.get("type", {}) or {}
 
-        if link_type.get("outward") == "Implements" and "outwardIssue" in link:
-            fields = link["outwardIssue"].get("fields", {})
-            summary_raw = fields.get("summary") or ""
-            themes.append({
-                "key": link["outwardIssue"].get("key"),
-                "summary": clean_value_stream_name(summary_raw),
-                "summary_raw": summary_raw,
-                "status": nested_str_field(fields, "status", "name"),
-            })
+        if _looks_like_implementation(link_type.get("outward")) and "outwardIssue" in link:
+            _append_theme(themes, seen, link["outwardIssue"])
 
-        if link_type.get("inward") == "is implemented by" and "inwardIssue" in link:
-            fields = link["inwardIssue"].get("fields", {})
-            summary_raw = fields.get("summary") or ""
-            themes.append({
-                "key": link["inwardIssue"].get("key"),
-                "summary": clean_value_stream_name(summary_raw),
-                "summary_raw": summary_raw,
-                "status": nested_str_field(fields, "status", "name"),
-            })
+        if _looks_like_implementation(link_type.get("inward")) and "inwardIssue" in link:
+            _append_theme(themes, seen, link["inwardIssue"])
 
     return themes
 
@@ -81,3 +68,27 @@ def resolve_value_streams(
             "value_stream_statuses": [v["status"] for v in value_streams],
             "value_stream_label_source": "jira_themes_fallback",
         }
+
+
+def _looks_like_implementation(value: Any) -> bool:
+    return "implement" in str(value or "").lower()
+
+
+def _append_theme(
+    themes: List[Dict[str, Any]],
+    seen: set[tuple[str, str]],
+    issue: Dict[str, Any],
+) -> None:
+    fields = issue.get("fields", {}) or {}
+    key = str(issue.get("key") or "")
+    summary_raw = str(fields.get("summary") or "")
+    dedupe_key = (key, summary_raw)
+    if dedupe_key in seen:
+        return
+    seen.add(dedupe_key)
+    themes.append({
+        "key": key,
+        "summary": clean_value_stream_name(summary_raw),
+        "summary_raw": summary_raw,
+        "status": nested_str_field(fields, "status", "name"),
+    })

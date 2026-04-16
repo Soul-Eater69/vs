@@ -12,6 +12,7 @@ from jira.attachments.constants import (
     DESC_WIKI_LINK_RE,
     EXT_TO_MIME,
 )
+from jira.text.text_processing import extract_adf_text
 
 
 def extract_description_link_attachments(description: Any) -> List[Dict[str, Any]]:
@@ -19,6 +20,8 @@ def extract_description_link_attachments(description: Any) -> List[Dict[str, Any
 
     Returns a list of synthetic attachment dicts compatible with the Jira attachment schema.
     """
+    if isinstance(description, (dict, list)):
+        description = extract_adf_text(description)
     if not isinstance(description, str) or not description.strip():
         return []
 

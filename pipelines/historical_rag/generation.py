@@ -8,14 +8,13 @@ from prompts import (
     SelectionResult,
     build_selection_system_prompt,
 )
-from text import condense_idea_card
 from pipelines.retrieval.pipeline import sanitize_selected
 
 logger = logging.getLogger(__name__)
 
 
 def generate_value_streams(
-    query: str,
+    query_for_prompt: str,
     llm_candidates: List[dict],
     auto_selected: List[dict] | None = None,
 ) -> dict:
@@ -30,7 +29,7 @@ def generate_value_streams(
 
     gen_svc = GenerationService()
     prompt = _build_prompt(
-        query_for_prompt=condense_idea_card(query, max_chars=3500),
+        query_for_prompt=query_for_prompt,
         candidates=llm_candidates,
     )
     system_prompt = _build_system_prompt()

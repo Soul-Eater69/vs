@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Any
 
+from clients.llm import complete_text
 from content.schemas import TicketSummaryDocument
 
 logger = logging.getLogger(__name__)
@@ -89,15 +90,14 @@ def summarize_ticket(
 
 def _call_llm(prompt: str, llm_client: Any, cfg: Any) -> str:
     model = getattr(cfg, "llm_model", None) or "gpt-4o"
-    messages = [{"role": "user", "content": prompt}]
     try:
-        response = llm_client.chat.completions.create(
+        return complete_text(
+            prompt,
+            llm_client,
             model=model,
-            messages=messages,
-            max_tokens=_MAX_OUTPUT_TOKENS,
+            max_output_tokens=_MAX_OUTPUT_TOKENS,
             temperature=0.2,
         )
-        return response.choices[0].message.content or ""
     except Exception as exc:
         logger.warning("LLM call failed: %s", exc)
         return ""

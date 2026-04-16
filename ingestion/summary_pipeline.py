@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from content.schemas import TicketSummaryDocument
 from ingestion.extractor import consolidate_ticket_text
-from ingestion.summarizer import summarize_ticket
+from ingestion.summarizer import classify_ticket_value_streams, summarize_ticket
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,25 @@ async def ingest_ticket_summary_payload(
         or ticket_data.get("label_source")
         or "jira_issuelinks"
     )
+    doc.value_streams = classify_ticket_value_streams(
+        ticket_id=ticket_key,
+        consolidated_text=consolidated_text,
+        value_stream_ids=doc.value_stream_ids,
+        value_stream_names=doc.value_stream_names,
+        label_source=doc.label_source,
+        llm_client=llm_client,
+        cfg=cfg,
+    )
+    doc.direct_vs_names = [
+        row.get("vs_name", "")
+        for row in doc.value_streams
+        if row.get("inference_type") == "direct" and row.get("vs_name")
+    ]
+    doc.implied_vs_names = [
+        row.get("vs_name", "")
+        for row in doc.value_streams
+        if row.get("inference_type") == "implied" and row.get("vs_name")
+    ]
 
     # 5. EMBED — full structured text → vector (richer than summary_text alone)
     if embedding_client is not None:

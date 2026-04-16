@@ -62,6 +62,51 @@ def build_local_faiss_indexes(
     }
 
 
+def faiss_index_exists(
+    *,
+    index_dir: str | Path = DEFAULT_FAISS_DIR,
+    kind: str = "summaries",
+) -> bool:
+    index_path = Path(index_dir) / kind
+    return (index_path / "index.faiss").exists() and (index_path / "index.pkl").exists()
+
+
+def search_local_faiss(
+    query_text: str,
+    *,
+    index_dir: str | Path = DEFAULT_FAISS_DIR,
+    kind: str = "summaries",
+    top_k: int = 8,
+    embedding: EmbeddingClient | None = None,
+) -> list[dict]:
+    index_path = Path(index_dir) / kind
+    if not faiss_index_exists(index_dir=index_dir, kind=kind):
+        return []
+
+    from langchain_community.vectorstores import FAISS
+
+    embeddings = embedding or EmbeddingClient()
+    vectorstore = FAISS.load_local(
+        str(index_path),
+        embeddings,
+        allow_dangerous_deserialization=True,
+    )
+    results = vectorstore.similarity_search_with_score(query_text, k=top_k)
+
+    out: list[dict] = []
+    for rank, (doc, raw_distance) in enumerate(results, start=1):
+        similarity = round(1.0 / (1.0 + float(raw_distance)), 4)
+        out.append(
+            {
+                "rank": rank,
+                "score": similarity,
+                "content": doc.page_content,
+                "metadata": dict(doc.metadata or {}),
+            }
+        )
+    return out
+
+
 def _load_summary_artifacts(output_dir: Path) -> list[dict]:
     aggregate_path = output_dir / "_all_summaries.json"
     if aggregate_path.exists():

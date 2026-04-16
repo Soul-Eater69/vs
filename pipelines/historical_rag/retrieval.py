@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from clients.azure_direct_client import AzureDirectSearchClient
+from sinks.faiss_store import faiss_index_exists, search_local_faiss
 from text import clean_ppt_text, normalize_for_search
 from pipelines.retrieval.pipeline import (
     build_historical_vs_evidence,
@@ -83,9 +84,26 @@ def retrieve_semantic_candidates(
     )
 
 
-def load_historical_summary_map(base_dir: str | Path | None = None) -> Dict[str, dict]:
+def load_historical_summary_map(
+    base_dir: str | Path | None = None,
+    *,
+    faiss_dir: str | Path | None = None,
+) -> Dict[str, dict]:
     base = Path(base_dir or "ticket_data")
     mapping: Dict[str, dict] = {}
+
+    faiss_summary_docs = Path(faiss_dir) / "summary_docs.json" if faiss_dir else None
+    if faiss_summary_docs and faiss_summary_docs.exists():
+        try:
+            payload = json.loads(faiss_summary_docs.read_text(encoding="utf-8"))
+            for record in payload or []:
+                if not isinstance(record, dict):
+                    continue
+                ticket_id = str(record.get("ticket_id") or "").strip()
+                if ticket_id:
+                    mapping[ticket_id] = record
+        except Exception as exc:
+            logger.warning("Failed loading %s: %s", faiss_summary_docs, exc)
 
     aggregate_path = base / "_all_summaries.json"
     if aggregate_path.exists():
@@ -123,16 +141,42 @@ def retrieve_historical_support(
     query: str,
     *,
     historical_summary_dir: str | Path = "ticket_data",
+    historical_faiss_dir: str | Path = "ticket_data/_faiss",
     local_vs_map_dir: str | Path = "ticket_chunks",
+    historical_backend: str = "auto",
     top_per_view: int = 12,
     max_historical_chunks: int = 60,
     max_ticket_hits: int = 12,
 ) -> dict:
     cleaned = clean_ppt_text(query)
+    summary_map = load_historical_summary_map(historical_summary_dir, faiss_dir=historical_faiss_dir)
+
+    if historical_backend not in {"auto", "faiss", "chunks"}:
+        raise ValueError("historical_backend must be one of: auto, faiss, chunks")
+
+    if historical_backend in {"auto", "faiss"} and faiss_index_exists(
+        index_dir=historical_faiss_dir,
+        kind="summaries",
+    ):
+        faiss_hits = _search_summary_faiss(
+            cleaned,
+            historical_faiss_dir=historical_faiss_dir,
+            top_k=max_ticket_hits,
+        )
+        vs_support = _build_support_from_summaries(faiss_hits, summary_map) if summary_map else []
+        return {
+            "historical_chunks": [],
+            "historical_ticket_hits": faiss_hits,
+            "historical_value_stream_support": vs_support,
+            "historical_source": "summary_faiss",
+        }
+
+    if historical_backend == "faiss":
+        logger.warning("FAISS backend requested but no local summary FAISS index was found at %s", historical_faiss_dir)
+
     historical_chunks = retrieve_historical_chunks(cleaned, top_k_per_view=top_per_view)
     historical_chunks = _limit_historical_chunks(historical_chunks, max_historical_chunks)
 
-    summary_map = load_historical_summary_map(historical_summary_dir)
     if summary_map:
         ticket_hits = _rank_ticket_hits(historical_chunks, max_ticket_hits=max_ticket_hits)
         vs_support = _build_support_from_summaries(ticket_hits, summary_map)
@@ -140,7 +184,7 @@ def retrieve_historical_support(
             "historical_chunks": historical_chunks,
             "historical_ticket_hits": ticket_hits,
             "historical_value_stream_support": vs_support,
-            "historical_source": "summary_docs",
+            "historical_source": "azure_chunks_plus_summary_docs",
         }
 
     ticket_vs_map = load_ticket_vs_maps(local_vs_map_dir)
@@ -156,6 +200,34 @@ def retrieve_historical_support(
         "historical_value_stream_support": adapted,
         "historical_source": "ticket_vs_maps",
     }
+
+
+def _search_summary_faiss(
+    query: str,
+    *,
+    historical_faiss_dir: str | Path,
+    top_k: int,
+) -> List[dict]:
+    results = search_local_faiss(
+        query,
+        index_dir=historical_faiss_dir,
+        kind="summaries",
+        top_k=top_k,
+    )
+    out: List[dict] = []
+    for row in results:
+        metadata = row.get("metadata") or {}
+        content = str(row.get("content") or "").strip()
+        out.append(
+            {
+                "ticket_id": str(metadata.get("ticket_id") or "").strip(),
+                "best_score": float(row.get("score", 0.0) or 0.0),
+                "matched_chunk_ids": [],
+                "title": str(metadata.get("ticket_id") or "").strip(),
+                "summary_preview": content[:320],
+            }
+        )
+    return [row for row in out if row.get("ticket_id")]
 
 
 def _limit_historical_chunks(chunks: List[dict], limit: int) -> List[dict]:

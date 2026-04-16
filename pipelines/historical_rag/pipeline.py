@@ -15,7 +15,9 @@ def select_value_streams(
     *,
     fetch_count: int = 12,
     historical_summary_dir: str = "ticket_data",
+    historical_faiss_dir: str = "ticket_data/_faiss",
     local_vs_map_dir: str = "ticket_chunks",
+    historical_backend: str = "auto",
     allowed_value_stream_names: Optional[List[str]] = None,
 ) -> dict:
     top_k = min(max(12, fetch_count), 24)
@@ -28,7 +30,9 @@ def select_value_streams(
     historical = retrieve_historical_support(
         query,
         historical_summary_dir=historical_summary_dir,
+        historical_faiss_dir=historical_faiss_dir,
         local_vs_map_dir=local_vs_map_dir,
+        historical_backend=historical_backend,
         top_per_view=top_k,
         max_historical_chunks=60,
         max_ticket_hits=12,
@@ -44,20 +48,6 @@ def select_value_streams(
         augmented["llm_candidates"],
         auto_selected=augmented["auto_selected_value_streams"],
     )
-    with open("results.json", "w") as f:
-        import json
-
-        json.dump({
-        "selected_value_streams": generated["selected_value_streams"],
-        "auto_selected_value_streams": augmented["auto_selected_value_streams"],
-        "llm_selected_value_streams": generated["llm_selected_value_streams"],
-        "historical_ticket_hits": historical.get("historical_ticket_hits", []),
-        "historical_value_stream_support": historical.get("historical_value_stream_support", []),
-        "candidate_value_streams": augmented["merged_candidates"],
-        "llm_candidates": generated["candidates_used"],
-        "historical_source": historical.get("historical_source", ""),
-        "raw_response": generated["raw_response"],
-    }, f, indent=2)
     return {
         "selected_value_streams": generated["selected_value_streams"],
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],

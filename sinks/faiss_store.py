@@ -13,6 +13,7 @@ from ..clients.embedding import EmbeddingClient
 logger = logging.getLogger(__name__)
 
 DEFAULT_FAISS_DIR = Path("local_faiss")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def build_local_faiss_indexes(
@@ -67,8 +68,7 @@ def faiss_index_exists(
     index_dir: str | Path = DEFAULT_FAISS_DIR,
     kind: str = "summaries",
 ) -> bool:
-    index_path = Path(index_dir) / kind
-    return (index_path / "index.faiss").exists() and (index_path / "index.pkl").exists()
+    return _resolve_existing_index_path(index_dir=index_dir, kind=kind) is not None
 
 
 def search_local_faiss(
@@ -79,8 +79,8 @@ def search_local_faiss(
     top_k: int = 8,
     embedding: EmbeddingClient | None = None,
 ) -> list[dict]:
-    index_path = Path(index_dir) / kind
-    if not faiss_index_exists(index_dir=index_dir, kind=kind):
+    index_path = _resolve_existing_index_path(index_dir=index_dir, kind=kind)
+    if index_path is None:
         return []
 
     from langchain_community.vectorstores import FAISS
@@ -105,6 +105,40 @@ def search_local_faiss(
             }
         )
     return out
+
+
+def _resolve_existing_index_path(
+    *,
+    index_dir: str | Path,
+    kind: str,
+) -> Path | None:
+    raw = Path(index_dir)
+    candidates: list[Path] = []
+
+    # Normal case: caller passes the FAISS root, we append kind.
+    candidates.append(raw / kind)
+
+    # Also allow callers to pass the concrete summaries/chunks directory directly.
+    if raw.name.lower() == kind.lower():
+        candidates.append(raw)
+
+    # Be resilient to relative-path confusion by resolving against the repo root too.
+    if not raw.is_absolute():
+        repo_relative = REPO_ROOT / raw
+        candidates.append(repo_relative / kind)
+        if repo_relative.name.lower() == kind.lower():
+            candidates.append(repo_relative)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if (candidate / "index.faiss").exists() and (candidate / "index.pkl").exists():
+            return candidate
+
+    return None
 
 
 def _load_summary_artifacts(output_dir: Path) -> list[dict]:

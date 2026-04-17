@@ -8,14 +8,14 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from jira import JiraValueStreamClient
-from pipelines.jira_batch.runtime.runtime_factory import (
+from ....jira import JiraValueStreamClient
+from ..runtime.runtime_factory import (
     build_ingestion_config,
     try_build_llm,
     try_build_embedding_client,
 )
-from ingestion.service import IngestionDeps
-from config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, JIRA_BASE_URL, JIRA_TOKEN
+from ....ingestion.service import IngestionDeps
+from ....config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, JIRA_BASE_URL, JIRA_TOKEN
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")

@@ -32,8 +32,8 @@ from azure.identity import ClientSecretCredential
 from langchain_core.documents import Document
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
-import config
-from clients.auth import IDPCustomAuth
+from .. import config
+from .auth import IDPCustomAuth
 
 logger = logging.getLogger(__name__)
 

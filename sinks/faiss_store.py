@@ -8,7 +8,7 @@ from typing import Any
 
 from langchain_core.documents import Document
 
-from clients.embedding import EmbeddingClient
+from ..clients.embedding import EmbeddingClient
 
 logger = logging.getLogger(__name__)
 

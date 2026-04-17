@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 import yaml
 from pydantic import BaseModel, Field
 
-from constants import RAG_PROMPTS_PATH
+from .constants import RAG_PROMPTS_PATH
 
 logger = logging.getLogger(__name__)
 

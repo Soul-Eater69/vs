@@ -6,7 +6,7 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
-from jira.value_stream.helpers import clean_value_stream_name, nested_str_field, str_field
+from .helpers import clean_value_stream_name, nested_str_field, str_field
 
 
 # ---------------------------------------------------------------------------

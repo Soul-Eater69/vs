@@ -1,5 +1,5 @@
 from typing import Dict, Optional
-from jira.client.base import JIRAClient
+from ..client.base import JIRAClient
 from .base import JIRAFieldProvider
 import logging
 from .constants import LOGICAL_TO_JIRA_FIELD_NAME, LOGICAL_TO_JIRA_ISSUE_TYPE_NAME

@@ -1,21 +1,21 @@
-from ingestion.chunk_pipeline import (
+from .chunk_pipeline import (
     ingest_ticket_chunks,
     ingest_ticket_chunks_payload,
 )
-from ingestion.idea_card import IdeaCard, resolve_idea_card
-from ingestion.pipeline import (
+from .idea_card import IdeaCard, resolve_idea_card
+from .pipeline import (
     IngestionMode,
     IngestionResult,
     ingest_ticket,
     ingest_ticket_payload,
 )
-from ingestion.service import (
+from .service import (
     IngestionDeps,
     TicketIngestionContext,
     ingest_one_ticket,
     ingest_single_ticket,
 )
-from ingestion.summary_pipeline import (
+from .summary_pipeline import (
     ingest_ticket_summary,
     ingest_ticket_summary_payload,
 )

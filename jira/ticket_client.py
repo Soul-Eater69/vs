@@ -14,12 +14,12 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 import httpx
-from jira.client.rest import JIRARestClient as CoreJIRARestClient
+from .client.rest import JIRARestClient as CoreJIRARestClient
 
-from jira.attachments.attachment_extraction import download_attachment, fetch_attachment_content
-from jira.attachments.description_links import extract_description_link_attachments
-from jira.value_stream.epic_extraction import extract_epics, map_value_streams_to_epics
-from jira.value_stream.theme_extraction import extract_themes, resolve_value_streams
+from .attachments.attachment_extraction import download_attachment, fetch_attachment_content
+from .attachments.description_links import extract_description_link_attachments
+from .value_stream.epic_extraction import extract_epics, map_value_streams_to_epics
+from .value_stream.theme_extraction import extract_themes, resolve_value_streams
 
 logger = logging.getLogger(__name__)
 

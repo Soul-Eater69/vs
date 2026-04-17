@@ -11,9 +11,9 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 # Canonical Jira implementations live in jira/text and jira/value_stream.
-from jira.value_stream.helpers import clean_value_stream_name  # noqa: F401
-from jira.value_stream.link_classification import classify_links  # noqa: F401
-from jira.text.text_processing import (
+from ..jira.value_stream.helpers import clean_value_stream_name  # noqa: F401
+from ..jira.value_stream.link_classification import classify_links  # noqa: F401
+from ..jira.text.text_processing import (
     clean_jira_markup,
     extract_adf_html,
     extract_adf_text,

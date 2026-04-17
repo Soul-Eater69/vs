@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from ingestion.pipeline import IngestionMode, IngestionResult, ingest_ticket_payload
+from .pipeline import IngestionMode, IngestionResult, ingest_ticket_payload
 
 logger = logging.getLogger(__name__)
 

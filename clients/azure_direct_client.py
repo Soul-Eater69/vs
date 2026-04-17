@@ -32,7 +32,7 @@ from azure.identity import ClientSecretCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
 
-import config
+from .. import config
 from .embedding import EmbeddingClient
 
 logger = logging.getLogger(__name__)

@@ -16,12 +16,12 @@ import asyncio
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
-from jira.text.text_assembly import (
+from ...jira.text.text_assembly import (
     build_retrieval_text,
     clean_description,
     extract_comment_texts,
 )
-from pipelines.historical.models import RawTicket
+from .models import RawTicket
 
 logger = logging.getLogger(__name__)
 EXTRACTION_SOURCE = "jira_direct"

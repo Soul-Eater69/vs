@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Optional, Sequence, Type, TypeVar
 
-from pipelines.jira_batch.errors import is_transient
+from .errors import is_transient
 
 logger = logging.getLogger(__name__)
 

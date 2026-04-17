@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from jira.value_stream.helpers import clean_value_stream_name, nested_str_field, str_field
+from .helpers import clean_value_stream_name, nested_str_field, str_field
 
 logger = logging.getLogger(__name__)
 

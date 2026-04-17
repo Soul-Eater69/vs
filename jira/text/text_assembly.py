@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from jira.text.text_processing import clean_description, extract_adf_text, extract_comment_texts
+from .text_processing import clean_description, extract_adf_text, extract_comment_texts
 
 
 # ---------------------------------------------------------------------------

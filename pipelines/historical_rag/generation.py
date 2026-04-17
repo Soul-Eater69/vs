@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from typing import Iterable, List
 
-from clients.generation_service import GenerationService
-from prompts import (
+from ...clients.generation_service import GenerationService
+from ...prompts import (
     SelectionResult,
     build_selection_system_prompt,
 )
-from pipelines.retrieval.pipeline import sanitize_selected
+from ..retrieval.pipeline import sanitize_selected
 
 logger = logging.getLogger(__name__)
 

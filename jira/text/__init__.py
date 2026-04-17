@@ -1,5 +1,5 @@
-from jira.text.text_assembly import build_retrieval_text
-from jira.text.text_processing import (
+from .text_assembly import build_retrieval_text
+from .text_processing import (
     clean_description,
     clean_jira_markup,
     classify_description,

@@ -54,17 +54,17 @@ are written automatically to `<storage_dir>/debug/<ticket_key>/`:
 These files are part of the framework contract and will remain stable.
 """
 
-from jira import JiraValueStreamClient
-from ingestion.pipeline import ingest_ticket, ingest_ticket_payload
-from pipelines.jira_batch.config import JiraIngestionConfig
-from pipelines.jira_batch.runtime.runtime_factory import build_ingestion_config
-from ingestion.service import (
+from ...jira import JiraValueStreamClient
+from ...ingestion.pipeline import ingest_ticket, ingest_ticket_payload
+from .config import JiraIngestionConfig
+from .runtime.runtime_factory import build_ingestion_config
+from ...ingestion.service import (
     IngestionDeps,
     TicketIngestionContext,
     ingest_one_ticket,
     ingest_single_ticket,
 )
-from pipelines.jira_batch.models import (
+from .models import (
     TicketInput,
     PipelineDocument,
     PreChunkDocument,

@@ -18,8 +18,8 @@ from typing import Any, Optional
 
 import httpx
 
-import config
-from clients.auth import IDPCustomAuth
+from .. import config
+from .auth import IDPCustomAuth
 
 logger = logging.getLogger(__name__)
 

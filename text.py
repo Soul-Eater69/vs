@@ -4,8 +4,8 @@ import logging
 import re
 from typing import Optional
 
-from clients.llm import IDPChatOpenAI
-from processing.extraction.text_cleaning import clean_extracted_text
+from .clients.llm import IDPChatOpenAI
+from .processing.extraction.text_cleaning import clean_extracted_text
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +289,8 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
         reply = IDPChatOpenAI(model="gpt-4o-mini-idp").invoke(input=prompt)
         condensed = (getattr(reply, "content", "") or "").strip()
         if condensed and len(condensed) > 50:
+            # LLM sometimes returns literal \n instead of real newlines
+            condensed = condensed.replace("\\n", "\n").replace("\\r", "")
             return condensed[:max_chars]
     except Exception as exc:
         logger.warning(

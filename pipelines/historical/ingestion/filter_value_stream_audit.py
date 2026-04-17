@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
-from jira.ticket_client import JiraTicketClient
-from config import JIRA_BASE_URL, JIRA_TOKEN
+from ....jira.ticket_client import JiraTicketClient
+from ....config import JIRA_BASE_URL, JIRA_TOKEN
 
 DEFAULT_OUTPUT = Path("historical_filter_value_stream_audit.json")
 DEFAULT_PAGE_SIZE = 100

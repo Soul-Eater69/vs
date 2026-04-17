@@ -12,8 +12,8 @@ import logging
 import re
 from typing import Any
 
-from clients.llm import complete_text
-from content.schemas import TicketSummaryDocument
+from ..clients.llm import complete_text
+from ..content.schemas import TicketSummaryDocument
 
 logger = logging.getLogger(__name__)
 

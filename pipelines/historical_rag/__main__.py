@@ -4,8 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from pipelines.historical_rag.pipeline import run_historical_rag_pipeline
-from processing.extraction import extract_idea_card_text
+from .pipeline import run_historical_rag_pipeline
+from ...processing.extraction import extract_idea_card_text
 
 
 def main() -> None:

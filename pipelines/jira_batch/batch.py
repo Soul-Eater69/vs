@@ -16,11 +16,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from jira import JiraValueStreamClient
-from pipelines.jira_batch.runtime.runtime_factory import try_build_llm, try_build_embedding_client
-from config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, JIRA_BASE_URL, JIRA_TOKEN
+from ...jira import JiraValueStreamClient
+from .runtime.runtime_factory import try_build_llm, try_build_embedding_client
+from ...config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, JIRA_BASE_URL, JIRA_TOKEN
 
-from pipelines.jira_batch.pipeline import ingest_ticket, project_chunk_records, project_vs_record
+from .pipeline import ingest_ticket, project_chunk_records, project_vs_record
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ async def process_one(
 def _try_build_sharepoint_client():
     """Build SharePoint client if Graph credentials are available."""
     try:
-        from clients.sharepoint import SharePointClient
+        from ...clients.sharepoint import SharePointClient
         # SharePointClient needs a config object; check if env vars exist first
         graph_client_id = os.environ.get("GRAPH_CLIENT_ID")
         if not graph_client_id:

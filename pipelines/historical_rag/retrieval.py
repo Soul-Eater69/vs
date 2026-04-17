@@ -4,9 +4,9 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from clients.azure_direct_client import AzureDirectSearchClient
-from sinks.faiss_store import faiss_index_exists, search_local_faiss
-from text import clean_ppt_text, normalize_for_search
+from ...clients.azure_direct_client import AzureDirectSearchClient
+from ...sinks.faiss_store import faiss_index_exists, search_local_faiss
+from ...text import clean_ppt_text, normalize_for_search
 
 logger = logging.getLogger(__name__)
 

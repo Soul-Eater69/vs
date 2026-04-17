@@ -1,4 +1,4 @@
-from content.schemas import ChunkDocument, HierarchicalTicketResult, TicketSummaryDocument
+from .schemas import ChunkDocument, HierarchicalTicketResult, TicketSummaryDocument
 
 __all__ = [
     "ChunkDocument",

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from jira.attachments.constants import (
+from .constants import (
     ATTACHMENT_CONVERT_TIMEOUT_SEC,
     ATTACHMENT_FETCH_BASE_DELAY_SEC,
     ATTACHMENT_FETCH_RETRIES,

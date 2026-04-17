@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pipelines.historical_rag.augmentation import merge_candidate_sources
-from pipelines.historical_rag.generation import generate_value_streams
-from pipelines.historical_rag.retrieval import (
+from .augmentation import merge_candidate_sources
+from .generation import generate_value_streams
+from .retrieval import (
     retrieve_historical_support,
     retrieve_semantic_candidates,
 )
-from text import clean_ppt_text, condense_idea_card
+from ...text import clean_ppt_text, condense_idea_card
 
 
 def select_value_streams(

@@ -17,7 +17,7 @@ import logging
 import pathlib
 import sys
 
-from pipelines.historical.extractor import fetch_tickets_from_jira
+from ...historical.extractor import fetch_tickets_from_jira
 
 logger = logging.getLogger(__name__)
 

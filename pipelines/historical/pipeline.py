@@ -21,18 +21,18 @@ import logging
 import pathlib
 from typing import List, Optional
 
-from pipelines.historical.ingestion import enrich_batch, load_json, save_json, upload_to_index
-from pipelines.historical.ingestion.enrichment import ENRICHMENT_MODEL
-from pipelines.historical.ingestion.store import DEFAULT_STORE_PATH
-from pipelines.historical.extractor import fetch_tickets_from_jira
-from pipelines.historical.models import EnrichedTicket
+from .ingestion import enrich_batch, load_json, save_json, upload_to_index
+from .ingestion.enrichment import ENRICHMENT_MODEL
+from .ingestion.store import DEFAULT_STORE_PATH
+from .extractor import fetch_tickets_from_jira
+from .models import EnrichedTicket
 
 logger = logging.getLogger(__name__)
 
 
 def _build_embedding_client() -> Optional[object]:
     try:
-        from clients.embedding import EmbeddingClient
+        from ...clients.embedding import EmbeddingClient
 
         return EmbeddingClient()
     except Exception as exc:

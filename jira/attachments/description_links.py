@@ -6,13 +6,13 @@ from hashlib import sha256
 from typing import Any, Dict, List, Tuple
 from urllib.parse import unquote, urlparse
 
-from jira.attachments.constants import (
+from .constants import (
     DESC_BARE_FILE_URL_RE,
     DESC_MD_LINK_RE,
     DESC_WIKI_LINK_RE,
     EXT_TO_MIME,
 )
-from jira.text.text_processing import extract_adf_text
+from ..text.text_processing import extract_adf_text
 
 
 def extract_description_link_attachments(description: Any) -> List[Dict[str, Any]]:

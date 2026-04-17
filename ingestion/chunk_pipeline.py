@@ -19,17 +19,17 @@ import logging
 import re
 from typing import Any, Optional
 
-from content.formatting import (
+from ..content.formatting import (
     clean_text,
     extract_description_text,
     extract_substantive_comments,
 )
-from content.schemas import (
+from ..content.schemas import (
     ChunkDocument,
     HierarchicalTicketResult,
 )
-from processing.attachment_routing import get_routing_candidates, route_attachments
-from processing.chunking import build_section_chunks
+from ..processing.attachment_routing import get_routing_candidates, route_attachments
+from ..processing.chunking import build_section_chunks
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from jira.value_stream.helpers import clean_value_stream_name
+from .helpers import clean_value_stream_name
 
 # ---------------------------------------------------------------------------
 # Link type -> category mapping

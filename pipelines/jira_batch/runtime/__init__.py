@@ -1,4 +1,4 @@
-from pipelines.jira_batch.runtime.runtime_factory import (
+from .runtime_factory import (
     OpenAICompatibleEmbeddingClient,
     OpenAICompatibleLLM,
     build_ingestion_config,

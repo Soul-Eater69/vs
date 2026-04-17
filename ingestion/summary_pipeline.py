@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from content.schemas import TicketSummaryDocument
-from ingestion.extractor import consolidate_ticket_text
-from ingestion.summarizer import classify_ticket_value_streams, summarize_ticket
+from ..content.schemas import TicketSummaryDocument
+from .extractor import consolidate_ticket_text
+from .summarizer import classify_ticket_value_streams, summarize_ticket
 
 logger = logging.getLogger(__name__)
 

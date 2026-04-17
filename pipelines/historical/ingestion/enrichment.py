@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from clients.llm import IDPChatOpenAI
-from text import clean_ppt_text
-from pipelines.historical.models import (
+from ....clients.llm import IDPChatOpenAI
+from ....text import clean_ppt_text
+from ..models import (
     EnrichedTicket,
     InferenceType,
     RawTicket,

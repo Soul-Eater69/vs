@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pipelines.jira_batch.config import JiraIngestionConfig
-from clients.embedding import EmbeddingClient
-from clients.llm import IDPChatOpenAI
-from config import EMBEDDING_DIMENSION, EMBEDDING_MODEL
+from ..config import JiraIngestionConfig
+from ....clients.embedding import EmbeddingClient
+from ....clients.llm import IDPChatOpenAI
+from ....config import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 

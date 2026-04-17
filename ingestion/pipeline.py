@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional, Union
 
-from content.schemas import HierarchicalTicketResult, TicketSummaryDocument
+from ..content.schemas import HierarchicalTicketResult, TicketSummaryDocument
 
 IngestionMode = Literal["summary", "chunks"]
 IngestionResult = Union[TicketSummaryDocument, HierarchicalTicketResult]

@@ -10,18 +10,18 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from pipelines.jira_batch.extract import (
+from .extract import (
     build_chunks,
     extract_attachment_texts,
     extract_comments,
     extract_description,
     extract_metadata,
 )
-from jira.value_stream.value_stream_mapping import (
+from ...jira.value_stream.value_stream_mapping import (
     resolve_value_stream_mapping,
     resolve_value_stream_epics_mapping,
 )
-from processing.metadata import classify_links
+from ...processing.metadata import classify_links
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ def _llm_summary(meta: dict, chunks: list[dict], llm_client: Any) -> str:
 
 def _embed_chunks(chunks: list[dict], summary: str, embedding_client: Any) -> None:
     """Embed summary + all chunks in-place."""
-    from clients.embedding import embed_batch
+    from ...clients.embedding import embed_batch
 
     texts = [summary] + [c["text"] for c in chunks]
     try:

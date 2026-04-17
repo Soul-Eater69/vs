@@ -21,8 +21,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.outputs import ChatResult, ChatGenerationChunk
 from pydantic import Field, SecretStr
 
-import config
-from clients.auth import IDPCustomAuth
+from .. import config
+from .auth import IDPCustomAuth
 
 logger = logging.getLogger(__name__)
 

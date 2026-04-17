@@ -9,7 +9,7 @@ import urllib3
 import httpx
 import requests
 
-import config
+from .. import config
 
 # Suppress InsecureRequestWarning from requests (verify=False)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

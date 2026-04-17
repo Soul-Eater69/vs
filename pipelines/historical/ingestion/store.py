@@ -7,7 +7,7 @@ import logging
 import pathlib
 from typing import Dict, List, Optional
 
-from pipelines.historical.models import EnrichedTicket
+from ..models import EnrichedTicket
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def upload_to_index(
         return 0
 
     try:
-        from clients.azure_direct_client import AzureDirectSearchClient
+        from ....clients.azure_direct_client import AzureDirectSearchClient
         client = AzureDirectSearchClient(index_name=index_name)
         uploaded = client.upload_documents(documents)
         logger.info("[INDEX] Uploaded %d to '%s'", uploaded, index_name)

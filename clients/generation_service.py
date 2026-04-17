@@ -18,8 +18,8 @@ from typing import Any, Optional
 
 from langchain_core.messages import BaseMessage
 
-from clients.llm import IDPChatOpenAI
-import config
+from .llm import IDPChatOpenAI
+from .. import config
 
 _SYSTEM_PROMPT = (
     "You are an expert on HCSC value streams. "

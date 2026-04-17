@@ -3,9 +3,9 @@ from typing import Any, Dict, List
 from http import HTTPStatus
 import httpx
 
-from jira.exceptions import JIRAApiError, JIRAAuthenticationError
-from jira.field.provider import jira_field_provider
-from jira.query.builder import JIRAQueryBuilder
+from ..exceptions import JIRAApiError, JIRAAuthenticationError
+from ..field.provider import jira_field_provider
+from ..query.builder import JIRAQueryBuilder
 
 logger = logging.getLogger(__name__)
 

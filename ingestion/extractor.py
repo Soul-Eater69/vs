@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional
 
-from content.formatting import (
+from ..content.formatting import (
     clean_text,
     extract_description_text,
     extract_substantive_comments,

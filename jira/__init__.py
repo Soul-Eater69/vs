@@ -1,4 +1,4 @@
-from jira.ticket_client import (
+from .ticket_client import (
     JiraTicketClient,
     JiraValueStreamClient,
     TicketFetcher,

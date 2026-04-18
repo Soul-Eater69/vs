@@ -18,7 +18,8 @@ def select_value_streams(
     historical_faiss_dir: str = "ticket_data/_faiss",
     allowed_value_stream_names: Optional[List[str]] = None,
 ) -> dict:
-    top_k = min(max(12, fetch_count), 24)
+    top_k = min(max(12, fetch_count), 50)
+    max_llm_candidates = min(max(top_k, 14), 24)
     cleaned_query = clean_ppt_text(query)
     query_for_prompt = condense_idea_card(query, max_chars=3500)
 
@@ -30,13 +31,13 @@ def select_value_streams(
     historical = retrieve_historical_support(
         query_for_prompt or cleaned_query,
         historical_faiss_dir=historical_faiss_dir,
-        max_ticket_hits=12,
+        max_ticket_hits=min(max(12, fetch_count), 24),
     )
 
     augmented = merge_candidate_sources(
         semantic_candidates,
         historical.get("historical_value_stream_support", []),
-        max_llm_candidates=max(top_k, 14),
+        max_llm_candidates=max_llm_candidates,
     )
     generated = generate_value_streams(
         query_for_prompt=query_for_prompt or cleaned_query,
@@ -48,6 +49,9 @@ def select_value_streams(
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],
         "llm_selected_value_streams": generated["llm_selected_value_streams"],
         "rejected_candidates": [],
+        "semantic_candidate_value_streams": semantic_candidates,
+        "historical_candidate_value_streams": historical.get("historical_value_stream_support", []),
+        "merged_candidate_value_streams": augmented["merged_candidates"],
         "historical_ticket_hits": historical.get("historical_ticket_hits", []),
         "historical_value_stream_support": historical.get("historical_value_stream_support", []),
         "candidate_value_streams": augmented["merged_candidates"],
@@ -88,6 +92,9 @@ def run_historical_rag_pipeline(
         "auto_selected_value_streams": result.get("auto_selected_value_streams", []),
         "llm_selected_value_streams": result.get("llm_selected_value_streams", []),
         "rejected_candidates": result.get("rejected_candidates", []),
+        "semantic_candidate_value_streams": result.get("semantic_candidate_value_streams", []),
+        "historical_candidate_value_streams": result.get("historical_candidate_value_streams", []),
+        "merged_candidate_value_streams": result.get("merged_candidate_value_streams", []),
         "historical_ticket_hits": result.get("historical_ticket_hits", []),
         "historical_value_stream_support": result.get("historical_value_stream_support", []),
         "candidate_value_streams": result.get("candidate_value_streams", []),

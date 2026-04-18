@@ -30,7 +30,7 @@ async def ingest_ticket(
 ) -> IngestionResult:
     """Fetch a ticket and run the requested pipeline."""
     if mode == "summary":
-        from ingestion.summary_pipeline import ingest_ticket_summary
+        from .summary_pipeline import ingest_ticket_summary
         return await ingest_ticket_summary(
             ticket_key=ticket_key,
             jira_client=jira_client,
@@ -39,7 +39,7 @@ async def ingest_ticket(
             cfg=cfg,
         )
     if mode == "chunks":
-        from ingestion.chunk_pipeline import ingest_ticket_chunks
+        from .chunk_pipeline import ingest_ticket_chunks
         return await ingest_ticket_chunks(
             ticket_key=ticket_key,
             jira_client=jira_client,
@@ -60,7 +60,7 @@ async def ingest_ticket_payload(
 ) -> IngestionResult:
     """Run the requested pipeline on an already-fetched ticket payload."""
     if mode == "summary":
-        from ingestion.summary_pipeline import ingest_ticket_summary_payload
+        from .summary_pipeline import ingest_ticket_summary_payload
         return await ingest_ticket_summary_payload(
             ticket_data=ticket_data,
             jira_client=jira_client,
@@ -69,7 +69,7 @@ async def ingest_ticket_payload(
             cfg=cfg,
         )
     if mode == "chunks":
-        from ingestion.chunk_pipeline import ingest_ticket_chunks_payload
+        from .chunk_pipeline import ingest_ticket_chunks_payload
         return await ingest_ticket_chunks_payload(
             ticket_data=ticket_data,
             jira_client=jira_client,

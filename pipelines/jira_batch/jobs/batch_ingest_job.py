@@ -94,7 +94,7 @@ async def process_ticket(
 
     # --- Summary pipeline ---
     if need_summary:
-        from ingestion.summary_pipeline import ingest_ticket_summary_payload
+        from ....ingestion.summary_pipeline import ingest_ticket_summary_payload
         result = await ingest_ticket_summary_payload(
             ticket_data=ticket_data,
             jira_client=deps.jira_client,
@@ -108,7 +108,7 @@ async def process_ticket(
 
     # --- Chunk pipeline ---
     if need_chunks:
-        from ingestion.chunk_pipeline import ingest_ticket_chunks_payload
+        from ....ingestion.chunk_pipeline import ingest_ticket_chunks_payload
         result = await ingest_ticket_chunks_payload(
             ticket_data=ticket_data,
             jira_client=deps.jira_client,

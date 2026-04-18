@@ -129,7 +129,7 @@ def _build_embedding_text(doc: "TicketSummaryDocument") -> str:
 
 
 def _embed(text: str, embedding_client: Any, cfg: Any) -> list[float]:
-    from clients.embedding import embed_batch
+    from ..clients.embedding import embed_batch
     try:
         results = embed_batch([text], embedding_client, model=getattr(cfg, "embedding_model", None))
         return results[0] if results else []
@@ -148,7 +148,7 @@ def _heuristic_summary(
     consolidated_text: str,
 ) -> TicketSummaryDocument:
     """Minimal summary from ticket metadata when LLM is skipped."""
-    from content.schemas import TicketSummaryDocument
+    from ..content.schemas import TicketSummaryDocument
 
     fields = ticket_data.get("fields", {})
     summary_field = str(fields.get("summary") or ticket_key)
@@ -166,5 +166,5 @@ def _heuristic_summary(
 def _default_cfg(cfg: Optional[Any]) -> Any:
     if cfg is not None:
         return cfg
-    from pipelines.jira_batch.config import JiraIngestionConfig
+    from ..pipelines.jira_batch.config import JiraIngestionConfig
     return JiraIngestionConfig()

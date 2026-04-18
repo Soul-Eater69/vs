@@ -550,7 +550,7 @@ def _generate_body_overview(
         f"Ticket {ticket_key} body:\n{body}"
     )
     try:
-        from clients.llm import complete_text
+        from ..clients.llm import complete_text
         return clean_text(
             complete_text(
                 prompt,
@@ -571,7 +571,7 @@ def _generate_body_overview(
 # ---------------------------------------------------------------------------
 
 def _embed_chunks(docs: list[ChunkDocument], embedding_client: Any, cfg: Any) -> None:
-    from clients.embedding import embed_batch
+    from ..clients.embedding import embed_batch
 
     texts = [d.text for d in docs]
     try:
@@ -595,7 +595,7 @@ def _embed_chunks(docs: list[ChunkDocument], embedding_client: Any, cfg: Any) ->
 def _default_cfg(cfg: Optional[Any]) -> Any:
     if cfg is not None:
         return cfg
-    from pipelines.jira_batch.config import JiraIngestionConfig
+    from ..pipelines.jira_batch.config import JiraIngestionConfig
     return JiraIngestionConfig()
 
 

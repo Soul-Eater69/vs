@@ -57,8 +57,8 @@ class _AzureValueStreamResolver:
     """BM25 resolver against Azure AI Search ValueStream nodes."""
 
     def __init__(self) -> None:
-        import config as app_config
-        from clients.azure_search import AzureSearchClient
+        from ... import config as app_config
+        from ...clients.azure_search import AzureSearchClient
 
         self._index_name = str(app_config.AZURE_SEARCH_INDEX_NAME or "").strip()
         self._embedding_model = str(app_config.EMBEDDING_MODEL or "").strip()
@@ -85,7 +85,7 @@ class _AzureValueStreamResolver:
             return self._cache[key]
 
         try:
-            from clients.azure_search import IDPAISearchRequest
+            from ...clients.azure_search import IDPAISearchRequest
 
             request = IDPAISearchRequest(
                 index_name=self._index_name,
@@ -118,13 +118,18 @@ class _AzureValueStreamResolver:
                 self._cache[key] = candidate
                 return candidate
 
-        # Conservative fallback: top BM25 candidate only if token overlap is strong
-        if docs:
-            candidate = str(docs[0].get("entity_name") or "").strip()
+        # Fallback: accept when candidate tokens are largely contained in the
+        # key (handles Jira-style prefixes like "APR 2.0 Onboard Partner").
+        key_tokens = set(key.split())
+        for doc in docs:
+            candidate = str(doc.get("entity_name") or "").strip()
+            if not candidate:
+                continue
             cand_tokens = set(_norm_vs(candidate).split())
-            key_tokens = set(key.split())
-            overlap = len(cand_tokens & key_tokens) / max(len(key_tokens), 1) if key_tokens else 0.0
-            if candidate and overlap >= 0.6:
+            if not cand_tokens:
+                continue
+            containment = len(cand_tokens & key_tokens) / len(cand_tokens)
+            if containment >= 0.8:
                 self._cache[key] = candidate
                 return candidate
 
@@ -149,7 +154,8 @@ def _get_azure_vs_resolver() -> Optional[_AzureValueStreamResolver]:
 
 def canonicalize_value_stream_names(vs_names: list[str]) -> list[str]:
     """Dedupe and normalize value-stream names to canonical Azure entity_name
-    values via BM25 lookup. Falls back to dedupe-only if Azure is unavailable.
+    values via BM25 lookup. Falls back to the cleaned raw name when a name
+    cannot be resolved so callers receive one entry per input.
     """
     deduped = _dedupe_names(vs_names)
     if not deduped:
@@ -161,9 +167,9 @@ def canonicalize_value_stream_names(vs_names: list[str]) -> list[str]:
 
     canonical: list[str] = []
     for name in deduped:
+        cleaned = clean_value_stream_name(name) or name
         resolved = resolver.resolve_one(name)
-        if resolved:
-            canonical.append(resolved)
+        canonical.append(resolved or cleaned)
     return _dedupe_names(canonical)
 
 
@@ -199,6 +205,10 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
         if themes:
             normalized: list[dict] = []
             for theme in themes:
+                issue_type = str(theme.get("issue_type") or "").strip().lower()
+                if "epic" in issue_type:
+                    continue
+
                 summary_raw = str(theme.get("summary_raw") or theme.get("summary") or "")
                 summary = _normalize_theme_summary(summary_raw)
                 if not is_valid_vs_name(summary):
@@ -208,25 +218,33 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
                     "summary": summary,
                     "summary_raw": summary_raw,
                     "status": str(theme.get("status") or ""),
+                    "issue_type": str(theme.get("issue_type") or ""),
                 })
             vs_links = normalized
             label_source = "jira_themes_fallback"
 
     vs_links = _dedupe_rows(vs_links)
-    raw_vs_names = [str(link.get("summary") or "") for link in vs_links if str(link.get("summary") or "")]
-    canonical_vs_names = canonicalize_value_stream_names(raw_vs_names)
-    vs_names = canonical_vs_names if canonical_vs_names else _dedupe_names(raw_vs_names)
+    resolver = _get_azure_vs_resolver()
+
+    def _resolve_name(raw: str) -> str:
+        cleaned = clean_value_stream_name(raw) or raw
+        if resolver is None:
+            return cleaned
+        return resolver.resolve_one(raw) or cleaned
+
+    per_link_names = [_resolve_name(str(link.get("summary") or "")) for link in vs_links]
+    vs_names = _dedupe_names(per_link_names)
     vs_ids = [str(link.get("key") or "") for link in vs_links if str(link.get("key") or "")]
     vs_statuses = [str(link.get("status") or "") for link in vs_links]
 
     linked_value_streams = [
         {
             "id": str(link.get("key") or ""),
-            "name": str(link.get("summary") or ""),
+            "name": per_link_names[idx] if idx < len(per_link_names) else str(link.get("summary") or ""),
             "status": str(link.get("status") or ""),
             "summary_raw": str(link.get("summary_raw") or link.get("summary") or ""),
         }
-        for link in vs_links
+        for idx, link in enumerate(vs_links)
     ]
 
     return {

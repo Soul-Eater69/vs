@@ -41,8 +41,8 @@ def resolve_value_streams(
     Falls back to themes-only representation on import/resolution failure.
     """
     try:
-        from jira.value_stream.link_classification import classify_links
-        from jira.value_stream.value_stream_mapping import resolve_value_stream_mapping
+        from .link_classification import classify_links
+        from .value_stream_mapping import resolve_value_stream_mapping
 
         classified_links = classify_links(issuelinks)
         vs_mapping = resolve_value_stream_mapping({"themes": themes}, classified_links)
@@ -53,20 +53,14 @@ def resolve_value_streams(
             "linked_value_streams": list(vs_mapping.get("linked_value_streams") or []),
             "value_stream_label_source": str(vs_mapping.get("label_source") or "jira_issuelinks"),
         }
-    except Exception:
-        value_streams = [
-            {
-                "id": str_field(theme, "key"),
-                "name": str_field(theme, "summary"),
-                "status": str_field(theme, "status"),
-            }
-            for theme in themes
-        ]
+    except Exception as exc:
+        logger.warning("Value-stream resolution failed; returning no fallback labels: %s", exc)
         return {
-            "value_stream_names": [v["name"] for v in value_streams if v["name"]],
-            "value_stream_ids": [v["id"] for v in value_streams if v["id"]],
-            "value_stream_statuses": [v["status"] for v in value_streams],
-            "value_stream_label_source": "jira_themes_fallback",
+            "value_stream_names": [],
+            "value_stream_ids": [],
+            "value_stream_statuses": [],
+            "linked_value_streams": [],
+            "value_stream_label_source": "jira_resolution_failed",
         }
 
 
@@ -80,6 +74,10 @@ def _append_theme(
     issue: Dict[str, Any],
 ) -> None:
     fields = issue.get("fields", {}) or {}
+    issue_type = nested_str_field(fields, "issuetype", "name")
+    if "epic" in issue_type.lower():
+        return
+
     key = str(issue.get("key") or "")
     summary_raw = str(fields.get("summary") or "")
     dedupe_key = (key, summary_raw)
@@ -91,4 +89,5 @@ def _append_theme(
         "summary": clean_value_stream_name(summary_raw),
         "summary_raw": summary_raw,
         "status": nested_str_field(fields, "status", "name"),
+        "issue_type": issue_type,
     })

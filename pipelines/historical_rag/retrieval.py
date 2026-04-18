@@ -120,10 +120,14 @@ def retrieve_historical_support(
             "best_score": float(row.get("score", 0.0) or 0.0),
             "title": str(meta.get("title") or ticket_id),
             "summary_preview": str(row.get("content") or "")[:320],
-            # VS labels are already in FAISS metadata
+            # Support both the newer rag-summary shape and the legacy local FAISS shape.
             "value_stream_labels": meta.get("value_stream_labels", []),
+            "value_stream_names": meta.get("value_stream_names", []),
             "value_stream_ids": meta.get("value_stream_ids", []),
             "stream_support_type": meta.get("stream_support_type", {}),
+            "direct_vs_names": meta.get("direct_vs_names", []),
+            "implied_vs_names": meta.get("implied_vs_names", []),
+            "label_source": meta.get("label_source", ""),
             "direct_functions_canonical": meta.get("direct_functions_canonical", []),
             "implied_functions_canonical": meta.get("implied_functions_canonical", []),
         })
@@ -150,9 +154,19 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
     for hit in ticket_hits:
         ticket_id = hit.get("ticket_id", "")
         score = float(hit.get("best_score", 0.0))
-        vs_labels = hit.get("value_stream_labels") or []
+        vs_labels = _resolve_hit_value_stream_names(hit)
         vs_ids = hit.get("value_stream_ids") or []
         support_types = hit.get("stream_support_type") or {}
+        direct_vs_names = {
+            str(value).strip()
+            for value in (hit.get("direct_vs_names") or [])
+            if str(value).strip()
+        }
+        implied_vs_names = {
+            str(value).strip()
+            for value in (hit.get("implied_vs_names") or [])
+            if str(value).strip()
+        }
 
         for idx, vs_name in enumerate(vs_labels):
             vs_name = str(vs_name).strip()
@@ -160,7 +174,12 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
                 continue
 
             vs_id = str(vs_ids[idx]).strip() if idx < len(vs_ids) else ""
-            inference_type = str(support_types.get(vs_name, "direct")).lower()
+            inference_type = str(support_types.get(vs_name, "")).lower()
+            if not inference_type:
+                if vs_name in implied_vs_names and vs_name not in direct_vs_names:
+                    inference_type = "implied"
+                else:
+                    inference_type = "direct"
 
             entry = support_by_name.setdefault(
                 vs_name,
@@ -200,3 +219,29 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
         key=lambda r: (r["support_count"], r["direct_count"], r["best_support_score"]),
         reverse=True,
     )
+
+
+def _resolve_hit_value_stream_names(hit: dict) -> List[str]:
+    labels = [
+        str(value).strip()
+        for value in (hit.get("value_stream_labels") or [])
+        if str(value).strip()
+    ]
+    if labels:
+        return labels
+
+    names = [
+        str(value).strip()
+        for value in (hit.get("value_stream_names") or [])
+        if str(value).strip()
+    ]
+    if names:
+        return names
+
+    combined: List[str] = []
+    for field in ("direct_vs_names", "implied_vs_names"):
+        for value in hit.get(field) or []:
+            clean = str(value).strip()
+            if clean and clean not in combined:
+                combined.append(clean)
+    return combined

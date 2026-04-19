@@ -22,9 +22,27 @@ def _norm_vs(name: str) -> str:
     return " ".join((name or "").strip().lower().split())
 
 
+def _stem(token: str) -> str:
+    """Collapse common English inflections so `pricing`≡`price`, `insights`≡`insight`,
+    `management`≡`manage`. Iterates to a fixed point so compound suffixes collapse
+    (e.g. `management` → `manage` → `manag`)."""
+    cur = token
+    while True:
+        if len(cur) <= 3:
+            return cur
+        for suffix in ("ments", "ment", "ings", "ing", "ies", "ed", "es", "e", "s"):
+            if cur.endswith(suffix) and len(cur) - len(suffix) >= 3:
+                cur = cur[: -len(suffix)]
+                break
+        else:
+            return cur
+
+
 def _vs_tokens(name: str) -> set[str]:
-    """Tokenize on any non-alphanumeric so `/`, `&`, `,` split (e.g. `request/inquiry`)."""
-    return set(re.findall(r"[a-z0-9]+", (name or "").lower()))
+    """Tokenize on any non-alphanumeric so `/`, `&`, `,` split (e.g. `request/inquiry`),
+    then stem to tolerate plural/gerund variants."""
+    raw = re.findall(r"[a-z0-9]+", (name or "").lower())
+    return {_stem(t) for t in raw}
 
 
 def _dedupe_rows(rows: list[dict]) -> list[dict]:
@@ -96,7 +114,7 @@ class _AzureValueStreamResolver:
                 index_name=self._index_name,
                 search_type="simple",
                 search_text=name,
-                top=5,
+                top=15,
                 filter_expression="node_type eq 'ValueStream'",
                 enable_vector_search=False,
                 hybrid_mode=None,
@@ -241,7 +259,11 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
         if resolver is None:
             resolved = cleaned
         else:
-            resolved = resolver.resolve_one(cleaned) or resolver.resolve_one(raw_summary)
+            resolved = (
+                resolver.resolve_one(cleaned)
+                or resolver.resolve_one(raw_summary)
+                or cleaned
+            )
         if not resolved:
             continue
         verified_links.append(link)

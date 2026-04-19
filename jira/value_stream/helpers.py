@@ -17,9 +17,11 @@ _VS_SUFFIX_RE = re.compile(
 # letters followed by a dotted version number. Stripped so BM25 can match
 # against canonical names like "Order to Cash" without version noise.
 _VS_PRODUCT_PREFIX_RE = re.compile(r"^[A-Z]{2,5}\s+\d+(?:\.\d+)*\s+(?=\S)")
-# Space-padded `-`, `–`, `—`, or `:` separator. Jira theme summaries often
-# prefix the VS name with product/release context (e.g. "CareWay (PEAQ) - Onboard Partner").
-_VS_SEPARATOR_RE = re.compile(r"\s[-–—:]\s+")
+# Separator between product/release prefix and VS name. Dashes (`-`, `–`, `—`)
+# must be space-padded on both sides to avoid breaking hyphenated names like
+# "Request-Inquiry". Colons only need a trailing space, since Jira writes
+# "Enhancements: Discover Business Insight" without a leading space.
+_VS_SEPARATOR_RE = re.compile(r"\s[-–—]\s+|:\s+")
 
 
 def clean_value_stream_name(summary: str) -> str:

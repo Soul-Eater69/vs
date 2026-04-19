@@ -22,6 +22,11 @@ def _norm_vs(name: str) -> str:
     return " ".join((name or "").strip().lower().split())
 
 
+def _vs_tokens(name: str) -> set[str]:
+    """Tokenize on any non-alphanumeric so `/`, `&`, `,` split (e.g. `request/inquiry`)."""
+    return set(re.findall(r"[a-z0-9]+", (name or "").lower()))
+
+
 def _dedupe_rows(rows: list[dict]) -> list[dict]:
     seen: set[tuple[str, str]] = set()
     out: list[dict] = []
@@ -118,18 +123,24 @@ class _AzureValueStreamResolver:
                 self._cache[key] = candidate
                 return candidate
 
-        # Fallback: accept when candidate tokens are largely contained in the
-        # key (handles Jira-style prefixes like "APR 2.0 Onboard Partner").
-        key_tokens = set(key.split())
+        # Fallback: bidirectional containment. Accept when either the candidate
+        # is largely in the key (handles Jira-style prefixes like "APR 2.0 Onboard Partner")
+        # or the key is largely in the candidate (handles shorter Jira labels
+        # against more specific index names, e.g. "Order to Cash" vs
+        # "Order to Cash for Group Coverage"). Punctuation-split tokens so
+        # `request/inquiry` matches `request inquiry`.
+        key_tokens = _vs_tokens(name)
         for doc in docs:
             candidate = str(doc.get("entity_name") or "").strip()
             if not candidate:
                 continue
-            cand_tokens = set(_norm_vs(candidate).split())
-            if not cand_tokens:
+            cand_tokens = _vs_tokens(candidate)
+            if not cand_tokens or not key_tokens:
                 continue
-            containment = len(cand_tokens & key_tokens) / len(cand_tokens)
-            if containment >= 0.8:
+            overlap = len(cand_tokens & key_tokens)
+            cand_containment = overlap / len(cand_tokens)
+            key_containment = overlap / len(key_tokens)
+            if cand_containment >= 0.8 or key_containment >= 0.8:
                 self._cache[key] = candidate
                 return candidate
 

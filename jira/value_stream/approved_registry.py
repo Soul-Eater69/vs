@@ -62,8 +62,9 @@ APPROVED_VALUE_STREAMS: tuple[str, ...] = (
 )
 
 APPROVED_VALUE_STREAM_SET = frozenset(APPROVED_VALUE_STREAMS)
-_FUZZ_MATCH_THRESHOLD = 92.0
+_FUZZ_MATCH_THRESHOLD = 90.0
 _FUZZ_AMBIGUITY_MARGIN = 2.0
+_MIN_SUFFIX_TOKENS = 2
 
 _NOISE_TOKENS = {"apr", "and"}
 
@@ -82,6 +83,27 @@ def _normalize_lookup_key(value: str) -> str:
     return " ".join(_normalize_tokens(value))
 
 
+def _candidate_lookup_keys(value: str) -> list[str]:
+    lookup_key = _normalize_lookup_key(value)
+    if not lookup_key:
+        return []
+
+    parts = lookup_key.split()
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    for start in range(0, len(parts)):
+        suffix = " ".join(parts[start:])
+        if len(suffix.split()) < _MIN_SUFFIX_TOKENS and start != 0:
+            continue
+        if suffix in seen:
+            continue
+        seen.add(suffix)
+        candidates.append(suffix)
+
+    return candidates
+
+
 _CANONICAL_BY_KEY: dict[str, str] = {}
 _LOOKUP_KEYS: list[str] = []
 for _name in APPROVED_VALUE_STREAMS:
@@ -98,33 +120,38 @@ def approved_value_streams_text() -> str:
 
 def canonicalize_approved_value_stream(value: str) -> str | None:
     """Map a Jira-style stream/theme name to the approved canonical list."""
-    lookup_key = _normalize_lookup_key(value)
-    if not lookup_key:
+    candidate_keys = _candidate_lookup_keys(value)
+    if not candidate_keys:
         return None
 
-    direct = _CANONICAL_BY_KEY.get(lookup_key)
-    if direct:
-        return direct
+    for lookup_key in candidate_keys:
+        direct = _CANONICAL_BY_KEY.get(lookup_key)
+        if direct:
+            return direct
 
-    matches = process.extract(
-        lookup_key,
-        _LOOKUP_KEYS,
-        scorer=fuzz.token_set_ratio,
-        limit=2,
-    )
-    if not matches:
+    best_scores: dict[str, float] = {}
+    for lookup_key in candidate_keys:
+        matches = process.extract(
+            lookup_key,
+            _LOOKUP_KEYS,
+            scorer=fuzz.WRatio,
+            limit=3,
+        )
+        for matched_key, score, _ in matches:
+            canonical_name = _CANONICAL_BY_KEY.get(matched_key)
+            if canonical_name is None:
+                continue
+            best_scores[canonical_name] = max(best_scores.get(canonical_name, 0.0), float(score))
+
+    if not best_scores:
         return None
 
-    best_key, best_score, _ = matches[0]
-    if float(best_score) < _FUZZ_MATCH_THRESHOLD:
+    ranked = sorted(best_scores.items(), key=lambda item: item[1], reverse=True)
+    best_name, best_score = ranked[0]
+    if best_score < _FUZZ_MATCH_THRESHOLD:
         return None
 
-    if len(matches) > 1:
-        second_key, second_score, _ = matches[1]
-        if (
-            _CANONICAL_BY_KEY.get(second_key) != _CANONICAL_BY_KEY.get(best_key)
-            and float(second_score) >= float(best_score) - _FUZZ_AMBIGUITY_MARGIN
-        ):
-            return None
+    if len(ranked) > 1 and ranked[1][1] >= best_score - _FUZZ_AMBIGUITY_MARGIN:
+        return None
 
-    return _CANONICAL_BY_KEY.get(best_key)
+    return best_name

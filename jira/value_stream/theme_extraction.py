@@ -33,6 +33,7 @@ def extract_themes(issuelinks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def resolve_value_streams(
     themes: List[Dict[str, Any]],
     issuelinks: List[Dict[str, Any]],
+    llm_client: Any | None = None,
 ) -> Dict[str, Any]:
     """Resolve canonical value stream names from themes + classified links.
 
@@ -45,7 +46,11 @@ def resolve_value_streams(
         from .value_stream_mapping import resolve_value_stream_mapping
 
         classified_links = classify_links(issuelinks)
-        vs_mapping = resolve_value_stream_mapping({"themes": themes}, classified_links)
+        vs_mapping = resolve_value_stream_mapping(
+            {"themes": themes},
+            classified_links,
+            llm_client=llm_client,
+        )
         return {
             "value_stream_names": list(vs_mapping.get("vs_names") or []),
             "value_stream_ids": list(vs_mapping.get("vs_ids") or []),

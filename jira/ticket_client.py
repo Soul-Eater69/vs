@@ -35,7 +35,12 @@ class TicketFetcher(ABC):
     async def authenticate(self) -> None: ...
 
     @abstractmethod
-    async def get_ticket_data(self, ticket_id: str, config: Optional[Any] = None) -> Dict[str, Any]: ...
+    async def get_ticket_data(
+        self,
+        ticket_id: str,
+        config: Optional[Any] = None,
+        llm_client: Optional[Any] = None,
+    ) -> Dict[str, Any]: ...
 
     @abstractmethod
     async def fetch_attachment_content(
@@ -192,7 +197,12 @@ class JiraTicketClient(TicketFetcher):
         response.raise_for_status()
         return response.json()
 
-    async def get_ticket_data(self, ticket_id: str, config: Optional[Any] = None) -> Dict[str, Any]:
+    async def get_ticket_data(
+        self,
+        ticket_id: str,
+        config: Optional[Any] = None,
+        llm_client: Optional[Any] = None,
+    ) -> Dict[str, Any]:
         """Fetch a Jira ticket and return structured data.
 
         Returns dict with keys: key, fields, attachments, description_attachments,
@@ -211,7 +221,7 @@ class JiraTicketClient(TicketFetcher):
         # Themes + value streams
         issuelinks = fields.get("issuelinks", [])
         themes = extract_themes(issuelinks)
-        vs_data = resolve_value_streams(themes, issuelinks)
+        vs_data = resolve_value_streams(themes, issuelinks, llm_client=llm_client)
 
         # Epics + VS-to-epic mapping
         epics = extract_epics(issue, config=config)

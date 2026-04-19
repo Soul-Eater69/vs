@@ -40,7 +40,7 @@ async def ingest_ticket(
       - ticket_key, metadata, chunks, value_stream mapping, summary, embeddings
     """
     # 1) Fetch from Jira
-    ticket_data = await jira_client.get_ticket_data(ticket_id)
+    ticket_data = await jira_client.get_ticket_data(ticket_id, llm_client=llm_client)
     fields = ticket_data.get("fields", {})
 
     # 2) Extract text
@@ -90,8 +90,8 @@ async def ingest_ticket(
 
     # 5) Value stream + epics mapping
     classified_links = classify_links(fields.get("issuelinks", []))
-    vs_mapping = resolve_value_stream_mapping(ticket_data, classified_links)
-    vs_epics = resolve_value_stream_epics_mapping(ticket_data, classified_links)
+    vs_mapping = resolve_value_stream_mapping(ticket_data, classified_links, llm_client=llm_client)
+    vs_epics = resolve_value_stream_epics_mapping(ticket_data, classified_links, llm_client=llm_client)
 
     # 6) Summary (LLM or heuristic)
     summary = _generate_summary(

@@ -41,7 +41,7 @@ async def ingest_ticket_summary(
     cfg = _default_cfg(cfg)
 
     # 1. FETCH
-    ticket_data = await jira_client.get_ticket_data(ticket_key, config=cfg)
+    ticket_data = await jira_client.get_ticket_data(ticket_key, config=cfg, llm_client=llm_client)
     return await ingest_ticket_summary_payload(
         ticket_data=ticket_data,
         jira_client=jira_client,

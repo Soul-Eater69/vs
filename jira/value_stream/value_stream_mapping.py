@@ -1,15 +1,11 @@
-"""Value stream mapping and canonicalization.
-
-Resolves canonical value stream names from Jira issue links/themes,
-optionally using Azure AI Search BM25 lookup for canonicalization.
-"""
+"""Value stream mapping and canonicalization."""
 
 from __future__ import annotations
 
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 from .approved_registry import (
     APPROVED_VALUE_STREAM_SET,
@@ -17,11 +13,6 @@ from .approved_registry import (
     canonicalize_approved_value_stream,
 )
 from .helpers import clean_value_stream_name
-
-_AZURE_VS_RESOLVER: Optional["_AzureValueStreamResolver"] = None
-_DEFAULT_LLM_CLIENT: Any | None = None
-_DEFAULT_LLM_CLIENT_ATTEMPTED = False
-_LLM_APPROVED_MAPPING_CACHE: dict[str, str | None] = {}
 
 logger = logging.getLogger(__name__)
 
@@ -32,29 +23,6 @@ logger = logging.getLogger(__name__)
 
 def _norm_vs(name: str) -> str:
     return " ".join((name or "").strip().lower().split())
-
-
-def _stem(token: str) -> str:
-    """Collapse common English inflections so `pricing`≡`price`, `insights`≡`insight`,
-    `management`≡`manage`. Iterates to a fixed point so compound suffixes collapse
-    (e.g. `management` → `manage` → `manag`)."""
-    cur = token
-    while True:
-        if len(cur) <= 3:
-            return cur
-        for suffix in ("ments", "ment", "ings", "ing", "ies", "ed", "es", "e", "s"):
-            if cur.endswith(suffix) and len(cur) - len(suffix) >= 3:
-                cur = cur[: -len(suffix)]
-                break
-        else:
-            return cur
-
-
-def _vs_tokens(name: str) -> set[str]:
-    """Tokenize on any non-alphanumeric so `/`, `&`, `,` split (e.g. `request/inquiry`),
-    then stem to tolerate plural/gerund variants."""
-    raw = re.findall(r"[a-z0-9]+", (name or "").lower())
-    return {_stem(t) for t in raw}
 
 
 def _dedupe_rows(rows: list[dict]) -> list[dict]:
@@ -88,128 +56,6 @@ def _mapping_cache_key(value: str) -> str:
     return _norm_vs(clean_value_stream_name(value) or value)
 
 
-# ---------------------------------------------------------------------------
-# Azure BM25 resolver (lazy singleton)
-# ---------------------------------------------------------------------------
-
-class _AzureValueStreamResolver:
-    """BM25 resolver against Azure AI Search ValueStream nodes."""
-
-    def __init__(self) -> None:
-        from ... import config as app_config
-        from ...clients.azure_search import AzureSearchClient
-
-        self._index_name = str(app_config.AZURE_SEARCH_INDEX_NAME or "").strip()
-        self._embedding_model = str(app_config.EMBEDDING_MODEL or "").strip()
-        self._embedding_dimension = int(getattr(app_config, "EMBEDDING_DIMENSION", 0) or 0)
-        self._has_valid_config = bool(
-            self._index_name and self._index_name.lower() != "your-index-name"
-            and self._embedding_model and self._embedding_model.lower() != "string"
-            and self._embedding_dimension > 0
-            and getattr(app_config, "AISEARCH_BASE_URL", "")
-        )
-        self._lookup_disabled = False
-        self._client = AzureSearchClient()
-        self._cache: dict[str, Optional[str]] = {}
-
-    def resolve_one(self, name: str) -> Optional[str]:
-        key = _norm_vs(name)
-        if not key:
-            return None
-        if key in self._cache:
-            return self._cache[key]
-
-        if not self._has_valid_config or self._lookup_disabled:
-            self._cache[key] = name.strip() or None
-            return self._cache[key]
-
-        try:
-            from ...clients.azure_search import IDPAISearchRequest
-
-            request = IDPAISearchRequest(
-                index_name=self._index_name,
-                search_type="simple",
-                search_text=name,
-                top=15,
-                filter_expression="node_type eq 'ValueStream'",
-                enable_vector_search=False,
-                hybrid_mode=None,
-                vector_weight=0.0,
-                text_weight=1.0,
-                embedding_params={
-                    "api_version": "2024-06-01",
-                    "encoding_format": "float",
-                    "dimensions": self._embedding_dimension,
-                    "model": self._embedding_model,
-                },
-            )
-            response = self._client.search(name, request=request)
-            docs = list(getattr(response, "documents", []) or [])
-        except Exception:
-            self._lookup_disabled = True
-            self._cache[key] = name.strip() or None
-            return self._cache[key]
-
-        # Prefer exact normalized match
-        for doc in docs:
-            candidate = str(doc.get("entity_name") or "").strip()
-            if _norm_vs(candidate) == key:
-                self._cache[key] = candidate
-                return candidate
-
-        # Fallback: bidirectional containment. Accept when either the candidate
-        # is largely in the key (handles Jira-style prefixes like "APR 2.0 Onboard Partner")
-        # or the key is largely in the candidate (handles shorter Jira labels
-        # against more specific index names, e.g. "Order to Cash" vs
-        # "Order to Cash for Group Coverage"). Punctuation-split tokens so
-        # `request/inquiry` matches `request inquiry`.
-        key_tokens = _vs_tokens(name)
-        for doc in docs:
-            candidate = str(doc.get("entity_name") or "").strip()
-            if not candidate:
-                continue
-            cand_tokens = _vs_tokens(candidate)
-            if not cand_tokens or not key_tokens:
-                continue
-            overlap = len(cand_tokens & key_tokens)
-            cand_containment = overlap / len(cand_tokens)
-            key_containment = overlap / len(key_tokens)
-            if cand_containment >= 0.8 or key_containment >= 0.8:
-                self._cache[key] = candidate
-                return candidate
-
-        self._cache[key] = None
-        return None
-
-
-def _get_azure_vs_resolver() -> Optional[_AzureValueStreamResolver]:
-    global _AZURE_VS_RESOLVER
-    if _AZURE_VS_RESOLVER is not None:
-        return _AZURE_VS_RESOLVER
-    try:
-        _AZURE_VS_RESOLVER = _AzureValueStreamResolver()
-    except Exception:
-        _AZURE_VS_RESOLVER = None
-    return _AZURE_VS_RESOLVER
-
-
-def _try_build_default_llm_client() -> Any | None:
-    global _DEFAULT_LLM_CLIENT, _DEFAULT_LLM_CLIENT_ATTEMPTED
-
-    if _DEFAULT_LLM_CLIENT_ATTEMPTED:
-        return _DEFAULT_LLM_CLIENT
-
-    _DEFAULT_LLM_CLIENT_ATTEMPTED = True
-    try:
-        from ...clients.llm import IDPChatOpenAI
-
-        _DEFAULT_LLM_CLIENT = IDPChatOpenAI(model="gpt-5-mini-idp")
-    except Exception as exc:
-        logger.info("Jira value-stream verifier LLM unavailable: %s", exc)
-        _DEFAULT_LLM_CLIENT = None
-    return _DEFAULT_LLM_CLIENT
-
-
 def _parse_verifier_json(raw: str) -> dict[str, Any]:
     if not raw:
         return {}
@@ -231,30 +77,14 @@ def _parse_verifier_json(raw: str) -> dict[str, Any]:
     return {}
 
 
-def _verify_names_with_llm(entries: list[dict[str, str]]) -> dict[str, str]:
-    if not entries:
+def _verify_names_with_llm(
+    entries: list[dict[str, str]],
+    llm_client: Any | None = None,
+) -> dict[str, str]:
+    if not entries or llm_client is None:
         return {}
 
     results: dict[str, str] = {}
-    pending_by_key: dict[str, dict[str, str]] = {}
-    for entry in entries:
-        key = _mapping_cache_key(entry.get("raw_name", ""))
-        if not key:
-            continue
-        if key in _LLM_APPROVED_MAPPING_CACHE:
-            cached = _LLM_APPROVED_MAPPING_CACHE[key]
-            if cached:
-                results[key] = cached
-            continue
-        pending_by_key.setdefault(key, entry)
-
-    if not pending_by_key:
-        return results
-
-    llm_client = _try_build_default_llm_client()
-    if llm_client is None:
-        return results
-
     try:
         from ...clients.llm import complete_text
     except Exception as exc:
@@ -262,13 +92,12 @@ def _verify_names_with_llm(entries: list[dict[str, str]]) -> dict[str, str]:
         return results
 
     unresolved_block = []
-    for idx, entry in enumerate(pending_by_key.values(), start=1):
+    for idx, entry in enumerate(entries, start=1):
         unresolved_block.append(
             "\n".join(
                 [
                     f"{idx}. raw_name: {entry.get('raw_name', '')}",
                     f"   cleaned_name: {entry.get('cleaned_name', '')}",
-                    f"   previous_hint: {entry.get('existing_guess', '') or 'none'}",
                 ]
             )
         )
@@ -285,7 +114,6 @@ Rules:
 - Use ONLY the approved value stream names listed above.
 - If a raw Jira name is just a prefixed or punctuated variant, choose the matching approved name.
 - If there is not a confident match, return null.
-- Treat previous_hint as a hint only, not as truth.
 
 Return ONLY valid JSON with this exact shape:
 {{
@@ -327,45 +155,40 @@ Return ONLY valid JSON with this exact shape:
         candidate = str(approved_name or "").strip() if approved_name is not None else ""
         resolved = canonicalize_approved_value_stream(candidate) if candidate else None
         if resolved and resolved in APPROVED_VALUE_STREAM_SET:
-            _LLM_APPROVED_MAPPING_CACHE[key] = resolved
             results[key] = resolved
-        else:
-            _LLM_APPROVED_MAPPING_CACHE[key] = None
-
-    for key in pending_by_key:
-        _LLM_APPROVED_MAPPING_CACHE.setdefault(key, None)
 
     return results
 
 
-def _resolve_existing_hint(name: str, resolver: Optional["_AzureValueStreamResolver"]) -> str:
-    if resolver is None:
-        return ""
-    cleaned = clean_value_stream_name(name) or name
-    return str(resolver.resolve_one(cleaned) or resolver.resolve_one(name) or "").strip()
+def _resolve_approved_name(raw_name: str) -> str | None:
+    cleaned = clean_value_stream_name(raw_name) or raw_name
+
+    for candidate in (cleaned, raw_name):
+        resolved = canonicalize_approved_value_stream(candidate)
+        if resolved:
+            return resolved
+
+    return None
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def canonicalize_value_stream_names(vs_names: list[str]) -> list[str]:
+def canonicalize_value_stream_names(
+    vs_names: list[str],
+    llm_client: Any | None = None,
+) -> list[str]:
     """Dedupe and normalize names, preferring the approved Jira registry."""
     deduped = _dedupe_names(vs_names)
     if not deduped:
         return []
 
-    resolver = _get_azure_vs_resolver()
-
     canonical: list[str] = []
     unresolved: list[dict[str, str]] = []
     for name in deduped:
         cleaned = clean_value_stream_name(name) or name
-        resolved = canonicalize_approved_value_stream(cleaned) or canonicalize_approved_value_stream(name)
-        existing_hint = ""
-        if not resolved:
-            existing_hint = _resolve_existing_hint(name, resolver)
-            resolved = canonicalize_approved_value_stream(existing_hint)
+        resolved = _resolve_approved_name(name)
 
         if resolved:
             canonical.append(resolved)
@@ -375,11 +198,10 @@ def canonicalize_value_stream_names(vs_names: list[str]) -> list[str]:
             {
                 "raw_name": name,
                 "cleaned_name": cleaned,
-                "existing_guess": existing_hint,
             }
         )
 
-    llm_results = _verify_names_with_llm(unresolved)
+    llm_results = _verify_names_with_llm(unresolved, llm_client=llm_client)
     for entry in unresolved:
         resolved = llm_results.get(_mapping_cache_key(entry["raw_name"]))
         canonical.append(resolved or entry["cleaned_name"])
@@ -405,7 +227,11 @@ def _normalize_theme_summary(summary: str) -> str:
     return re.sub(r"\s{2,}", " ", text).strip(" :-")
 
 
-def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> dict[str, Any]:
+def resolve_value_stream_mapping(
+    ticket_data: dict,
+    classified_links: dict,
+    llm_client: Any | None = None,
+) -> dict[str, Any]:
     """Resolve value stream names/IDs from classified links or theme fallback."""
     vs_links = list((classified_links or {}).get("vs") or [])
     label_source = "jira_issuelinks"
@@ -434,7 +260,6 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
             label_source = "jira_themes_fallback"
 
     vs_links = _dedupe_rows(vs_links)
-    resolver = _get_azure_vs_resolver()
 
     verified_links: list[dict] = []
     per_link_names: list[str] = []
@@ -442,11 +267,7 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
     for link in vs_links:
         raw_summary = str(link.get("summary") or "")
         cleaned = clean_value_stream_name(raw_summary) or raw_summary
-        resolved = canonicalize_approved_value_stream(cleaned) or canonicalize_approved_value_stream(raw_summary)
-        existing_hint = ""
-        if not resolved:
-            existing_hint = _resolve_existing_hint(raw_summary, resolver)
-            resolved = canonicalize_approved_value_stream(existing_hint)
+        resolved = _resolve_approved_name(raw_summary)
 
         if resolved:
             verified_links.append(link)
@@ -458,7 +279,6 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
                 "link": link,
                 "raw_name": raw_summary,
                 "cleaned_name": cleaned,
-                "existing_guess": existing_hint,
             }
         )
 
@@ -467,18 +287,17 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
             {
                 "raw_name": str(entry.get("raw_name") or ""),
                 "cleaned_name": str(entry.get("cleaned_name") or ""),
-                "existing_guess": str(entry.get("existing_guess") or ""),
             }
             for entry in unresolved_entries
-        ]
+        ],
+        llm_client=llm_client,
     )
     for entry in unresolved_entries:
         resolved = llm_results.get(_mapping_cache_key(str(entry.get("raw_name") or "")))
         if not resolved:
             logger.warning(
-                "Dropped unresolved Jira value-stream name '%s' (hint='%s', source=%s)",
+                "Dropped unresolved Jira value-stream name '%s' (source=%s)",
                 entry.get("raw_name") or entry.get("cleaned_name") or "",
-                entry.get("existing_guess") or "",
                 label_source,
             )
             continue
@@ -511,9 +330,13 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
     }
 
 
-def resolve_value_stream_epics_mapping(ticket_data: dict, classified_links: dict) -> dict[str, Any]:
+def resolve_value_stream_epics_mapping(
+    ticket_data: dict,
+    classified_links: dict,
+    llm_client: Any | None = None,
+) -> dict[str, Any]:
     """Extract value streams and their associated epics from ticket data."""
-    vs_mapping = resolve_value_stream_mapping(ticket_data, classified_links)
+    vs_mapping = resolve_value_stream_mapping(ticket_data, classified_links, llm_client=llm_client)
     linked_value_streams = vs_mapping.get("linked_value_streams", [])
 
     epics_raw = list((ticket_data or {}).get("epics") or [])

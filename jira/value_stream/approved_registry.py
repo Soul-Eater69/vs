@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from rapidfuzz import fuzz, process
+
 from .helpers import clean_value_stream_name
 
 APPROVED_VALUE_STREAMS: tuple[str, ...] = (
@@ -60,6 +62,8 @@ APPROVED_VALUE_STREAMS: tuple[str, ...] = (
 )
 
 APPROVED_VALUE_STREAM_SET = frozenset(APPROVED_VALUE_STREAMS)
+_FUZZ_MATCH_THRESHOLD = 92.0
+_FUZZ_AMBIGUITY_MARGIN = 2.0
 
 _NOISE_TOKENS = {"apr", "and"}
 
@@ -74,14 +78,17 @@ def _normalize_tokens(value: str) -> tuple[str, ...]:
     )
 
 
+def _normalize_lookup_key(value: str) -> str:
+    return " ".join(_normalize_tokens(value))
+
+
 _CANONICAL_BY_KEY: dict[str, str] = {}
-_CANONICAL_TOKEN_SETS: dict[str, frozenset[str]] = {}
+_LOOKUP_KEYS: list[str] = []
 for _name in APPROVED_VALUE_STREAMS:
-    _tokens = _normalize_tokens(_name)
-    _key = " ".join(_tokens)
+    _key = _normalize_lookup_key(_name)
     if _key:
         _CANONICAL_BY_KEY[_key] = _name
-        _CANONICAL_TOKEN_SETS[_name] = frozenset(_tokens)
+        _LOOKUP_KEYS.append(_key)
 
 
 def approved_value_streams_text() -> str:
@@ -91,43 +98,33 @@ def approved_value_streams_text() -> str:
 
 def canonicalize_approved_value_stream(value: str) -> str | None:
     """Map a Jira-style stream/theme name to the approved canonical list."""
-    tokens = _normalize_tokens(value)
-    if not tokens:
+    lookup_key = _normalize_lookup_key(value)
+    if not lookup_key:
         return None
 
-    direct = _CANONICAL_BY_KEY.get(" ".join(tokens))
+    direct = _CANONICAL_BY_KEY.get(lookup_key)
     if direct:
         return direct
 
-    target = frozenset(tokens)
-    best_name: str | None = None
-    best_score: tuple[float, int, int] | None = None
-    ambiguous = False
-
-    for canonical_name, canonical_tokens in _CANONICAL_TOKEN_SETS.items():
-        overlap = len(target & canonical_tokens)
-        if overlap == 0:
-            continue
-
-        canonical_containment = overlap / len(canonical_tokens)
-        target_containment = overlap / len(target)
-        if canonical_containment < 0.8 and target_containment < 0.8:
-            continue
-
-        score = (
-            max(canonical_containment, target_containment),
-            overlap,
-            -abs(len(canonical_tokens) - len(target)),
-        )
-        if best_score is None or score > best_score:
-            best_name = canonical_name
-            best_score = score
-            ambiguous = False
-            continue
-
-        if score == best_score and canonical_name != best_name:
-            ambiguous = True
-
-    if ambiguous:
+    matches = process.extract(
+        lookup_key,
+        _LOOKUP_KEYS,
+        scorer=fuzz.token_set_ratio,
+        limit=2,
+    )
+    if not matches:
         return None
-    return best_name
+
+    best_key, best_score, _ = matches[0]
+    if float(best_score) < _FUZZ_MATCH_THRESHOLD:
+        return None
+
+    if len(matches) > 1:
+        second_key, second_score, _ = matches[1]
+        if (
+            _CANONICAL_BY_KEY.get(second_key) != _CANONICAL_BY_KEY.get(best_key)
+            and float(second_score) >= float(best_score) - _FUZZ_AMBIGUITY_MARGIN
+        ):
+            return None
+
+    return _CANONICAL_BY_KEY.get(best_key)

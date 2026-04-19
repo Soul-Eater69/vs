@@ -87,7 +87,11 @@ async def process_ticket(
             return summary, chunks
 
     # --- Fetch once from Jira ---
-    ticket_data = await deps.jira_client.get_ticket_data(ticket_id, config=cfg)
+    ticket_data = await deps.jira_client.get_ticket_data(
+        ticket_id,
+        config=cfg,
+        llm_client=deps.llm_client,
+    )
 
     summary_doc: Optional[dict] = None
     chunk_docs: Optional[list[dict]] = None

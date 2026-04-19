@@ -47,7 +47,7 @@ async def ingest_ticket_chunks(
 ) -> HierarchicalTicketResult:
     """Full chunk pipeline for a single ticket — fetches first."""
     cfg = _default_cfg(cfg)
-    ticket_data = await jira_client.get_ticket_data(ticket_key, config=cfg)
+    ticket_data = await jira_client.get_ticket_data(ticket_key, config=cfg, llm_client=llm_client)
     return await ingest_ticket_chunks_payload(
         ticket_data=ticket_data,
         jira_client=jira_client,

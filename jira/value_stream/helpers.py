@@ -13,6 +13,10 @@ _VS_SUFFIX_RE = re.compile(
     r"\s*-\s*(?:IVL(?:\s|)[A-Z]+-\d+|APP\d{5,}|P\d{5,}).*$",
     re.IGNORECASE,
 )
+# Product/release prefix like "APR 2.0 " or "CP 2024.5 " — 2-5 uppercase
+# letters followed by a dotted version number. Stripped so BM25 can match
+# against canonical names like "Order to Cash" without version noise.
+_VS_PRODUCT_PREFIX_RE = re.compile(r"^[A-Z]{2,5}\s+\d+(?:\.\d+)*\s+(?=\S)")
 # Space-padded `-`, `–`, `—`, or `:` separator. Jira theme summaries often
 # prefix the VS name with product/release context (e.g. "CareWay (PEAQ) - Onboard Partner").
 _VS_SEPARATOR_RE = re.compile(r"\s[-–—:]\s+")
@@ -24,6 +28,7 @@ def clean_value_stream_name(summary: str) -> str:
     if not text:
         return ""
     text = _VS_PREFIX_RE.sub("", text)
+    text = _VS_PRODUCT_PREFIX_RE.sub("", text)
     text = _VS_SUFFIX_RE.sub("", text)
     matches = list(_VS_SEPARATOR_RE.finditer(text))
     if matches:

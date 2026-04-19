@@ -6,12 +6,24 @@ optionally using Azure AI Search BM25 lookup for canonicalization.
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from typing import Any, Optional
 
+from .approved_registry import (
+    APPROVED_VALUE_STREAM_SET,
+    approved_value_streams_text,
+    canonicalize_approved_value_stream,
+)
 from .helpers import clean_value_stream_name
 
 _AZURE_VS_RESOLVER: Optional["_AzureValueStreamResolver"] = None
+_DEFAULT_LLM_CLIENT: Any | None = None
+_DEFAULT_LLM_CLIENT_ATTEMPTED = False
+_LLM_APPROVED_MAPPING_CACHE: dict[str, str | None] = {}
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +82,10 @@ def _dedupe_names(names: list[str]) -> list[str]:
         seen.add(key)
         out.append(clean)
     return out
+
+
+def _mapping_cache_key(value: str) -> str:
+    return _norm_vs(clean_value_stream_name(value) or value)
 
 
 # ---------------------------------------------------------------------------
@@ -177,28 +193,197 @@ def _get_azure_vs_resolver() -> Optional[_AzureValueStreamResolver]:
     return _AZURE_VS_RESOLVER
 
 
+def _try_build_default_llm_client() -> Any | None:
+    global _DEFAULT_LLM_CLIENT, _DEFAULT_LLM_CLIENT_ATTEMPTED
+
+    if _DEFAULT_LLM_CLIENT_ATTEMPTED:
+        return _DEFAULT_LLM_CLIENT
+
+    _DEFAULT_LLM_CLIENT_ATTEMPTED = True
+    try:
+        from ...clients.llm import IDPChatOpenAI
+
+        _DEFAULT_LLM_CLIENT = IDPChatOpenAI(model="gpt-5-mini-idp")
+    except Exception as exc:
+        logger.info("Jira value-stream verifier LLM unavailable: %s", exc)
+        _DEFAULT_LLM_CLIENT = None
+    return _DEFAULT_LLM_CLIENT
+
+
+def _parse_verifier_json(raw: str) -> dict[str, Any]:
+    if not raw:
+        return {}
+
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned.strip())
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(cleaned[start : end + 1])
+            except json.JSONDecodeError:
+                pass
+
+    logger.warning("Failed to parse Jira value-stream verifier JSON: %.200s", raw)
+    return {}
+
+
+def _verify_names_with_llm(entries: list[dict[str, str]]) -> dict[str, str]:
+    if not entries:
+        return {}
+
+    results: dict[str, str] = {}
+    pending_by_key: dict[str, dict[str, str]] = {}
+    for entry in entries:
+        key = _mapping_cache_key(entry.get("raw_name", ""))
+        if not key:
+            continue
+        if key in _LLM_APPROVED_MAPPING_CACHE:
+            cached = _LLM_APPROVED_MAPPING_CACHE[key]
+            if cached:
+                results[key] = cached
+            continue
+        pending_by_key.setdefault(key, entry)
+
+    if not pending_by_key:
+        return results
+
+    llm_client = _try_build_default_llm_client()
+    if llm_client is None:
+        return results
+
+    try:
+        from ...clients.llm import complete_text
+    except Exception as exc:
+        logger.info("Jira value-stream verifier text helper unavailable: %s", exc)
+        return results
+
+    unresolved_block = []
+    for idx, entry in enumerate(pending_by_key.values(), start=1):
+        unresolved_block.append(
+            "\n".join(
+                [
+                    f"{idx}. raw_name: {entry.get('raw_name', '')}",
+                    f"   cleaned_name: {entry.get('cleaned_name', '')}",
+                    f"   previous_hint: {entry.get('existing_guess', '') or 'none'}",
+                ]
+            )
+        )
+
+    prompt = f"""Map each Jira-linked name to exactly one approved value stream or null.
+
+Approved value streams:
+{approved_value_streams_text()}
+
+Jira-linked names to verify:
+{chr(10).join(unresolved_block)}
+
+Rules:
+- Use ONLY the approved value stream names listed above.
+- If a raw Jira name is just a prefixed or punctuated variant, choose the matching approved name.
+- If there is not a confident match, return null.
+- Treat previous_hint as a hint only, not as truth.
+
+Return ONLY valid JSON with this exact shape:
+{{
+  "mappings": [
+    {{
+      "raw_name": "exact raw_name from the input",
+      "approved_value_stream": "exact approved value stream name or null"
+    }}
+  ]
+}}"""
+
+    try:
+        raw = complete_text(
+            prompt,
+            llm_client,
+            model="gpt-5-mini-idp",
+            max_output_tokens=1200,
+            temperature=0.0,
+            system_prompt=(
+                "You verify Jira-linked value stream names against an approved canonical list. "
+                "Never invent a name outside the approved list."
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Jira value-stream verifier LLM call failed: %s", exc)
+        return results
+
+    parsed = _parse_verifier_json(raw)
+    for item in parsed.get("mappings") or []:
+        if not isinstance(item, dict):
+            continue
+
+        raw_name = str(item.get("raw_name") or "").strip()
+        key = _mapping_cache_key(raw_name)
+        if not key:
+            continue
+
+        approved_name = item.get("approved_value_stream")
+        candidate = str(approved_name or "").strip() if approved_name is not None else ""
+        resolved = canonicalize_approved_value_stream(candidate) if candidate else None
+        if resolved and resolved in APPROVED_VALUE_STREAM_SET:
+            _LLM_APPROVED_MAPPING_CACHE[key] = resolved
+            results[key] = resolved
+        else:
+            _LLM_APPROVED_MAPPING_CACHE[key] = None
+
+    for key in pending_by_key:
+        _LLM_APPROVED_MAPPING_CACHE.setdefault(key, None)
+
+    return results
+
+
+def _resolve_existing_hint(name: str, resolver: Optional["_AzureValueStreamResolver"]) -> str:
+    if resolver is None:
+        return ""
+    cleaned = clean_value_stream_name(name) or name
+    return str(resolver.resolve_one(cleaned) or resolver.resolve_one(name) or "").strip()
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 def canonicalize_value_stream_names(vs_names: list[str]) -> list[str]:
-    """Dedupe and normalize value-stream names to canonical Azure entity_name
-    values via BM25 lookup. Falls back to the cleaned raw name when a name
-    cannot be resolved so callers receive one entry per input.
-    """
+    """Dedupe and normalize names, preferring the approved Jira registry."""
     deduped = _dedupe_names(vs_names)
     if not deduped:
         return []
 
     resolver = _get_azure_vs_resolver()
-    if resolver is None:
-        return deduped
 
     canonical: list[str] = []
+    unresolved: list[dict[str, str]] = []
     for name in deduped:
         cleaned = clean_value_stream_name(name) or name
-        resolved = resolver.resolve_one(cleaned) or resolver.resolve_one(name)
-        canonical.append(resolved or cleaned)
+        resolved = canonicalize_approved_value_stream(cleaned) or canonicalize_approved_value_stream(name)
+        existing_hint = ""
+        if not resolved:
+            existing_hint = _resolve_existing_hint(name, resolver)
+            resolved = canonicalize_approved_value_stream(existing_hint)
+
+        if resolved:
+            canonical.append(resolved)
+            continue
+
+        unresolved.append(
+            {
+                "raw_name": name,
+                "cleaned_name": cleaned,
+                "existing_guess": existing_hint,
+            }
+        )
+
+    llm_results = _verify_names_with_llm(unresolved)
+    for entry in unresolved:
+        resolved = llm_results.get(_mapping_cache_key(entry["raw_name"]))
+        canonical.append(resolved or entry["cleaned_name"])
+
     return _dedupe_names(canonical)
 
 
@@ -253,20 +438,52 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
 
     verified_links: list[dict] = []
     per_link_names: list[str] = []
+    unresolved_entries: list[dict[str, Any]] = []
     for link in vs_links:
         raw_summary = str(link.get("summary") or "")
         cleaned = clean_value_stream_name(raw_summary) or raw_summary
-        if resolver is None:
-            resolved = cleaned
-        else:
-            resolved = (
-                resolver.resolve_one(cleaned)
-                or resolver.resolve_one(raw_summary)
-                or cleaned
-            )
+        resolved = canonicalize_approved_value_stream(cleaned) or canonicalize_approved_value_stream(raw_summary)
+        existing_hint = ""
         if not resolved:
+            existing_hint = _resolve_existing_hint(raw_summary, resolver)
+            resolved = canonicalize_approved_value_stream(existing_hint)
+
+        if resolved:
+            verified_links.append(link)
+            per_link_names.append(resolved)
             continue
-        verified_links.append(link)
+
+        unresolved_entries.append(
+            {
+                "link": link,
+                "raw_name": raw_summary,
+                "cleaned_name": cleaned,
+                "existing_guess": existing_hint,
+            }
+        )
+
+    llm_results = _verify_names_with_llm(
+        [
+            {
+                "raw_name": str(entry.get("raw_name") or ""),
+                "cleaned_name": str(entry.get("cleaned_name") or ""),
+                "existing_guess": str(entry.get("existing_guess") or ""),
+            }
+            for entry in unresolved_entries
+        ]
+    )
+    for entry in unresolved_entries:
+        resolved = llm_results.get(_mapping_cache_key(str(entry.get("raw_name") or "")))
+        if not resolved:
+            logger.warning(
+                "Dropped unresolved Jira value-stream name '%s' (hint='%s', source=%s)",
+                entry.get("raw_name") or entry.get("cleaned_name") or "",
+                entry.get("existing_guess") or "",
+                label_source,
+            )
+            continue
+
+        verified_links.append(entry["link"])
         per_link_names.append(resolved)
 
     vs_links = verified_links

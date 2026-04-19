@@ -75,7 +75,7 @@ def _append_theme(
 ) -> None:
     fields = issue.get("fields", {}) or {}
     issue_type = nested_str_field(fields, "issuetype", "name")
-    if "epic" in issue_type.lower():
+    if "theme" not in issue_type.lower():
         return
 
     key = str(issue.get("key") or "")

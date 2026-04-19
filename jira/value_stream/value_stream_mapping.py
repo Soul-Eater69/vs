@@ -168,7 +168,7 @@ def canonicalize_value_stream_names(vs_names: list[str]) -> list[str]:
     canonical: list[str] = []
     for name in deduped:
         cleaned = clean_value_stream_name(name) or name
-        resolved = resolver.resolve_one(name)
+        resolved = resolver.resolve_one(cleaned) or resolver.resolve_one(name)
         canonical.append(resolved or cleaned)
     return _dedupe_names(canonical)
 
@@ -188,10 +188,6 @@ def is_valid_vs_name(name: str) -> bool:
 
 def _normalize_theme_summary(summary: str) -> str:
     text = clean_value_stream_name((summary or "").strip())
-    if ":" in text:
-        text = text.split(":")[-1].strip()
-    if "-" in text:
-        text = text.split("-")[-1].strip()
     return re.sub(r"\s{2,}", " ", text).strip(" :-")
 
 
@@ -206,7 +202,7 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
             normalized: list[dict] = []
             for theme in themes:
                 issue_type = str(theme.get("issue_type") or "").strip().lower()
-                if "epic" in issue_type:
+                if issue_type and "theme" not in issue_type:
                     continue
 
                 summary_raw = str(theme.get("summary_raw") or theme.get("summary") or "")
@@ -226,13 +222,21 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
     vs_links = _dedupe_rows(vs_links)
     resolver = _get_azure_vs_resolver()
 
-    def _resolve_name(raw: str) -> str:
-        cleaned = clean_value_stream_name(raw) or raw
+    verified_links: list[dict] = []
+    per_link_names: list[str] = []
+    for link in vs_links:
+        raw_summary = str(link.get("summary") or "")
+        cleaned = clean_value_stream_name(raw_summary) or raw_summary
         if resolver is None:
-            return cleaned
-        return resolver.resolve_one(raw) or cleaned
+            resolved = cleaned
+        else:
+            resolved = resolver.resolve_one(cleaned) or resolver.resolve_one(raw_summary)
+        if not resolved:
+            continue
+        verified_links.append(link)
+        per_link_names.append(resolved)
 
-    per_link_names = [_resolve_name(str(link.get("summary") or "")) for link in vs_links]
+    vs_links = verified_links
     vs_names = _dedupe_names(per_link_names)
     vs_ids = [str(link.get("key") or "") for link in vs_links if str(link.get("key") or "")]
     vs_statuses = [str(link.get("status") or "") for link in vs_links]
@@ -240,7 +244,7 @@ def resolve_value_stream_mapping(ticket_data: dict, classified_links: dict) -> d
     linked_value_streams = [
         {
             "id": str(link.get("key") or ""),
-            "name": per_link_names[idx] if idx < len(per_link_names) else str(link.get("summary") or ""),
+            "name": per_link_names[idx],
             "status": str(link.get("status") or ""),
             "summary_raw": str(link.get("summary_raw") or link.get("summary") or ""),
         }

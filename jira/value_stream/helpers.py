@@ -13,6 +13,9 @@ _VS_SUFFIX_RE = re.compile(
     r"\s*-\s*(?:IVL(?:\s|)[A-Z]+-\d+|APP\d{5,}|P\d{5,}).*$",
     re.IGNORECASE,
 )
+# Space-padded `-`, `–`, `—`, or `:` separator. Jira theme summaries often
+# prefix the VS name with product/release context (e.g. "CareWay (PEAQ) - Onboard Partner").
+_VS_SEPARATOR_RE = re.compile(r"\s[-–—:]\s+")
 
 
 def clean_value_stream_name(summary: str) -> str:
@@ -22,6 +25,11 @@ def clean_value_stream_name(summary: str) -> str:
         return ""
     text = _VS_PREFIX_RE.sub("", text)
     text = _VS_SUFFIX_RE.sub("", text)
+    matches = list(_VS_SEPARATOR_RE.finditer(text))
+    if matches:
+        tail = text[matches[-1].end():].strip()
+        if len(tail) >= 4:
+            text = tail
     text = re.sub(r"\s{2,}", " ", text)
     return text.strip(" -:")
 

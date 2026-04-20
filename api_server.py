@@ -49,6 +49,9 @@ _TICKET_CHUNKS_DIR = pathlib.Path(
 _SUMMARY_INDEX_DIR = pathlib.Path(
     os.environ.get("SUMMARY_INDEX_DIR", DEFAULT_INDEX_DIR)
 ).resolve()
+_HISTORICAL_FAISS_DIR = pathlib.Path(
+    os.environ.get("HISTORICAL_FAISS_DIR", "ticket_data/_faiss")
+).resolve()
 
 # ---------------------------------------------------------------------------
 # App
@@ -225,7 +228,7 @@ def _normalize_historic_rag_for_ui(result: dict) -> dict:
 
 
 def _load_ticket_chunk_ground_truth(doc_id: str) -> dict:
-    map_path = _TICKET_CHUNKS_DIR / f"{doc_id} / 08_valuestream_map.json"
+    map_path = _TICKET_CHUNKS_DIR / doc_id / "08_valuestream_map.json"
     if not map_path.exists():
         return {"value_streams": [], "title": doc_id, "found": False}
 
@@ -241,6 +244,73 @@ def _load_ticket_chunk_ground_truth(doc_id: str) -> dict:
     except Exception as exc:
         logger.error(f"Error loading ticket chunk GT: {exc}", exc_info=True)
         return {"value_streams": [], "title": doc_id, "found": False}
+
+
+def _coerce_ground_truth_value_streams(payload: dict) -> list[str]:
+    names = [
+        str(name).strip()
+        for name in (payload.get("value_stream_names") or payload.get("value_stream_labels") or [])
+        if str(name).strip()
+    ]
+    if names:
+        return names
+
+    rows = payload.get("value_streams") or []
+    if isinstance(rows, list):
+        extracted = [
+            str(row.get("vs_name") or row.get("name") or "").strip()
+            for row in rows
+            if isinstance(row, dict) and str(row.get("vs_name") or row.get("name") or "").strip()
+        ]
+        if extracted:
+            return extracted
+
+    fallback = []
+    for key in ("direct_vs_names", "implied_vs_names"):
+        fallback.extend(
+            str(name).strip()
+            for name in (payload.get(key) or [])
+            if str(name).strip()
+        )
+    return list(dict.fromkeys(fallback))
+
+
+def _load_historical_faiss_summary_docs() -> list[dict]:
+    docs_path = _HISTORICAL_FAISS_DIR / "summary_docs.json"
+    if not docs_path.exists():
+        return []
+
+    with open(docs_path, encoding="utf-8") as f:
+        payload = json.load(f)
+
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        return [row for row in (payload.get("summaries") or []) if isinstance(row, dict)]
+    return []
+
+
+def _load_historical_faiss_ground_truth(doc_id: str) -> dict:
+    doc_id_key = str(doc_id or "").strip().lower()
+    if not doc_id_key:
+        return {"value_streams": [], "title": doc_id, "found": False}
+
+    try:
+        for row in _load_historical_faiss_summary_docs():
+            ticket_id = str(row.get("ticket_id") or row.get("doc_id") or "").strip()
+            if ticket_id.lower() != doc_id_key:
+                continue
+
+            value_streams = _coerce_ground_truth_value_streams(row)
+            return {
+                "value_streams": value_streams,
+                "title": str(row.get("title") or ticket_id or doc_id).strip(),
+                "found": True,
+            }
+    except Exception as exc:
+        logger.error("Error loading FAISS ground truth for %s: %s", doc_id, exc, exc_info=True)
+
+    return {"value_streams": [], "title": doc_id, "found": False}
 
 
 def _enrich_and_attach_ground_truth(
@@ -265,7 +335,11 @@ def _enrich_and_attach_ground_truth(
 
     # Enrich with ground truth if doc_id is known
     if req.doc_id:
-        if ground_truth_source == "ticket_chunks":
+        if ground_truth_source == "historical_faiss":
+            ground_truth_data = _load_historical_faiss_ground_truth(req.doc_id)
+            if not ground_truth_data["found"]:
+                ground_truth_data = _load_ticket_chunk_ground_truth(req.doc_id)
+        elif ground_truth_source == "ticket_chunks":
             ground_truth_data = _load_ticket_chunk_ground_truth(req.doc_id)
         else:
             ground_truth_data = get_value_streams_for_idea_card_sync(req.doc_id)
@@ -550,12 +624,12 @@ def run_historic_rag(req: GenerateRequest) -> dict:
             query,
             allowed_value_stream_names=req.allowed_value_stream_names,
             fetch_count=req.fetch_count,
-            historical_faiss_dir="ticket_data/_faiss",
+            historical_faiss_dir=str(_HISTORICAL_FAISS_DIR),
         )
 
         result["approach"] = "historic-rag"
         result = _normalize_historic_rag_for_ui(result)
-        return _enrich_and_attach_ground_truth(result, req, ground_truth_source="ticket_chunks")
+        return _enrich_and_attach_ground_truth(result, req, ground_truth_source="historical_faiss")
 
     except HTTPException:
         raise

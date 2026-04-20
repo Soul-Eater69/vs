@@ -1,0 +1,20 @@
+system: |
+  You are a healthcare business analyst enriching historical Jira ticket data.
+  Your output feeds a search index used to classify future idea cards.
+  Be specific. Use healthcare domain terminology. Output only structured data.
+
+user: |
+  Analyze this Jira ticket and produce a structured enrichment.
+
+  TICKET TEXT:
+  {raw_text}
+
+  VALUE STREAMS ATTACHED:
+  {vs_list}
+
+  For summary: capture problem, goal, stakeholders, domains, outcomes in 2-4 sentences.
+  For domain_tags: 5-10 healthcare domain or function tags from the content.
+  For vs_classifications: for each value stream above, classify as:
+  - "direct": ticket explicitly addresses this value-stream domain or problem
+  - "implied": the value stream is relevant as an upstream, downstream, or adjacent consequence
+  Give a one-sentence reason for each.

@@ -6,7 +6,8 @@ from typing import Iterable, List
 from ...clients.generation_service import GenerationService
 from ...prompts import (
     SelectionResult,
-    build_selection_system_prompt,
+    build_historical_selection_prompt,
+    build_historical_selection_system_prompt,
 )
 from ..retrieval.pipeline import sanitize_selected
 
@@ -54,28 +55,9 @@ def generate_value_streams(
 
 
 def _build_system_prompt() -> str:
-    return (
-        build_selection_system_prompt(min_select=6, max_select=12)
-        + "\n\nYou are operating in a merged semantic + historical retrieval setting."
-          "\n\nInterpret evidence this way:"
-          "\n- semantic_plus_historical: strongest bucket; usually keep unless the connection is clearly weak"
-          "\n- semantic_only: normal semantic candidate; judge by business fit to the current idea card"
-          "\n- historical_only: recovered candidate that semantic retrieval missed; do NOT reject it only because wording differs"
-          "\n\nHistorical evidence rules:"
-          "\n- repeated direct support across multiple similar tickets is strong evidence"
-          "\n- implied support is weaker than direct support"
-          "\n- a candidate supported by several similar historical tickets may still be relevant even if the exact terminology is absent in the current idea card"
-          "\n- one weak implied historical match is not enough by itself"
-          "\n\nDecision policy:"
-          "\n- prioritize recall, especially for candidates with both semantic and historical support"
-          "\n- include historical-only candidates when there is a defensible business connection and the historical support is meaningfully strong"
-          "\n- do not over-penalize candidates with vocabulary mismatch when historical analogs are strong"
-          "\n- do not select candidates that are only loosely adjacent with weak support"
-          "\n\nConfidence guidance:"
-          "\n- 0.85-1.0: strong direct fit, or very strong combined semantic + historical support"
-          "\n- 0.65-0.84: meaningful but not perfect fit, or strong historical recovery"
-          "\n- 0.40-0.64: plausible but borderline"
-          "\n- below 0.40: usually do not select"
+    return build_historical_selection_system_prompt(
+        min_select=6,
+        max_select=12,
     )
 
 
@@ -112,23 +94,9 @@ def _build_prompt(query_for_prompt: str, candidates: List[dict]) -> str:
 
         blocks.append("\n".join(lines))
 
-    return (
-        "IDEA CARD:\n\n"
-        f"{query_for_prompt}\n\n"
-        "TASK:\n"
-        "Select the value streams that are materially relevant to this idea card.\n"
-        "Evaluate every candidate.\n"
-        "A candidate can be selected because of semantic evidence, historical evidence, or both.\n"
-        "Historical-only candidates are valid when several similar tickets show the same business mapping.\n"
-        "Do not require exact wording overlap.\n\n"
-        "SELECTION RULES:\n"
-        "- Favor candidates with both semantic and historical support.\n"
-        "- Treat repeated direct historical support as stronger than implied support.\n"
-        "- Historical-only candidates with multi-ticket support should be kept when the business connection is defensible.\n"
-        "- Weak one-off implied historical support is usually not enough.\n"
-        "- Reject only when the connection is not materially defensible.\n\n"
-        "CANDIDATE VALUE STREAMS (evaluate every one):\n\n"
-        + "\n\n".join(blocks)
+    return build_historical_selection_prompt(
+        query_for_prompt=query_for_prompt,
+        candidate_blocks="\n\n".join(blocks),
     )
 
 

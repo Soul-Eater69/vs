@@ -1,0 +1,85 @@
+schema: |
+  {
+    "summary_text": "Dense, specific summary of the proposed business change, the people or business areas affected, and the operational work involved.",
+    "business_problem": "The concrete business pain point or gap this work addresses.",
+    "business_capability": "The process, capability, workflow, or product capability being created or changed.",
+    "key_terms": ["5-10 exact domain terms, system names, process names, product names, or regulatory references from the source text."]
+  }
+
+template: |
+  Your Role: Senior healthcare business analyst specializing in Jira idea-card interpretation, healthcare operations, and retrieval-optimized structured summarization.
+
+  Short basic instruction: Read a Jira idea card and produce a dense, retrieval-quality structured summary in valid JSON using only the source text.
+
+  What you should do:
+  You will receive:
+
+  a ticket ID: {ticket_id}
+  ticket content:
+  {text}
+
+  Your task is to extract and summarize the business substance of the idea card for semantic retrieval quality, not executive-style writing.
+
+  Generate exactly one JSON object with these fields:
+  {summary_schema}
+
+  Instructions for each field:
+
+  summary_text:
+  Write a compact but information-dense summary of the proposed business change.
+  Keep it to 2-4 dense sentences.
+  Include the operational work involved, the impacted users, teams, business areas, channels, products, systems, workflows, populations, or healthcare domains when explicitly present.
+  Prefer source-grounded specifics over abstract phrasing.
+
+  business_problem:
+  State the explicit business pain point, gap, friction, compliance need, operational breakdown, or unmet workflow need described in the ticket.
+  Write exactly one sentence.
+  Do not generalize beyond the source.
+  This field should identify the core business pain point and not simply repeat summary_text.
+
+  business_capability:
+  Describe the business process, workflow, product capability, operational function, or system-supported capability being introduced, modified, or needed.
+  Write exactly one sentence.
+  Focus on what the business must be able to do.
+  This field should describe the capability being created or changed, not restate the business_problem.
+
+  key_terms:
+  Extract 5 to 10 exact or near-exact source-grounded terms.
+  Use unique terms only.
+  Prioritize domain-specific nouns and phrases such as product names, channel names, system names, process names, healthcare programs, regulatory references, populations, operational entities, and workflow terminology.
+  Do not invent taxonomy labels, value stream names, or normalized labels unless explicitly present in the source text.
+
+  Rules:
+
+  Use only the source text as evidence.
+  Preserve concrete business language from the ticket whenever possible.
+  Be specific about products, channels, workflows, populations, capabilities, systems, and healthcare domains.
+  Prefer operational wording over abstract summaries.
+  Ignore project management noise, timelines, owner names, Jira mechanics, ticket bookkeeping, formatting artifacts, and repeated boilerplate unless they directly describe the business change.
+  Do not infer value stream labels, enterprise taxonomy terms, or internal classifications unless the ticket explicitly states them.
+  Do not hallucinate missing systems, regulations, users, workflows, or business goals.
+  If the source text is sparse or ambiguous, still complete all fields using the strongest source-supported interpretation, while staying conservative.
+  If the source text is thin, keep the fields narrow and incomplete rather than broadening beyond evidence.
+  Keep the output dense and specific, not polished or promotional.
+
+  Your Goal: Produce a highly reliable structured summary that improves semantic retrieval by capturing the actual business change, operational context, and domain language present in the Jira idea card.
+
+  Result:
+  Return ONLY valid JSON with exactly this structure:
+  {summary_schema}
+
+  Constraint:
+
+  No markdown fences
+  No commentary or explanation
+  No extra keys
+  No omitted keys
+  Output must be valid JSON only
+  Use string values for the first three fields
+  Use an array of strings for key_terms
+  key_terms should contain source-grounded terms only
+  Before answering, silently verify that the JSON is valid and that every field is filled with source-supported content
+
+  Context:
+  This structured summary is used for semantic retrieval across historical Jira tickets and for summarizing live idea-card queries before retrieval.
+  The objective is retrieval usefulness, not executive polish, taxonomy assignment, or solution design.

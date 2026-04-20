@@ -4,43 +4,16 @@ import json
 import re
 from typing import Any, Mapping
 
-
-_STRUCTURED_SUMMARY_SCHEMA = """{
-  "summary_text": "Dense, specific summary of the proposed business change, the people or business areas affected, and the operational work involved.",
-  "business_problem": "The concrete business pain point or gap this work addresses.",
-  "business_capability": "The process, capability, workflow, or product capability being created or changed.",
-  "key_terms": ["5-10 exact domain terms, system names, process names, product names, or regulatory references from the source text."]
-}"""
-
+from ..prompts import load_prompt_yaml, render_prompt
 
 def build_structured_summary_prompt(*, ticket_id: str, text: str) -> str:
-    return f"""\
-You are a senior healthcare business analyst preparing a retrieval summary for a Jira idea card.
-
-This structured summary is used in two places:
-1. to index historical Jira tickets for semantic retrieval
-2. to summarize a live idea-card query before retrieval
-
-Write for retrieval quality, not for executive polish.
-
-Rules:
-- Preserve concrete business language from the source text.
-- Be specific about products, channels, workflows, populations, capabilities, systems, and healthcare domains.
-- Avoid generic filler like "improve efficiency", "enhance experience", or "support transformation" unless the source gives concrete detail.
-- Ignore project management noise, timelines, owner names, Jira mechanics, ticket bookkeeping, and repeated slide boilerplate.
-- Do not infer value stream labels or taxonomy names unless the source text explicitly says them.
-- Prefer operational wording over abstract summaries.
-
-## TICKET
-ID: {ticket_id}
-
-## CONTENT
-{text}
-
-Return ONLY valid JSON with exactly this shape:
-{_STRUCTURED_SUMMARY_SCHEMA}
-
-No markdown fences. No commentary. Just the JSON object."""
+    payload = load_prompt_yaml("retrieval_summary")
+    return render_prompt(
+        str(payload["template"]),
+        ticket_id=ticket_id,
+        text=text,
+        summary_schema=str(payload["schema"]).strip(),
+    )
 
 
 def parse_structured_summary_payload(

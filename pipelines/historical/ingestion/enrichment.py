@@ -6,6 +6,10 @@ import logging
 from typing import List
 
 from ....clients.llm import IDPChatOpenAI
+from ....prompts import (
+    build_historical_enrichment_prompt,
+    build_historical_enrichment_system_prompt,
+)
 from ....text import clean_ppt_text
 from ..models import (
     EnrichedTicket,
@@ -19,31 +23,11 @@ logger = logging.getLogger(__name__)
 
 ENRICHMENT_MODEL = "gpt-4o-mini-idp"
 
-SYSTEM_PROMPT = """\
-You are a healthcare business analyst enriching historical Jira ticket data.
-Your output feeds a search index used to classify future idea cards.
-Be specific. Use healthcare domain terminology. Output only structured data."""
-
 
 def _build_prompt(raw_text: str, vs_labels: List[str]) -> str:
     cleaned = clean_ppt_text(raw_text)[:6000]
     vs_list = "\n".join(f"- {name}" for name in vs_labels) if vs_labels else "(none)"
-
-    return f"""\
-Analyze this Jira ticket and produce a structured enrichment.
-
-TICKET TEXT:
-{cleaned}
-
-VALUE STREAMS ATTACHED:
-{vs_list}
-
-For summary: capture problem, goal, stakeholders, domains, outcomes in 2-4 sentences.
-For domain_tags: 5-10 healthcare domain/function tags from the content.
-For vs_classifications: for EACH value stream above, classify as:
-- "direct": ticket explicitly addresses this VS domain/problem
-- "implied": VS is relevant as upstream/downstream/adjacent consequence
-Give a one-sentence reason for each."""
+    return build_historical_enrichment_prompt(raw_text=cleaned, vs_list=vs_list)
 
 
 def _make_fallback_vs(vs_labels: List[str], reason: str) -> List[VSAttachment]:
@@ -76,7 +60,7 @@ def enrich_one(ticket: RawTicket, model: str = ENRICHMENT_MODEL) -> EnrichedTick
         llm = IDPChatOpenAI(model=model)
         structured = llm.with_structured_output(TicketEnrichmentResult, method="function_calling")
         result: TicketEnrichmentResult = structured.invoke([
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": build_historical_enrichment_system_prompt()},
             {"role": "user", "content": _build_prompt(ticket.raw_text, ticket.value_stream_labels)},
         ])
 

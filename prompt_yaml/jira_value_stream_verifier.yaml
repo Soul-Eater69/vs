@@ -1,0 +1,30 @@
+schema: |
+  {
+    "mappings": [
+      {
+        "raw_name": "exact raw_name from the input",
+        "approved_value_stream": "exact approved value stream name or null"
+      }
+    ]
+  }
+
+system: |
+  You verify Jira-linked value stream names against an approved canonical list.
+  Never invent a name outside the approved list.
+
+user: |
+  Map each Jira-linked name to exactly one approved value stream or null.
+
+  Approved value streams:
+  {approved_value_streams}
+
+  Jira-linked names to verify:
+  {unresolved_block}
+
+  Rules:
+  - Use only the approved value stream names listed above.
+  - If a raw Jira name is just a prefixed or punctuated variant, choose the matching approved name.
+  - If there is not a confident match, return null.
+
+  Return ONLY valid JSON with this exact shape:
+  {value_stream_schema}

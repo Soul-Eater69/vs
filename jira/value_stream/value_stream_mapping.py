@@ -7,6 +7,10 @@ import logging
 import re
 from typing import Any
 
+from ...prompts import (
+    build_jira_value_stream_verifier_prompt,
+    build_jira_value_stream_verifier_system_prompt,
+)
 from .approved_registry import (
     APPROVED_VALUE_STREAM_SET,
     approved_value_streams_text,
@@ -102,28 +106,10 @@ def _verify_names_with_llm(
             )
         )
 
-    prompt = f"""Map each Jira-linked name to exactly one approved value stream or null.
-
-Approved value streams:
-{approved_value_streams_text()}
-
-Jira-linked names to verify:
-{chr(10).join(unresolved_block)}
-
-Rules:
-- Use ONLY the approved value stream names listed above.
-- If a raw Jira name is just a prefixed or punctuated variant, choose the matching approved name.
-- If there is not a confident match, return null.
-
-Return ONLY valid JSON with this exact shape:
-{{
-  "mappings": [
-    {{
-      "raw_name": "exact raw_name from the input",
-      "approved_value_stream": "exact approved value stream name or null"
-    }}
-  ]
-}}"""
+    prompt = build_jira_value_stream_verifier_prompt(
+        approved_value_streams=approved_value_streams_text(),
+        unresolved_block="\n".join(unresolved_block),
+    )
 
     try:
         raw = complete_text(
@@ -132,10 +118,7 @@ Return ONLY valid JSON with this exact shape:
             model="gpt-5-mini-idp",
             max_output_tokens=1200,
             temperature=0.0,
-            system_prompt=(
-                "You verify Jira-linked value stream names against an approved canonical list. "
-                "Never invent a name outside the approved list."
-            ),
+            system_prompt=build_jira_value_stream_verifier_system_prompt(),
         )
     except Exception as exc:
         logger.warning("Jira value-stream verifier LLM call failed: %s", exc)

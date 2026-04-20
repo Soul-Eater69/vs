@@ -7,28 +7,27 @@ from __future__ import annotations
 import json
 import logging
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
 from pydantic import BaseModel, Field
 
-from .constants import RAG_PROMPTS_PATH
+from .constants import PROMPT_YAML_DIR, RAG_PROMPTS_PATH
 
 logger = logging.getLogger(__name__)
 
-# --- JSON extraction
 
 def safe_json_extract(text: str) -> dict:
     """Best effort extraction of a JSON object from LLM output."""
     text = (text or "").strip()
 
-    # Direct parse
     try:
         return json.loads(text)
     except Exception:
         pass
 
-    # Fenced JSON block
     match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
     if match:
         try:
@@ -36,7 +35,6 @@ def safe_json_extract(text: str) -> dict:
         except Exception:
             pass
 
-    # First/last braces
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end != -1 and end > start:
         try:
@@ -46,32 +44,58 @@ def safe_json_extract(text: str) -> dict:
 
     return {"selected_value_streams": [], "rejected_candidates": []}
 
-# --- RAG prompts
+
+@lru_cache(maxsize=None)
+def _load_yaml_payload(path_value: str) -> Dict[str, Any]:
+    path = Path(path_value)
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt file not found: {path}")
+
+    with open(path, encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle) or {}
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"Prompt file must contain a mapping: {path}")
+
+    return payload
+
+
+def load_prompt_yaml(name: str) -> Dict[str, Any]:
+    path = PROMPT_YAML_DIR / f"{name}.yaml"
+    return _load_yaml_payload(str(path))
+
+
+def _load_required_prompt_yaml(name: str, required_keys: list[str]) -> Dict[str, Any]:
+    payload = load_prompt_yaml(name)
+    missing = [key for key in required_keys if key not in payload]
+    if missing:
+        raise ValueError(
+            f"Missing prompt keys in {PROMPT_YAML_DIR / f'{name}.yaml'}: {missing}"
+        )
+    return payload
+
 
 def load_rag_prompts() -> Dict[str, str]:
     """Load the YAML prompt file for the RAG pipeline."""
-    if not RAG_PROMPTS_PATH.exists():
-        raise FileNotFoundError(f"Prompt file not found: {RAG_PROMPTS_PATH}")
-    with open(RAG_PROMPTS_PATH, encoding="utf-8") as f:
-        payload = yaml.safe_load(f) or {}
+    payload = _load_yaml_payload(str(RAG_PROMPTS_PATH))
     if "selection_user" not in payload and "user" in payload:
         payload["selection_user"] = payload["user"]
-    missing = [k for k in ("system", "selection_user") if k not in payload]
+    missing = [key for key in ("system", "selection_user") if key not in payload]
     if missing:
         raise ValueError(f"Missing prompt keys in {RAG_PROMPTS_PATH}: {missing}")
     return payload
+
 
 def render_prompt(template: str, **kwargs: Any) -> str:
     return template.format(**kwargs)
 
 
-# --- Plain-approach structured output schema
-
-
 class SelectedValueStream(BaseModel):
     entity_id: str = Field(description="The entity ID of the value stream")
     entity_name: str = Field(description="The name of the value stream")
-    confidence: float = Field(description="0.8-1.0 strong direct alignment, 0.5-0.7 partial, 0.3-0.4 weak but plausible")
+    confidence: float = Field(
+        description="0.8-1.0 strong direct alignment, 0.5-0.7 partial, 0.3-0.4 weak but plausible"
+    )
     reason: str = Field(description="Brief: which criteria matched and how")
 
 
@@ -81,53 +105,92 @@ class SelectionResult(BaseModel):
     )
 
 
-# --- Plain-approach prompt (split: system is cacheable, user is per-request)
-
 def build_selection_system_prompt(min_select: int = 10, max_select: int = 14) -> str:
-    return f"""\
-Role: Senior Healthcare Business Analyst specializing in value stream classification.
-
-Task: Select the value streams from the candidate set that are relevant to the healthcare idea card summary.
-
-A value stream is a business signal or business area materially touched by the idea, such as a \
-function, capability, workflow, transformation theme, stakeholder space, or outcome area.
-
-Use semantic business reasoning, not keyword matching. Infer the business intent, problem being \
-solved, affected stakeholders, impacted functions/workflows, and expected outcomes.
-
-A value stream is relevant when there is a defensible connection through one or more of:
-1. Problem or pain-point overlap
-2. Same or adjacent domain
-3. Stakeholder overlap
-4. Process, workflow, or capability connection
-5. Outcome alignment
-6. Upstream, downstream, enabling, or indirect transformation-theme connection
-
-Prioritize recall, but do not over-select.
-- Usually return between {min_select} and {max_select} value streams when enough plausible matches exist
-- Return fewer if fewer are truly defensible
-- Return at most {max_select} unless the schema or calling logic explicitly allows more
-- Favor the strongest and most material business connections
-
-Confidence:
-- 0.8-1.0 = strong direct alignment
-- 0.5-0.7 = partial but meaningful relevance
-- 0.3-0.4 = weak but plausible relevance
-
-Reason:
-Provide a brief concrete business reason for each selected value stream.
-
-Retrieval scores are supporting context only. Do not require exact wording overlap.
-
-Output only data matching the provided schema."""
+    payload = _load_required_prompt_yaml("selection", ["system"])
+    return render_prompt(
+        str(payload["system"]),
+        min_select=min_select,
+        max_select=max_select,
+    )
 
 
 def build_plain_selection_prompt(query: str, context: str) -> str:
-    """Build the user-message portion of the selection prompt (data only)."""
-    return f"""IDEA CARD:
+    payload = _load_required_prompt_yaml("selection", ["user"])
+    return render_prompt(str(payload["user"]), query=query, context=context)
 
-{query}
 
-CANDIDATE VALUE STREAMS (evaluate every one):
+def build_historical_selection_system_prompt(
+    min_select: int = 6,
+    max_select: int = 12,
+) -> str:
+    base_prompt = build_selection_system_prompt(
+        min_select=min_select,
+        max_select=max_select,
+    ).rstrip()
+    payload = _load_required_prompt_yaml("historical_rag_selection", ["system_extension"])
+    extension = str(payload["system_extension"]).strip()
+    return f"{base_prompt}\n\n{extension}" if extension else base_prompt
 
-{context}"""
+
+def build_historical_selection_prompt(
+    query_for_prompt: str,
+    candidate_blocks: str,
+) -> str:
+    payload = _load_required_prompt_yaml("historical_rag_selection", ["user"])
+    return render_prompt(
+        str(payload["user"]),
+        query_for_prompt=query_for_prompt,
+        candidate_blocks=candidate_blocks,
+    )
+
+
+def build_value_stream_classification_prompt(
+    *,
+    ticket_id: str,
+    text: str,
+    value_streams: str,
+) -> str:
+    payload = _load_required_prompt_yaml(
+        "value_stream_classification",
+        ["schema", "template"],
+    )
+    return render_prompt(
+        str(payload["template"]),
+        ticket_id=ticket_id,
+        text=text,
+        value_streams=value_streams,
+        value_stream_schema=str(payload["schema"]).strip(),
+    )
+
+
+def build_historical_enrichment_system_prompt() -> str:
+    payload = _load_required_prompt_yaml("historical_enrichment", ["system"])
+    return str(payload["system"]).strip()
+
+
+def build_historical_enrichment_prompt(*, raw_text: str, vs_list: str) -> str:
+    payload = _load_required_prompt_yaml("historical_enrichment", ["user"])
+    return render_prompt(
+        str(payload["user"]),
+        raw_text=raw_text,
+        vs_list=vs_list,
+    )
+
+
+def build_jira_value_stream_verifier_system_prompt() -> str:
+    payload = _load_required_prompt_yaml("jira_value_stream_verifier", ["system"])
+    return str(payload["system"]).strip()
+
+
+def build_jira_value_stream_verifier_prompt(
+    *,
+    approved_value_streams: str,
+    unresolved_block: str,
+) -> str:
+    payload = _load_required_prompt_yaml("jira_value_stream_verifier", ["user", "schema"])
+    return render_prompt(
+        str(payload["user"]),
+        approved_value_streams=approved_value_streams,
+        unresolved_block=unresolved_block,
+        value_stream_schema=str(payload["schema"]).strip(),
+    )

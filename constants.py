@@ -16,11 +16,8 @@ CANONICAL_VALUE_STREAMS: List[Dict[str, Any]] = []
 # Default directory for pre-chunked ticket output
 PRECHUNK_DIR: pathlib.Path = pathlib.Path("jira_prechunk_output")
 
+# Root directory for application prompt YAML files.
+PROMPT_YAML_DIR: pathlib.Path = pathlib.Path(__file__).parent / "prompt_yaml"
+
 # Path to the primary RAG selection prompt YAML file.
-RAG_PROMPTS_PATH: pathlib.Path = (
-    pathlib.Path(__file__).parent
-    / "rag-summary"
-    / "prompts"
-    / "selector"
-    / "finalize_selection.v3.yaml"
-)
+RAG_PROMPTS_PATH: pathlib.Path = PROMPT_YAML_DIR / "rag_selection.yaml"

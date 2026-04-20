@@ -5,6 +5,11 @@ import re
 from typing import Optional
 
 from .clients.llm import IDPChatOpenAI
+from .content.retrieval_summary import (
+    build_structured_summary_prompt,
+    format_structured_summary_text,
+    parse_structured_summary_payload,
+)
 from .processing.extraction.text_cleaning import clean_extracted_text
 
 logger = logging.getLogger(__name__)
@@ -271,27 +276,26 @@ def raw_starts_like_bullet(line: str) -> bool:
 
 
 def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
-    """Use a fast LLM to condense noisy PPT text into business essence."""
+    """Summarize noisy idea-card text into the same retrieval shape used by indexing."""
     cleaned = clean_opt_text(raw_text)
     input_text = cleaned[:8000]
 
-    prompt = (
-        "Condense this noisy healthcare idea card PPT text into a clear, concise business summary.\n\n"
-        "KEEP: problem statement, business goals, stakeholders, affected domains/functions, "
-        "key metrics, outcomes, dependencies, and any specific healthcare terms or processes mentioned.\n"
-        "DROP: slide headers, repeated text, formatting artifacts, sponsor/owner names, IDs, dates, boilerplate.\n\n"
-        "Write plain text, not JSON. Use short paragraphs or bullet points. "
-        f"Stay under {max_chars // 4} words. Preserve specific terminology - do not generalize.\n\n"
-        f"PPT TEXT:\n{input_text}"
+    prompt = build_structured_summary_prompt(
+        ticket_id="QUERY",
+        text=input_text,
     )
 
     try:
         reply = IDPChatOpenAI(model="gpt-4o-mini-idp").invoke(input=prompt)
-        condensed = (getattr(reply, "content", "") or "").strip()
+        parsed = parse_structured_summary_payload(
+            getattr(reply, "content", "") or "",
+            context_id="query_summary",
+            logger=logger,
+        )
+        condensed = format_structured_summary_text(parsed, max_chars=max_chars)
         if condensed and len(condensed) > 50:
-            # LLM sometimes returns literal \n instead of real newlines
             condensed = condensed.replace("\\n", "\n").replace("\\r", "")
-            return condensed[:max_chars]
+            return condensed
     except Exception as exc:
         logger.warning(
             "Idea card condensation failed, using signal-line fallback: %s",

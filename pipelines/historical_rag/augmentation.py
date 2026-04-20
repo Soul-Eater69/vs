@@ -32,6 +32,9 @@ def merge_candidate_sources(
             "support_count": 0,
             "direct_count": 0,
             "implied_count": 0,
+            "weighted_support_count": 0.0,
+            "weighted_direct_count": 0.0,
+            "weighted_implied_count": 0.0,
             "best_support_score": 0.0,
             "avg_support_score": 0.0,
             "supporting_ticket_ids": [],
@@ -58,6 +61,9 @@ def merge_candidate_sources(
                 "support_count": 0,
                 "direct_count": 0,
                 "implied_count": 0,
+                "weighted_support_count": 0.0,
+                "weighted_direct_count": 0.0,
+                "weighted_implied_count": 0.0,
                 "best_support_score": 0.0,
                 "avg_support_score": 0.0,
                 "supporting_ticket_ids": [],
@@ -72,6 +78,9 @@ def merge_candidate_sources(
         existing["support_count"] = int(row.get("support_count", 0) or 0)
         existing["direct_count"] = int(row.get("direct_count", 0) or 0)
         existing["implied_count"] = int(row.get("implied_count", 0) or 0)
+        existing["weighted_support_count"] = float(row.get("weighted_support_count", 0.0) or 0.0)
+        existing["weighted_direct_count"] = float(row.get("weighted_direct_count", 0.0) or 0.0)
+        existing["weighted_implied_count"] = float(row.get("weighted_implied_count", 0.0) or 0.0)
         existing["best_support_score"] = float(row.get("best_support_score", 0.0) or 0.0)
         existing["avg_support_score"] = float(row.get("avg_support_score", 0.0) or 0.0)
         existing["supporting_ticket_ids"] = list(row.get("supporting_ticket_ids") or [])
@@ -142,8 +151,8 @@ def _norm_name(value: str) -> str:
 def _historical_strength(row: dict) -> float:
     return (
         float(row.get("best_support_score", 0.0) or 0.0)
-        + 0.12 * int(row.get("direct_count", 0) or 0)
-        + 0.05 * int(row.get("implied_count", 0) or 0)
+        + 0.18 * _weighted_support_value(row, "weighted_direct_count", "direct_count")
+        + 0.06 * _weighted_support_value(row, "weighted_implied_count", "implied_count")
         + _label_source_adjustment(row)
     )
 
@@ -164,15 +173,25 @@ def _should_auto_include(row: dict, *, support_count: int, min_score: float) -> 
         return False
     if int(row.get("support_count", 0) or 0) < support_count:
         return False
+    if _weighted_support_value(row, "weighted_support_count", "support_count") < max(1.5, support_count * 0.45):
+        return False
     if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
         return False
-    return int(row.get("direct_count", 0) or 0) >= int(row.get("implied_count", 0) or 0)
+    return _weighted_support_value(row, "weighted_direct_count", "direct_count") >= _weighted_support_value(
+        row,
+        "weighted_implied_count",
+        "implied_count",
+    )
 
 
 def _should_send_to_llm(row: dict, *, support_count: int, min_score: float) -> bool:
+    weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
     if int(row.get("support_count", 0) or 0) >= support_count:
-        return True
-    return float(row.get("best_support_score", 0.0) or 0.0) >= min_score
+        return weighted_support >= max(1.0, support_count * 0.4)
+    return (
+        float(row.get("best_support_score", 0.0) or 0.0) >= min_score
+        and weighted_support >= 0.5
+    )
 
 
 def _to_selected_value_stream(row: dict) -> dict:
@@ -180,11 +199,12 @@ def _to_selected_value_stream(row: dict) -> dict:
     direct_count = int(row.get("direct_count", 0) or 0)
     implied_count = int(row.get("implied_count", 0) or 0)
     best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    confidence = min(0.95, 0.45 + 0.07 * support_count + 0.10 * min(best_score, 1.0))
+    weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
+    confidence = min(0.92, 0.38 + 0.12 * min(weighted_support, 4.0) + 0.10 * min(best_score, 1.0))
 
     reason = (
         f"Recovered from {support_count} similar historical tickets "
-        f"({direct_count} direct, {implied_count} implied)."
+        f"({direct_count} direct, {implied_count} implied; weighted support {weighted_support:.2f})."
     )
     example_reasons = [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]
     if example_reasons:
@@ -198,3 +218,10 @@ def _to_selected_value_stream(row: dict) -> dict:
         "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
     }
+
+
+def _weighted_support_value(row: dict, weighted_key: str, fallback_key: str) -> float:
+    weighted = row.get(weighted_key)
+    if weighted is not None:
+        return float(weighted or 0.0)
+    return float(row.get(fallback_key, 0.0) or 0.0)

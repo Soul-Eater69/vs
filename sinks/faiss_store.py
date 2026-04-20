@@ -9,6 +9,7 @@ from typing import Any
 from langchain_core.documents import Document
 
 from ..clients.embedding import EmbeddingClient
+from ..content.retrieval_summary import format_structured_summary_text
 
 logger = logging.getLogger(__name__)
 
@@ -188,38 +189,7 @@ def _summary_to_document(summary: dict) -> Document:
 
 
 def _summary_text(summary: dict) -> str:
-    parts = [str(summary.get("summary_text") or "").strip()]
-    business_problem = str(summary.get("business_problem") or "").strip()
-    business_capability = str(summary.get("business_capability") or "").strip()
-    if business_problem:
-        parts.append(f"Problem: {business_problem}")
-    if business_capability:
-        parts.append(f"Capability: {business_capability}")
-    key_terms = [str(term).strip() for term in (summary.get("key_terms") or []) if str(term).strip()]
-    if key_terms:
-        parts.append("Key Terms: " + ", ".join(key_terms))
-
-    value_streams = summary.get("value_streams") or []
-    if isinstance(value_streams, list) and value_streams:
-        lines = []
-        for row in value_streams:
-            if not isinstance(row, dict):
-                continue
-            name = str(row.get("vs_name") or "").strip()
-            inference_type = str(row.get("inference_type") or "").strip()
-            reason = str(row.get("reason") or "").strip()
-            if not name:
-                continue
-            line = name
-            if inference_type:
-                line += f" [{inference_type}]"
-            if reason:
-                line += f": {reason}"
-            lines.append(line)
-        if lines:
-            parts.append("Value Streams:\n" + "\n".join(lines[:8]))
-
-    return "\n".join(part for part in parts if part and part.strip()).strip()
+    return format_structured_summary_text(summary)
 
 
 def _chunk_to_document(chunk: dict) -> Document:

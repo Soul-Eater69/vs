@@ -1,59 +1,28 @@
 """
-LLM summarization: consolidated ticket text → TicketSummaryDocument.
+LLM summarization: consolidated ticket text -> TicketSummaryDocument.
 
-This is the vocabulary bridge — converts operational idea-card language
-into the structured fields used for VS prediction retrieval.
+This is the vocabulary bridge that converts operational Jira idea-card language
+into the structured fields used for retrieval.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
 
 from ..clients.llm import complete_text
+from ..content.retrieval_summary import (
+    build_structured_summary_prompt,
+    coerce_key_terms,
+    parse_structured_summary_payload,
+)
 from ..content.schemas import TicketSummaryDocument
 
 logger = logging.getLogger(__name__)
 
 _MAX_INPUT_CHARS = 20_000
 _MAX_OUTPUT_TOKENS = 1_200
-
-_PROMPT = """\
-You are an expert healthcare business analyst extracting a structured summary \
-from a Jira idea card. This summary will be embedded for vector retrieval to \
-match tickets to value streams — extract specific, discriminative vocabulary.
-
-## TICKET
-ID: {ticket_id}
-
-## CONTENT
-{text}
-
-## INSTRUCTIONS
-Extract a structured summary. Be precise and specific — generic phrases like \
-"improve efficiency" are useless for retrieval. Use the exact domain language \
-from the text.
-
-Ignore project management details, timelines, team names, and Jira metadata.
-
-Return ONLY valid JSON with exactly these keys:
-{{
-  "summary_text": "Dense summary covering: what change is proposed, what business \
-problem it solves, who is affected, and what operational capabilities are involved. \
-Include specific domain terms. No length limit — be thorough.",
-  "business_problem": "The core pain point or gap. Be specific: 'Medicare members \
-in IL cannot self-service plan comparisons during AEP' not 'members need better tools'.",
-  "business_capability": "What process or capability is being built or changed. \
-Use operational language: 'automated claims adjudication for out-of-network providers' \
-not 'claims improvement'.",
-  "key_terms": ["Extract 5-10 specific domain terms from the text that would help \
-match this ticket to similar work. Include process names, system names, product \
-names, regulatory references, and business-specific vocabulary."]
-}}
-
-No markdown fences. No extra text. Just the JSON object."""
 
 _VS_CLASSIFICATION_PROMPT = """\
 You are an expert healthcare business analyst reviewing a Jira idea card and a
@@ -99,26 +68,26 @@ def summarize_ticket(
     """
     Call the LLM with the consolidated ticket text and return a
     TicketSummaryDocument with all fields populated except VS labels
-    and embedding (those are set by the pipeline after this call).
+    and embedding.
     """
     if not consolidated_text.strip():
-        logger.warning("Empty consolidated text for %s — returning minimal summary", ticket_id)
+        logger.warning("Empty consolidated text for %s - returning minimal summary", ticket_id)
         return _empty_summary(ticket_id)
 
-    prompt = _PROMPT.format(
+    prompt = build_structured_summary_prompt(
         ticket_id=ticket_id,
         text=consolidated_text[:_MAX_INPUT_CHARS],
     )
 
     raw = _call_llm(prompt, llm_client, cfg)
-    parsed = _parse_json(raw, ticket_id)
+    parsed = parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)
 
     return TicketSummaryDocument(
         ticket_id=ticket_id,
         summary_text=parsed.get("summary_text", ""),
         business_problem=parsed.get("business_problem", ""),
         business_capability=parsed.get("business_capability", ""),
-        key_terms=_as_list(parsed.get("key_terms")),
+        key_terms=coerce_key_terms(parsed.get("key_terms")),
     )
 
 
@@ -194,13 +163,15 @@ def classify_ticket_value_streams(
         )
         seen.add(key)
 
-    # Preserve every Jira-attached VS even if the model missed one.
+    # Preserve Jira provenance for missed labels, but downgrade non-verified rows
+    # to the fallback confidence level instead of treating them as direct evidence.
     for row in fallback_rows:
         if row["vs_name"].lower() in seen:
             continue
         patched = dict(row)
+        patched["inference_type"] = _fallback_inference_type(label_source)
         patched["reason"] = (
-            "Not classified by LLM; defaulted to direct while preserving Jira label provenance."
+            "Not classified by the LLM; preserved as lower-confidence Jira provenance."
         )
         matched.append(patched)
 
@@ -223,25 +194,7 @@ def _call_llm(prompt: str, llm_client: Any, cfg: Any) -> str:
 
 
 def _parse_json(raw: str, ticket_id: str) -> dict:
-    if not raw:
-        return {}
-    # Strip markdown fences if the model added them anyway
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned.strip())
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        logger.warning("JSON parse failed for %s — raw: %.200s", ticket_id, raw)
-        return {}
-
-
-
-def _as_list(value: Any) -> list[str]:
-    if isinstance(value, list):
-        return [str(v) for v in value if v]
-    if isinstance(value, str) and value:
-        return [value]
-    return []
+    return parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)
 
 
 def _match_known_value_stream(candidate: str, known_names: list[str]) -> str:
@@ -272,16 +225,23 @@ def _fallback_value_stream_rows(
     label_source: str,
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
+    inference_type = _fallback_inference_type(label_source)
     for idx, name in enumerate(value_stream_names):
         rows.append(
             {
                 "vs_id": value_stream_ids[idx] if idx < len(value_stream_ids) else "",
                 "vs_name": name,
-                "inference_type": "direct",
+                "inference_type": inference_type,
                 "reason": _fallback_reason(label_source),
             }
         )
     return rows
+
+
+def _fallback_inference_type(label_source: str) -> str:
+    if str(label_source or "").strip() == "jira_issuelinks":
+        return "direct"
+    return "implied"
 
 
 def _empty_summary(ticket_id: str) -> TicketSummaryDocument:

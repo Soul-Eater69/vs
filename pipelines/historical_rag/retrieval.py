@@ -146,40 +146,21 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
     """
     Aggregate VS support counts from FAISS results.
 
-    Each FAISS hit already has value_stream_labels and stream_support_type
-    in its metadata, so we just aggregate.
+    Each FAISS hit already has resolved VS metadata. We prefer explicitly
+    classified direct/implied buckets and only fall back to the full attached
+    label list when no finer-grained classification exists.
     """
     support_by_name: Dict[str, dict] = {}
 
     for hit in ticket_hits:
         ticket_id = hit.get("ticket_id", "")
         score = float(hit.get("best_score", 0.0))
-        vs_labels = _resolve_hit_value_stream_names(hit)
-        vs_ids = hit.get("value_stream_ids") or []
-        support_types = hit.get("stream_support_type") or {}
-        direct_vs_names = {
-            str(value).strip()
-            for value in (hit.get("direct_vs_names") or [])
-            if str(value).strip()
-        }
-        implied_vs_names = {
-            str(value).strip()
-            for value in (hit.get("implied_vs_names") or [])
-            if str(value).strip()
-        }
-
-        for idx, vs_name in enumerate(vs_labels):
-            vs_name = str(vs_name).strip()
-            if not vs_name:
-                continue
-
-            vs_id = str(vs_ids[idx]).strip() if idx < len(vs_ids) else ""
-            inference_type = str(support_types.get(vs_name, "")).lower()
-            if not inference_type:
-                if vs_name in implied_vs_names and vs_name not in direct_vs_names:
-                    inference_type = "implied"
-                else:
-                    inference_type = "direct"
+        for item in _extract_hit_value_stream_support(hit):
+            vs_name = item["entity_name"]
+            vs_id = item["entity_id"]
+            inference_type = item["inference_type"]
+            per_ticket_weight = float(item["per_ticket_weight"])
+            label_source = item["label_source"]
 
             entry = support_by_name.setdefault(
                 vs_name,
@@ -189,59 +170,131 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
                     "support_count": 0,
                     "direct_count": 0,
                     "implied_count": 0,
+                    "weighted_support_count": 0.0,
+                    "weighted_direct_count": 0.0,
+                    "weighted_implied_count": 0.0,
                     "best_support_score": 0.0,
                     "total_score": 0.0,
                     "supporting_ticket_ids": [],
+                    "label_sources": [],
                 },
             )
 
             entry["support_count"] += 1
+            entry["weighted_support_count"] += per_ticket_weight
             entry["best_support_score"] = max(entry["best_support_score"], score)
             entry["total_score"] += score
 
             if inference_type == "implied":
                 entry["implied_count"] += 1
+                entry["weighted_implied_count"] += per_ticket_weight
             else:
                 entry["direct_count"] += 1
+                entry["weighted_direct_count"] += per_ticket_weight
 
             if ticket_id and ticket_id not in entry["supporting_ticket_ids"]:
                 entry["supporting_ticket_ids"].append(ticket_id)
+            if label_source and label_source not in entry["label_sources"]:
+                entry["label_sources"].append(label_source)
 
     rows: List[dict] = []
     for row in support_by_name.values():
         count = max(row["support_count"], 1)
         row["avg_support_score"] = round(row.pop("total_score") / count, 4)
         row["best_support_score"] = round(row["best_support_score"], 4)
+        row["weighted_support_count"] = round(float(row["weighted_support_count"]), 4)
+        row["weighted_direct_count"] = round(float(row["weighted_direct_count"]), 4)
+        row["weighted_implied_count"] = round(float(row["weighted_implied_count"]), 4)
         rows.append(row)
 
     return sorted(
         rows,
-        key=lambda r: (r["support_count"], r["direct_count"], r["best_support_score"]),
+        key=lambda r: (
+            float(r.get("weighted_support_count", 0.0)),
+            float(r.get("weighted_direct_count", 0.0)),
+            r["best_support_score"],
+        ),
         reverse=True,
     )
 
 
-def _resolve_hit_value_stream_names(hit: dict) -> List[str]:
-    labels = [
-        str(value).strip()
-        for value in (hit.get("value_stream_labels") or [])
-        if str(value).strip()
-    ]
-    if labels:
-        return labels
+def _extract_hit_value_stream_support(hit: dict) -> List[dict]:
+    label_source = str(hit.get("label_source") or "").strip()
+    fallback_names = _dedupe_text_list(
+        hit.get("value_stream_names")
+        or hit.get("value_stream_labels")
+        or []
+    )
+    fallback_ids = [str(value).strip() for value in (hit.get("value_stream_ids") or [])]
+    id_by_name = {
+        name: fallback_ids[idx]
+        for idx, name in enumerate(fallback_names)
+        if idx < len(fallback_ids) and fallback_ids[idx]
+    }
 
-    names = [
-        str(value).strip()
-        for value in (hit.get("value_stream_names") or [])
-        if str(value).strip()
+    direct_names = _dedupe_text_list(hit.get("direct_vs_names") or [])
+    direct_set = {name.lower() for name in direct_names}
+    implied_names = [
+        name
+        for name in _dedupe_text_list(hit.get("implied_vs_names") or [])
+        if name.lower() not in direct_set
     ]
-    if names:
-        return names
 
-    combined: List[str] = []
-    for field in ("direct_vs_names", "implied_vs_names"):
-        for value in hit.get(field) or []:
-            clean = str(value).strip()
-            if clean and clean not in combined:
-                combined.append(clean)
-    return combined
+    support_types = hit.get("stream_support_type") or {}
+    if not direct_names and not implied_names and isinstance(support_types, dict):
+        for name in fallback_names:
+            inference_type = str(support_types.get(name, "")).strip().lower()
+            if inference_type == "direct":
+                direct_names.append(name)
+                direct_set.add(name.lower())
+            elif inference_type == "implied" and name.lower() not in direct_set:
+                implied_names.append(name)
+
+    if not direct_names and not implied_names:
+        fallback_inference = "direct" if label_source == "jira_issuelinks" else "implied"
+        if fallback_inference == "direct":
+            direct_names = list(fallback_names)
+            direct_set = {name.lower() for name in direct_names}
+        else:
+            implied_names = list(fallback_names)
+
+    stream_names = direct_names + [name for name in implied_names if name.lower() not in direct_set]
+    if not stream_names:
+        return []
+
+    per_ticket_weight = 1.0 / max(len(stream_names), 1)
+    rows: List[dict] = []
+    for name in direct_names:
+        rows.append(
+            {
+                "entity_name": name,
+                "entity_id": id_by_name.get(name, ""),
+                "inference_type": "direct",
+                "label_source": label_source,
+                "per_ticket_weight": per_ticket_weight,
+            }
+        )
+    for name in implied_names:
+        rows.append(
+            {
+                "entity_name": name,
+                "entity_id": id_by_name.get(name, ""),
+                "inference_type": "implied",
+                "label_source": label_source,
+                "per_ticket_weight": per_ticket_weight,
+            }
+        )
+    return rows
+
+
+def _dedupe_text_list(values: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        clean = str(value).strip()
+        key = clean.lower()
+        if not clean or key in seen:
+            continue
+        seen.add(key)
+        out.append(clean)
+    return out

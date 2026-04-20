@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from ..content.retrieval_summary import format_structured_summary_text
 from ..content.schemas import TicketSummaryDocument
 from .extractor import consolidate_ticket_text
 from .summarizer import classify_ticket_value_streams, summarize_ticket
@@ -115,17 +116,8 @@ async def ingest_ticket_summary_payload(
 # ---------------------------------------------------------------------------
 
 def _build_embedding_text(doc: "TicketSummaryDocument") -> str:
-    """Concatenate all structured fields for a richer embedding than summary_text alone."""
-    parts = []
-    if doc.summary_text:
-        parts.append(doc.summary_text)
-    if doc.business_problem:
-        parts.append(f"Problem: {doc.business_problem}")
-    if doc.business_capability:
-        parts.append(f"Capability: {doc.business_capability}")
-    if doc.key_terms:
-        parts.append(f"Terms: {', '.join(doc.key_terms)}")
-    return "\n".join(parts)
+    """Build the same structured retrieval text shape used by the FAISS summary store."""
+    return format_structured_summary_text(doc)
 
 
 def _embed(text: str, embedding_client: Any, cfg: Any) -> list[float]:

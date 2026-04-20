@@ -23,6 +23,7 @@ type Tab =
   | 'retrieval'
   | 'vsCandidates'
   | 'historicCandidates'
+  | 'faissHits'
   | 'mergedCandidates'
   | 'trace'
   | 'reference'
@@ -66,6 +67,17 @@ interface RejectedVS { entity_id: string; entity_name: string; reason: string }
 interface CanonicalVS { id: string; name: string; category: string }
 interface TraceStep { label: string; timing_s?: number; [k: string]: unknown }
 
+interface HistoricalTicketHit {
+  ticket_id: string;
+  best_score?: number;
+  title?: string;
+  summary_preview?: string;
+  value_stream_names?: string[];
+  direct_vs_names?: string[];
+  implied_vs_names?: string[];
+  label_source?: string;
+}
+
 interface PipelineResult {
   selected_value_streams: SelectedVS[];
   rejected_candidates: RejectedVS[];
@@ -74,6 +86,7 @@ interface PipelineResult {
   semantic_candidate_value_streams?: Candidate[];
   historical_candidate_value_streams?: Candidate[];
   merged_candidate_value_streams?: Candidate[];
+  historical_ticket_hits?: HistoricalTicketHit[];
   raw_response?: unknown;
   ground_truth?: string[];
   ground_truth_title?: string;
@@ -388,6 +401,90 @@ function RetrievalPane({
   );
 }
 
+function FaissHitsPane({
+  hits,
+  emptyText = 'No historical FAISS ticket hits were returned.',
+}: {
+  hits: HistoricalTicketHit[];
+  emptyText?: string;
+}) {
+  if (!hits.length) return <Empty text={emptyText} />;
+  const best = Math.max(...hits.map(hit => Number(hit.best_score ?? 0) || 0), 0.0001);
+  return (
+    <div className="space-y-2">
+      {hits.map((hit, i) => {
+        const score = Number(hit.best_score ?? 0) || 0;
+        const pct = Math.max((score / best) * 100, 4);
+        const direct = Array.isArray(hit.direct_vs_names) ? hit.direct_vs_names.filter(Boolean) : [];
+        const implied = Array.isArray(hit.implied_vs_names) ? hit.implied_vs_names.filter(Boolean) : [];
+        const names = Array.isArray(hit.value_stream_names) ? hit.value_stream_names.filter(Boolean) : [];
+        const hasClassified = direct.length > 0 || implied.length > 0;
+        const preview = String(hit.summary_preview ?? '').trim();
+        return (
+          <div key={`${hit.ticket_id}-${i}`} className="rounded-xl border border-zinc-200 bg-white px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-zinc-400">#{i + 1}</span>
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{hit.ticket_id}</span>
+                </div>
+                {hit.title && hit.title !== hit.ticket_id && (
+                  <div className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">{hit.title}</div>
+                )}
+              </div>
+              <span className="shrink-0 text-xs font-mono text-amber-600 dark:text-amber-400">{score.toFixed(4)}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Pill tone="amber">faiss</Pill>
+              {hasClassified ? (
+                <>
+                  {direct.length > 0 && <Pill tone="green">{direct.length} direct</Pill>}
+                  {implied.length > 0 && <Pill tone="amber">{implied.length} implied</Pill>}
+                </>
+              ) : (
+                names.length > 0 && <Pill tone="neutral">{names.length} attached VS</Pill>
+              )}
+              {hit.label_source && <Pill tone="neutral">{String(hit.label_source)}</Pill>}
+            </div>
+            <div className="mt-2 h-1 rounded-full bg-zinc-100 dark:bg-zinc-800">
+              <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${pct}%` }} />
+            </div>
+            {preview && <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{preview}</p>}
+            {(direct.length > 0 || implied.length > 0 || names.length > 0) && (
+              <div className="mt-3 space-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                {direct.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Direct</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {direct.map(name => <Pill key={`d-${hit.ticket_id}-${name}`} tone="green">{name}</Pill>)}
+                    </div>
+                  </div>
+                )}
+                {implied.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">Implied</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {implied.map(name => <Pill key={`i-${hit.ticket_id}-${name}`} tone="amber">{name}</Pill>)}
+                    </div>
+                  </div>
+                )}
+                {!hasClassified && names.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Attached Streams</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {names.map(name => <Pill key={`n-${hit.ticket_id}-${name}`} tone="neutral">{name}</Pill>)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ComparisonPane({ selected, groundTruth, title }: { selected: SelectedVS[]; groundTruth?: string[]; title?: string }) {
   const gt = groundTruth ?? [];
   if (!selected.length && !gt.length) return <Empty text="Run the pipeline to compare against ground truth." />;
@@ -621,6 +718,7 @@ export default function Home() {
   const cands = useMemo(() => result?.candidate_value_streams ?? result?.candidates_used ?? [], [result]);
   const vsCandidates = useMemo(() => result?.semantic_candidate_value_streams ?? [], [result]);
   const historicCandidates = useMemo(() => result?.historical_candidate_value_streams ?? [], [result]);
+  const faissHits = useMemo(() => result?.historical_ticket_hits ?? [], [result]);
   const mergedCandidates = useMemo(
     () => result?.merged_candidate_value_streams ?? result?.candidate_value_streams ?? result?.candidates_used ?? [],
     [result],
@@ -632,6 +730,7 @@ export default function Home() {
         result.approach === 'historic-rag'
         || result.semantic_candidate_value_streams !== undefined
         || result.historical_candidate_value_streams !== undefined
+        || result.historical_ticket_hits !== undefined
         || result.merged_candidate_value_streams !== undefined
       )
     ),
@@ -859,6 +958,7 @@ export default function Home() {
                     <>
                       <TabBtn active={tab === 'vsCandidates'}       label="VS Candidates" icon="database" count={vsCandidates.length}       onClick={() => setTab('vsCandidates')} />
                       <TabBtn active={tab === 'historicCandidates'} label="Historic"      icon="book"     count={historicCandidates.length} onClick={() => setTab('historicCandidates')} />
+                      <TabBtn active={tab === 'faissHits'}          label="FAISS Hits"    icon="file"     count={faissHits.length}         onClick={() => setTab('faissHits')} />
                       <TabBtn active={tab === 'mergedCandidates'}   label="Merged"        icon="layers"   count={mergedCandidates.length}   onClick={() => setTab('mergedCandidates')} />
                     </>
                   ) : (
@@ -874,6 +974,7 @@ export default function Home() {
                 {tab === 'retrieval'  && <RetrievalPane  candidates={cands} />}
                 {tab === 'vsCandidates'       && <RetrievalPane candidates={vsCandidates} emptyText="No semantic VS candidates retrieved yet." />}
                 {tab === 'historicCandidates' && <RetrievalPane candidates={historicCandidates} emptyText="No historic candidates recovered yet." />}
+                {tab === 'faissHits'          && <FaissHitsPane hits={faissHits} emptyText="No IDMT ticket hits recovered from FAISS yet." />}
                 {tab === 'mergedCandidates'   && <RetrievalPane candidates={mergedCandidates} emptyText="No merged candidates available yet." />}
                 {tab === 'trace'      && <TracePane      trace={result.trace} />}
                 {tab === 'reference'  && <ReferencePane  canonical={result.canonical_value_streams} />}

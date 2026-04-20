@@ -25,27 +25,50 @@ _MAX_INPUT_CHARS = 20_000
 _MAX_OUTPUT_TOKENS = 1_200
 
 _VS_CLASSIFICATION_PROMPT = """\
-You are an expert healthcare business analyst reviewing a Jira idea card and a
-set of already-attached value streams.
+Your Role: Expert healthcare business analyst specializing in Jira idea triage
+and healthcare value-stream classification.
 
-Your job is not to invent new value streams. Only classify the supplied value
-streams using the ticket text.
+Short basic instruction: Review a Jira idea card and classify each
+already-attached value stream using only the ticket text.
 
-## TICKET
-ID: {ticket_id}
+What you should do:
+You will receive:
 
-## CONTENT
-{text}
+a ticket ID: {ticket_id}
+ticket content: {text}
+a list of already-attached value streams: {value_streams}
 
-## ATTACHED VALUE STREAMS
-{value_streams}
+For each supplied value stream, determine whether it is:
 
-## INSTRUCTIONS
-For EACH attached value stream, classify it as:
-- "direct": the ticket explicitly addresses this value-stream domain/problem
-- "implied": the value stream is relevant but more upstream/downstream/adjacent
+"direct": the ticket explicitly addresses that value-stream domain, problem,
+workflow, or operational area
+"implied": the value stream is relevant, but only indirectly, adjacently,
+upstream, or downstream from what the ticket explicitly describes
 
-Return ONLY valid JSON with exactly this shape:
+Important rules:
+
+Classify every supplied value stream, even if the ticket text is limited or
+somewhat ambiguous
+Do not invent, infer, or add new value streams beyond those in {value_streams}
+Use only the ticket text as evidence
+Do not use the fact that a value stream is attached as evidence that it is
+direct; the attachment list is the set to classify, not proof of strength
+Choose "direct" only when the ticket text clearly describes work, problems,
+workflows, stakeholders, or outcomes that are central to that value stream
+Use "implied" when the value stream is related but not explicitly central in
+the ticket
+When uncertain between "direct" and "implied", prefer "implied"
+Keep each reason to exactly one sentence
+Make each reason specific enough to reflect the ticket context, citing concrete
+business context from the ticket text, but not overly broad or repetitive
+Preserve the value stream name exactly as supplied
+
+Your Goal: Produce a reliable classification of all attached value streams
+based strictly on the Jira ticket text, minimizing overreach while still making
+a determination for every supplied value stream.
+
+Result:
+Return ONLY valid JSON with exactly this structure:
 {{
   "value_streams": [
     {{
@@ -56,7 +79,23 @@ Return ONLY valid JSON with exactly this shape:
   ]
 }}
 
-Do not add value streams that were not supplied. No markdown fences. No extra text."""
+Constraint:
+
+No markdown fences
+No extra commentary, explanation, headings, or notes
+No additional keys beyond those shown
+No omitted supplied value streams
+No value streams that were not supplied
+Output must be valid JSON only
+If the ticket is ambiguous, still classify each supplied value stream using the
+strongest text-supported judgment
+
+Context:
+You are evaluating only the relationship between the provided Jira ticket text
+and the already-attached value streams.
+You are not creating new value streams, redesigning taxonomy, or making product
+recommendations.
+Your task is classification only."""
 
 
 def summarize_ticket(

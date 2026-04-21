@@ -195,7 +195,9 @@ def _should_auto_include(row: dict, *, support_count: int, min_score: float) -> 
     # Direct-count shortcut: multiple direct-tagged analogs at good similarity
     # bypasses weighted-count check because per-ticket weight is diluted when
     # a ticket has many VS attached — the raw direct count is more reliable signal.
-    if direct_count >= 2 and total_count >= support_count:
+    # Requires 3 direct (not 2) to avoid false positives from common VS that appear
+    # as direct on many unrelated tickets in the historical corpus.
+    if direct_count >= 3 and total_count >= support_count:
         return True
 
     if total_count < support_count:
@@ -212,21 +214,22 @@ def _should_auto_include(row: dict, *, support_count: int, min_score: float) -> 
 def _should_auto_include_merged(row: dict, *, min_score: float) -> bool:
     """Auto-select candidates with both strong semantic AND strong historical support.
 
-    These are the safest bets — two independent signals agree. Bypassing the LLM
-    cap prevents high-scoring merged candidates from being crowded out by false
-    positives that the LLM over-selects from semantic-only evidence.
+    Thresholds are intentionally conservative — auto-select only the highest-confidence
+    merged candidates to avoid greedily including semantically-adjacent VS that Azure
+    AI Search retrieves with decent scores but that aren't genuinely relevant.
+    Borderline merged candidates go to the LLM instead.
 
-    Semantic score threshold of 1.0 targets reranker scores (range 0-3); plain
-    vector fallback scores top out at 1.0 so this path rarely fires on fallback,
-    which is acceptable since fallback retrieval is already degraded.
+    Semantic score threshold of 1.5 targets strong reranker scores (range 0-3); plain
+    vector fallback scores top out at 1.0 so this path never fires on fallback,
+    which is correct since fallback retrieval is already degraded.
     """
     if not (row.get("from_semantic") and row.get("from_historical")):
         return False
-    if float(row.get("semantic_score", 0.0) or 0.0) < 1.0:
+    if float(row.get("semantic_score", 0.0) or 0.0) < 1.5:
         return False
     if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
         return False
-    if int(row.get("support_count", 0) or 0) < 4:
+    if int(row.get("support_count", 0) or 0) < 5:
         return False
     return True
 

@@ -20,12 +20,16 @@ system_extension: |
     the historical support even if the count is high.
 
   Decision policy:
-  - Prioritize recall, especially for candidates with both semantic and historical support.
+  - Favor quality over quantity: prefer 8-10 well-supported selections over 12 marginal ones.
+  - Prioritize recall for candidates with both semantic and historical support.
   - Include historical-only candidates when the analog evidence shows a defensible business
     connection — base this on the analog content, not just the support count.
   - Do not over-penalize vocabulary mismatch when analog summaries show functional overlap.
   - Do not select when analog evidence is clearly from a different domain or the only support
     is weak implied matches with unrelated summaries.
+  - When two candidates represent closely related but distinct business domains (e.g.
+    "Manage X" vs "Administer X"), select only the one with stronger direct evidence;
+    do not select both unless each has independent, clearly relevant analog summaries.
 
   Confidence guidance:
   - 0.85-1.0: strong direct fit, or multiple direct analogs with clearly similar summaries

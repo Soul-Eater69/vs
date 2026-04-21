@@ -149,12 +149,20 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
     Each FAISS hit already has resolved VS metadata. We prefer explicitly
     classified direct/implied buckets and only fall back to the full attached
     label list when no finer-grained classification exists.
+
+    historical_reasons is populated per VS from each supporting ticket's
+    summary_preview and the relevant canonical functions (implied or direct),
+    so downstream prompts have analog card context rather than just counts.
     """
     support_by_name: Dict[str, dict] = {}
 
     for hit in ticket_hits:
         ticket_id = hit.get("ticket_id", "")
         score = float(hit.get("best_score", 0.0))
+        summary_preview = str(hit.get("summary_preview") or "").strip()[:200]
+        direct_funcs: List[str] = [f for f in (hit.get("direct_functions_canonical") or []) if f]
+        implied_funcs: List[str] = [f for f in (hit.get("implied_functions_canonical") or []) if f]
+
         for item in _extract_hit_value_stream_support(hit):
             vs_name = item["entity_name"]
             vs_id = item["entity_id"]
@@ -177,6 +185,7 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
                     "total_score": 0.0,
                     "supporting_ticket_ids": [],
                     "label_sources": [],
+                    "historical_reasons": [],
                 },
             )
 
@@ -196,6 +205,19 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
                 entry["supporting_ticket_ids"].append(ticket_id)
             if label_source and label_source not in entry["label_sources"]:
                 entry["label_sources"].append(label_source)
+
+            # Build analog reason string: summary + functions that drove the mapping.
+            # Keep up to 3 per VS so the prompt stays concise.
+            if len(entry["historical_reasons"]) < 3:
+                funcs = implied_funcs if inference_type == "implied" else direct_funcs
+                parts: List[str] = []
+                if summary_preview:
+                    parts.append(summary_preview)
+                if funcs:
+                    parts.append(f"functions: {', '.join(funcs[:3])}")
+                if parts:
+                    prefix = f"[{ticket_id} / {inference_type}]"
+                    entry["historical_reasons"].append(f"{prefix} {' | '.join(parts)}")
 
     rows: List[dict] = []
     for row in support_by_name.values():

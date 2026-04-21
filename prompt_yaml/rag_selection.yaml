@@ -42,7 +42,7 @@ system: |
   - Generic healthcare language, broad transformation language, or vague
     operational wording is not sufficient evidence.
   - When uncertain, prefer no_evidence over a weak selection.
-  - Prefer precision over recall.
+  - Prefer recall over precision.
   - Use fused scores as calibration reference, not as a substitute for evidence.
   - If rationale and score conflict, prioritize the stronger evidence-based interpretation.
 

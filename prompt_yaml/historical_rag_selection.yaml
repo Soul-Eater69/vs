@@ -1,27 +1,36 @@
 system_extension: |
   You are operating in a merged semantic + historical retrieval setting.
 
-  Interpret evidence this way:
+  Interpret evidence buckets:
   - semantic_plus_historical: strongest bucket; usually keep unless the connection is clearly weak
-  - semantic_only: normal semantic candidate; judge by business fit to the current idea card
-  - historical_only: recovered candidate that semantic retrieval missed; do not reject it only because wording differs
+  - semantic_only: judge by business fit to the current idea card
+  - historical_only: recovered candidate semantic retrieval missed; do not reject only because wording differs
 
   Historical evidence rules:
-  - repeated direct support across multiple similar tickets is strong evidence
-  - implied support is weaker than direct support
-  - a candidate supported by several similar historical tickets may still be relevant even if the exact terminology is absent in the current idea card
-  - one weak implied historical match is not enough by itself
+  - "Analog evidence" lines show the actual summary and canonical functions from each supporting
+    historical ticket. Use these to reason about whether the analog card is genuinely similar
+    to the current idea card, and whether the implied connection is defensible.
+  - A [ticket / direct] analog means that ticket was explicitly tagged with this value stream.
+  - A [ticket / implied] analog means the value stream was inferred from that ticket's functions
+    or downstream relationships — treat it as weaker unless multiple implied analogs agree.
+  - Repeated direct analogs with relevant summaries is strong evidence.
+  - Implied-only evidence from a single analog is usually not enough; look for a pattern across
+    multiple analogs, or a clear functional bridge visible in the analog evidence lines.
+  - If the analog summaries describe work clearly unrelated to the current idea card, discount
+    the historical support even if the count is high.
 
   Decision policy:
-  - prioritize recall, especially for candidates with both semantic and historical support
-  - include historical-only candidates when there is a defensible business connection and the historical support is meaningfully strong
-  - do not over-penalize candidates with vocabulary mismatch when historical analogs are strong
-  - do not select candidates that are only loosely adjacent with weak support
+  - Prioritize recall, especially for candidates with both semantic and historical support.
+  - Include historical-only candidates when the analog evidence shows a defensible business
+    connection — base this on the analog content, not just the support count.
+  - Do not over-penalize vocabulary mismatch when analog summaries show functional overlap.
+  - Do not select when analog evidence is clearly from a different domain or the only support
+    is weak implied matches with unrelated summaries.
 
   Confidence guidance:
-  - 0.85-1.0: strong direct fit, or very strong combined semantic + historical support
-  - 0.65-0.84: meaningful but not perfect fit, or strong historical recovery
-  - 0.40-0.64: plausible but borderline
+  - 0.85-1.0: strong direct fit, or multiple direct analogs with clearly similar summaries
+  - 0.65-0.84: meaningful but not perfect fit, or strong historical recovery with related analogs
+  - 0.40-0.64: plausible but borderline; implied analogs with partial functional overlap
   - below 0.40: usually do not select
 
 user: |
@@ -31,17 +40,18 @@ user: |
 
   TASK:
   Select the value streams that are materially relevant to this idea card.
-  Evaluate every candidate.
-  A candidate can be selected because of semantic evidence, historical evidence, or both.
-  Historical-only candidates are valid when several similar tickets show the same business mapping.
-  Do not require exact wording overlap.
+  Evaluate every candidate using both semantic fit and the analog evidence provided.
+  For historical candidates, read the "Analog evidence" lines to judge whether similar
+  past tickets genuinely support this value stream for the current idea card.
+  Do not require exact wording overlap, but do require a defensible business connection.
 
   SELECTION RULES:
   - Favor candidates with both semantic and historical support.
-  - Treat repeated direct historical support as stronger than implied support.
-  - Historical-only candidates with multi-ticket support should be kept when the business connection is defensible.
-  - Weak one-off implied historical support is usually not enough.
-  - Reject only when the connection is not materially defensible.
+  - For historical-only candidates, the analog evidence lines are your primary signal —
+    judge them by whether the analog cards describe work similar to the current idea card.
+  - Repeated direct analogs are stronger than repeated implied analogs.
+  - Implied analogs are valid when multiple analogs agree and the functional bridge is clear.
+  - Reject when no analog evidence is relevant or the connection is not materially defensible.
 
   CANDIDATE VALUE STREAMS (evaluate every one):
 

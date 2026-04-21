@@ -79,18 +79,26 @@ def _build_prompt(query_for_prompt: str, candidates: List[dict]) -> str:
             lines.append(f"Semantic score: {float(row.get('semantic_score', 0.0) or 0.0):.4f}")
 
         if row.get("from_historical"):
+            direct_count = int(row.get("direct_count", 0) or 0)
+            implied_count = int(row.get("implied_count", 0) or 0)
             lines.append(
                 "Historical support: "
                 f"{int(row.get('support_count', 0) or 0)} tickets "
-                f"({int(row.get('direct_count', 0) or 0)} direct, "
-                f"{int(row.get('implied_count', 0) or 0)} implied), "
+                f"({direct_count} direct, {implied_count} implied), "
                 f"best similarity {float(row.get('best_support_score', 0.0) or 0.0):.4f}, "
                 f"average similarity {float(row.get('avg_support_score', 0.0) or 0.0):.4f}"
             )
 
             reasons = [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]
             if reasons:
-                lines.append("Historical examples: " + " | ".join(reasons[:2]))
+                # Show direct-tagged analogs first so the LLM sees the strongest
+                # evidence before implied ones.
+                direct_reasons = [r for r in reasons if "/ direct]" in r]
+                implied_reasons = [r for r in reasons if "/ implied]" in r]
+                ordered = (direct_reasons + implied_reasons)[:3]
+                lines.append("Analog evidence:")
+                for reason in ordered:
+                    lines.append(f"  - {reason}")
 
         blocks.append("\n".join(lines))
 

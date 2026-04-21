@@ -45,6 +45,11 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+try:
+    from rapidfuzz import fuzz
+except Exception:  # pragma: no cover - optional dependency
+    fuzz = None
+
 # -----------------------------------------------------------------------------
 # Constants
 # -----------------------------------------------------------------------------
@@ -271,6 +276,7 @@ def _layer0_filter(
 # -----------------------------------------------------------------------------
 
 def _layer1_score(survivors: list[dict], ticket_summary: str = "") -> list[dict]:
+    ticket_summary_norm = str(ticket_summary or "").lower()
     summary_words = {w for w in _simple_words(ticket_summary) if len(w) >= 4}
     stems: dict[str, list[str]] = {}
 
@@ -282,8 +288,9 @@ def _layer1_score(survivors: list[dict], ticket_summary: str = "") -> list[dict]
     scored: list[dict] = []
     for rank, att in enumerate(sorted_by_date):
         filename = att.get("filename", "")
+        display_text = str(att.get("display_text") or "")
         ext = att.get("ext", _ext_of(att))
-        name_lower = filename.lower()
+        name_lower = " ".join(part for part in (filename, display_text) if part).lower()
 
         score = 0
         reasons: list[str] = []
@@ -308,6 +315,13 @@ def _layer1_score(survivors: list[dict], ticket_summary: str = "") -> list[dict]
             pts = min(20, 5 * len(overlap))
             score += pts
             reasons.append(f"+{pts}: summary-overlap:({', '.join(sorted(list(overlap))[:4])})")
+
+        if ticket_summary_norm and fuzz is not None:
+            fuzzy_ratio = float(fuzz.token_set_ratio(ticket_summary_norm, name_lower))
+            if fuzzy_ratio >= 60:
+                pts = min(18, max(4, int(round((fuzzy_ratio - 55) / 3.0))))
+                score += pts
+                reasons.append(f"+{pts}: fuzzy-summary:({fuzzy_ratio:.0f})")
 
         if att.get("is_reporter_upload"):
             score += 8
@@ -423,6 +437,11 @@ def _layer3_extract_many(candidates: list[dict], download_fn: Callable[[dict], b
             confirmed = _confirm_is_idea_card(extracted)
             semantic_density = _semantic_density(extracted_text)
             likely_template = extracted.get("template_phrase_hits", 0) >= 2
+            att["word_count"] = word_count
+            att["business_signal_count"] = business_signal_count
+            att["confirmed"] = confirmed
+            att["semantic_density"] = semantic_density
+            att["likely_template"] = likely_template
 
             score_adj = 0
             if confirmed:

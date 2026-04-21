@@ -10,7 +10,7 @@ def merge_candidate_sources(
     semantic_candidates: List[dict],
     historical_support: List[dict],
     *,
-    max_llm_candidates: int = 16,
+    max_llm_candidates: int = 24,
     strong_support_count: int = 3,
     strong_support_score: float = 0.60,
     moderate_support_count: int = 2,
@@ -101,12 +101,7 @@ def merge_candidate_sources(
         row["historical_strength"] = _historical_strength(row)
 
     merged.sort(
-        key=lambda row: (
-            1 if row.get("from_semantic") else 0,
-            float(row.get("historical_strength", 0.0)),
-            float(row.get("semantic_score", 0.0)),
-            float(row.get("best_support_score", 0.0)),
-        ),
+        key=lambda row: _ranking_score(row),
         reverse=True,
     )
 
@@ -114,6 +109,10 @@ def merge_candidate_sources(
     llm_candidates: List[dict] = []
 
     for row in merged:
+        if _should_auto_include_merged(row, min_score=strong_support_score):
+            auto_selected.append(_to_selected_merged(row))
+            continue
+
         if _should_auto_include(
             row,
             support_count=strong_support_count,
@@ -131,10 +130,11 @@ def merge_candidate_sources(
 
     llm_candidates = llm_candidates[:max_llm_candidates]
     logger.info(
-        "[HIST-RAG] %d merged candidates -> %d auto, %d for LLM",
+        "[HIST-RAG] %d merged candidates -> %d auto-selected, %d for LLM (cap=%d)",
         len(merged),
         len(auto_selected),
         len(llm_candidates),
+        max_llm_candidates,
     )
 
     return {
@@ -157,6 +157,21 @@ def _historical_strength(row: dict) -> float:
     )
 
 
+def _ranking_score(row: dict) -> float:
+    """Blended rank score so strong historical-only candidates interleave with
+    weak semantic ones rather than always being pushed to the end of the list."""
+    semantic = float(row.get("semantic_score", 0.0) or 0.0)
+    hist = float(row.get("historical_strength", 0.0) or 0.0)
+    if row.get("from_semantic") and row.get("from_historical"):
+        # Merged: semantic dominates but historical adds a boost
+        return semantic + 0.25 * hist
+    if row.get("from_semantic"):
+        return semantic
+    # Historical-only: project onto same scale as semantic scores so a strong
+    # historical candidate (hist ~0.85) can outrank a weak semantic one (~0.50).
+    return 0.70 * hist
+
+
 def _label_source_adjustment(row: dict) -> float:
     sources = {str(value).strip() for value in (row.get("label_sources") or []) if str(value).strip()}
     if not sources:
@@ -171,17 +186,77 @@ def _label_source_adjustment(row: dict) -> float:
 def _should_auto_include(row: dict, *, support_count: int, min_score: float) -> bool:
     if row.get("from_semantic"):
         return False
-    if int(row.get("support_count", 0) or 0) < support_count:
+    if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
+        return False
+
+    direct_count = int(row.get("direct_count", 0) or 0)
+    total_count = int(row.get("support_count", 0) or 0)
+
+    # Direct-count shortcut: multiple direct-tagged analogs at good similarity
+    # bypasses weighted-count check because per-ticket weight is diluted when
+    # a ticket has many VS attached — the raw direct count is more reliable signal.
+    if direct_count >= 2 and total_count >= support_count:
+        return True
+
+    if total_count < support_count:
         return False
     if _weighted_support_value(row, "weighted_support_count", "support_count") < max(1.5, support_count * 0.45):
-        return False
-    if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
         return False
     return _weighted_support_value(row, "weighted_direct_count", "direct_count") >= _weighted_support_value(
         row,
         "weighted_implied_count",
         "implied_count",
     )
+
+
+def _should_auto_include_merged(row: dict, *, min_score: float) -> bool:
+    """Auto-select candidates with both strong semantic AND strong historical support.
+
+    These are the safest bets — two independent signals agree. Bypassing the LLM
+    cap prevents high-scoring merged candidates from being crowded out by false
+    positives that the LLM over-selects from semantic-only evidence.
+
+    Semantic score threshold of 1.0 targets reranker scores (range 0-3); plain
+    vector fallback scores top out at 1.0 so this path rarely fires on fallback,
+    which is acceptable since fallback retrieval is already degraded.
+    """
+    if not (row.get("from_semantic") and row.get("from_historical")):
+        return False
+    if float(row.get("semantic_score", 0.0) or 0.0) < 1.0:
+        return False
+    if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
+        return False
+    if int(row.get("support_count", 0) or 0) < 4:
+        return False
+    return True
+
+
+def _to_selected_merged(row: dict) -> dict:
+    semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
+    best_score = float(row.get("best_support_score", 0.0) or 0.0)
+    support_count = int(row.get("support_count", 0) or 0)
+    direct_count = int(row.get("direct_count", 0) or 0)
+    implied_count = int(row.get("implied_count", 0) or 0)
+    weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
+    confidence = min(0.95, 0.55 + 0.10 * min(semantic_score, 2.0) + 0.08 * min(weighted_support, 3.0))
+
+    reason = (
+        f"Strong semantic match (score {semantic_score:.3f}) confirmed by "
+        f"{support_count} historical tickets ({direct_count} direct, {implied_count} implied; "
+        f"best similarity {best_score:.3f})."
+    )
+    example_reasons = [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]
+    if example_reasons:
+        reason += f" Example: {example_reasons[0]}"
+
+    return {
+        "entity_id": str(row.get("entity_id") or "").strip(),
+        "entity_name": str(row.get("entity_name") or "").strip(),
+        "confidence": round(confidence, 4),
+        "reason": reason,
+        "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
+        "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
+    }
 
 
 def _should_send_to_llm(row: dict, *, support_count: int, min_score: float) -> bool:

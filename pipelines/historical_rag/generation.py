@@ -57,7 +57,7 @@ def generate_value_streams(
 def _build_system_prompt() -> str:
     return build_historical_selection_system_prompt(
         min_select=6,
-        max_select=12,
+        max_select=15,
     )
 
 

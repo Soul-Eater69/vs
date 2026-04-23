@@ -62,21 +62,19 @@ _ISSUELINK_PROPERTY_KEYS = (
     "issueLinksMetaData",
 )
 
-_TICKET_QUERY = f"""
-MATCH (t:JIRA {{key: $ticket_key}})
-WITH
-    t,
-    [k IN coalesce(t.{_GROUP_LINK_ARRAY_FIELD}, []) WHERE k STARTS WITH $group_key_prefix] AS candidate_group_keys
-UNWIND CASE
-    WHEN size(candidate_group_keys) = 0 THEN [NULL]
-    ELSE candidate_group_keys
-END AS group_key
-OPTIONAL MATCH (g:JIRA {{key: group_key}})
-WHERE g.issueType = $theme_issue_type
-RETURN
-    t AS ticket_node,
-    collect(DISTINCT g) AS theme_nodes
+_TICKET_QUERY = """
+MATCH (t:JIRA)
+WHERE toUpper(trim(toString(t.key))) = toUpper(trim($ticket_key))
+RETURN t AS ticket_node
 LIMIT 1
+"""
+
+_THEMES_QUERY = """
+MATCH (g:JIRA)
+WHERE g.key IN $group_keys
+  AND g.issueType = $theme_issue_type
+RETURN g AS theme_node
+ORDER BY g.key
 """
 
 
@@ -199,8 +197,6 @@ class Neo4jTicketClient(TicketFetcher):
                 _TICKET_QUERY,
                 {
                     "ticket_key": ticket_id,
-                    "theme_issue_type": self.theme_issue_type,
-                    "group_key_prefix": self.group_key_prefix,
                 },
             ).single()
 
@@ -211,15 +207,35 @@ class Neo4jTicketClient(TicketFetcher):
         if ticket_node is None:
             return None
 
-        theme_nodes = [
-            dict(node)
-            for node in (row.get("theme_nodes") or [])
-            if node is not None
-        ]
+        ticket_payload = dict(ticket_node)
+        group_keys = _extract_group_keys(
+            ticket_payload.get(_GROUP_LINK_ARRAY_FIELD),
+            group_key_prefix=self.group_key_prefix,
+        )
+        theme_nodes = self._query_theme_nodes_sync(group_keys) if group_keys else []
         return {
-            "ticket_node": dict(ticket_node),
+            "ticket_node": ticket_payload,
             "theme_nodes": theme_nodes,
         }
+
+    def _query_theme_nodes_sync(self, group_keys: list[str]) -> list[dict[str, Any]]:
+        assert self._driver is not None
+        if not group_keys:
+            return []
+
+        with self._driver.session(database=self.database) as session:
+            rows = session.run(
+                _THEMES_QUERY,
+                {
+                    "group_keys": group_keys,
+                    "theme_issue_type": self.theme_issue_type,
+                },
+            )
+            return [
+                dict(row["theme_node"])
+                for row in rows
+                if row.get("theme_node") is not None
+            ]
 
 
 def _build_ticket_payload(
@@ -625,6 +641,19 @@ def _normalize_theme_nodes(theme_nodes: list[dict[str, Any]]) -> list[dict[str, 
     return themes
 
 
+def _extract_group_keys(value: Any, *, group_key_prefix: str) -> list[str]:
+    prefix = str(group_key_prefix or "").strip().upper()
+    keys = []
+    for item in _normalize_string_list(value):
+        candidate = str(item or "").strip()
+        if not candidate:
+            continue
+        if prefix and not candidate.upper().startswith(prefix):
+            continue
+        keys.append(candidate)
+    return _unique_keep_order(keys)
+
+
 def _normalize_issue_ref(value: Any) -> dict[str, Any] | None:
     value = _normalize_graph_value(value)
     if not value:
@@ -712,4 +741,3 @@ def _unique_keep_order(values: Iterable[str]) -> list[str]:
         seen.add(key)
         out.append(cleaned)
     return out
-

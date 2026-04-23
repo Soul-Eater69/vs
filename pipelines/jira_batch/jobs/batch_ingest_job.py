@@ -8,14 +8,14 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from ....jira import JiraValueStreamClient
+from ....jira import build_ticket_fetcher
 from ..runtime.runtime_factory import (
     build_ingestion_config,
     try_build_llm,
     try_build_embedding_client,
 )
 from ....ingestion.service import IngestionDeps
-from ....config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, JIRA_BASE_URL, JIRA_TOKEN
+from ....config import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -86,7 +86,7 @@ async def process_ticket(
                 chunks = None
             return summary, chunks
 
-    # --- Fetch once from Jira ---
+    # --- Fetch once from the selected source ---
     ticket_data = await deps.jira_client.get_ticket_data(
         ticket_id,
         config=cfg,
@@ -147,6 +147,7 @@ async def process_ticket(
 async def run_batch(
     tickets: list[str],
     *,
+    source: str,
     output_dir: Path,
     force_reprocess: bool,
     max_concurrent: int,
@@ -179,9 +180,8 @@ async def run_batch(
 
     sem = asyncio.Semaphore(max_concurrent)
 
-    async with JiraValueStreamClient(
-        base_url=JIRA_BASE_URL,
-        token=JIRA_TOKEN,
+    async with build_ticket_fetcher(
+        source=source,
         verify_ssl=VERIFY_SSL,
     ) as jira_client:
         deps = IngestionDeps(
@@ -275,7 +275,7 @@ async def run_batch(
 
 async def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Batch ingest Jira tickets — summary index (B), chunk index (C), or both.",
+        description="Batch ingest tickets — summary index (B), chunk index (C), or both.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -305,6 +305,12 @@ Examples:
         default="both",
         help="Which pipeline to run (default: both).",
     )
+    parser.add_argument(
+        "--source",
+        choices=["jira", "neo4j"],
+        default=os.environ.get("INGESTION_TICKET_SOURCE", "jira"),
+        help="Ticket source backend (default: %(default)s).",
+    )
 
     force_grp = parser.add_mutually_exclusive_group()
     force_grp.add_argument(
@@ -332,7 +338,7 @@ Examples:
         type=int,
         default=MAX_CONCURRENT,
         metavar="N",
-        help=f"Max concurrent Jira fetches (default: {MAX_CONCURRENT}).",
+        help=f"Max concurrent ticket fetches (default: {MAX_CONCURRENT}).",
     )
     parser.add_argument(
         "--no-llm",
@@ -365,6 +371,7 @@ Examples:
 
     await run_batch(
         tickets,
+        source=args.source,
         output_dir=Path(args.output_dir),
         force_reprocess=args.force_reprocess,
         max_concurrent=args.concurrency,

@@ -1,13 +1,13 @@
 """
-Jira-backed ticket extraction for the historical pipeline.
+Ticket extraction for the historical pipeline.
 
-Fetches live ticket data through the jira client and assembles
+Fetches live ticket data through a source client (Jira or Neo4j) and assembles
 lightweight text representations without running the full ingestion pipeline.
 
 Produces RawTicket records with:
   - raw_text (retrieval text from description + attachments + comments)
   - description (cleaned description)
-  - value_stream_labels (canonical VS names from issue links)
+  - value_stream_labels (canonical VS names from linked Themes / issue links)
 """
 
 from __future__ import annotations
@@ -24,7 +24,10 @@ from ...jira.text.text_assembly import (
 from .models import RawTicket
 
 logger = logging.getLogger(__name__)
-EXTRACTION_SOURCE = "jira_direct"
+_EXTRACTION_SOURCE_BY_TICKET_SOURCE = {
+    "jira": "jira_direct",
+    "neo4j": "neo4j_graph",
+}
 
 
 def _normalize_ticket_ids(ticket_ids: Iterable[object]) -> List[str]:
@@ -61,8 +64,9 @@ def _project_raw_ticket(
     ticket_id: str,
     ticket_data: Dict[str, Any],
     attachment_texts: Optional[List[str]] = None,
+    extraction_source: str = "jira_direct",
 ) -> RawTicket:
-    """Project Jira ticket data into a RawTicket for enrichment."""
+    """Project a normalized source ticket into a RawTicket for enrichment."""
     fields = ticket_data.get("fields", {}) or {}
 
     # Clean description (handles ADF dicts and wiki markup strings)
@@ -91,20 +95,21 @@ def _project_raw_ticket(
         raw_text=raw_text,
         description=description,
         value_stream_labels=vs_labels,
-        extraction_source=EXTRACTION_SOURCE,
+        extraction_source=extraction_source,
         char_count=len(raw_text),
     )
 
 
 async def _extract_ticket(
     ticket_id: str,
-    jira_client: Any,
+    ticket_client: Any,
     config: Any = None,
     extract_attachments: bool = True,
+    extraction_source: str = "jira_direct",
 ) -> Optional[RawTicket]:
     """Fetch and extract a single ticket."""
     try:
-        ticket_data = await jira_client.get_ticket_data(ticket_id, config=config)
+        ticket_data = await ticket_client.get_ticket_data(ticket_id, config=config)
 
         # Extract attachment text if requested and client supports it
         attachment_texts: List[str] = []
@@ -112,7 +117,7 @@ async def _extract_ticket(
             attachments = ticket_data.get("attachments", []) or []
             if attachments:
                 try:
-                    contents = await jira_client.fetch_attachment_content(attachments)
+                    contents = await ticket_client.fetch_attachment_content(attachments)
                     attachment_texts = [
                         c["text_content"]
                         for c in contents
@@ -125,37 +130,71 @@ async def _extract_ticket(
             ticket_id=ticket_id,
             ticket_data=ticket_data,
             attachment_texts=attachment_texts,
+            extraction_source=extraction_source,
         )
     except Exception as exc:
         logger.error("[EXTRACT] Failed for %s: %s", ticket_id, exc)
         return None
 
 
-async def _fetch_tickets_from_jira(
+async def _fetch_tickets_from_source(
     ticket_ids: List[str],
-    base_url: str,
-    token: str,
+    ticket_source: str,
     sharepoint_client: Any = None,
     extract_attachments: bool = True,
 ) -> List[RawTicket]:
-    from jira.ticket_client import JiraTicketClient
+    from ...jira import build_ticket_fetcher, normalize_ticket_source
+
+    resolved_source = normalize_ticket_source(ticket_source)
+    extraction_source = _EXTRACTION_SOURCE_BY_TICKET_SOURCE.get(
+        resolved_source,
+        f"{resolved_source}_graph",
+    )
 
     results: List[RawTicket] = []
-    async with JiraTicketClient(
-        base_url=base_url,
-        token=token,
+    async with build_ticket_fetcher(
+        source=resolved_source,
         verify_ssl=False,
         sharepoint_client=sharepoint_client,
-    ) as jira_client:
+    ) as ticket_client:
         for ticket_id in ticket_ids:
             ticket = await _extract_ticket(
                 ticket_id=ticket_id,
-                jira_client=jira_client,
+                ticket_client=ticket_client,
                 extract_attachments=extract_attachments,
+                extraction_source=extraction_source,
             )
             if ticket:
                 results.append(ticket)
     return results
+
+
+def fetch_tickets(
+    ticket_ids: List[str],
+    ticket_source: str = "jira",
+    sharepoint_client: Any = None,
+    extract_attachments: bool = True,
+) -> List[RawTicket]:
+    """Fetch tickets from the configured source and project them into RawTickets.
+
+    Args:
+        ticket_ids: Ticket keys to fetch.
+        ticket_source: Source backend to use: ``jira`` or ``neo4j``.
+        sharepoint_client: Optional SharePointClient for attachments hosted on SharePoint.
+        extract_attachments: Whether to download and extract attachment text (default True).
+    """
+    if not ticket_ids:
+        raise ValueError("ticket_ids are required for historical ingestion")
+
+    normalized_ids = _normalize_ticket_ids(ticket_ids)
+    return asyncio.run(
+        _fetch_tickets_from_source(
+            normalized_ids,
+            ticket_source=ticket_source,
+            sharepoint_client=sharepoint_client,
+            extract_attachments=extract_attachments,
+        )
+    )
 
 
 def fetch_tickets_from_jira(
@@ -163,27 +202,24 @@ def fetch_tickets_from_jira(
     sharepoint_client: Any = None,
     extract_attachments: bool = True,
 ) -> List[RawTicket]:
-    """Fetch tickets from Jira and project them into RawTicket records.
+    """Backward-compatible Jira-specific wrapper."""
+    return fetch_tickets(
+        ticket_ids=ticket_ids,
+        ticket_source="jira",
+        sharepoint_client=sharepoint_client,
+        extract_attachments=extract_attachments,
+    )
 
-    Args:
-        ticket_ids: Jira ticket keys to fetch.
-        sharepoint_client: Optional SharePointClient for attachments hosted on SharePoint.
-        extract_attachments: Whether to download and extract attachment text (default True).
-    """
-    from config import JIRA_BASE_URL, JIRA_TOKEN
 
-    if not ticket_ids:
-        raise ValueError("ticket_ids are required for historical ingestion")
-    if not JIRA_BASE_URL or not JIRA_TOKEN:
-        raise RuntimeError("JIRA_BASE_URL and JIRA_TOKEN must be set")
-
-    normalized_ids = _normalize_ticket_ids(ticket_ids)
-    return asyncio.run(
-        _fetch_tickets_from_jira(
-            normalized_ids,
-            JIRA_BASE_URL,
-            JIRA_TOKEN,
-            sharepoint_client=sharepoint_client,
-            extract_attachments=extract_attachments,
-        )
+def fetch_tickets_from_neo4j(
+    ticket_ids: List[str],
+    sharepoint_client: Any = None,
+    extract_attachments: bool = True,
+) -> List[RawTicket]:
+    """Neo4j-specific wrapper using the notebook-backed graph model."""
+    return fetch_tickets(
+        ticket_ids=ticket_ids,
+        ticket_source="neo4j",
+        sharepoint_client=sharepoint_client,
+        extract_attachments=extract_attachments,
     )

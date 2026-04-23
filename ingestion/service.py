@@ -24,9 +24,9 @@ async def ingest_single_ticket(
     storage_dir: Optional[str] = None,
     mode: IngestionMode = "summary",
 ) -> IngestionResult:
-    from jira import JiraTicketExtractionService
+    from jira import TicketExtractionService
 
-    extraction_service = JiraTicketExtractionService(jira_client=deps.jira_client)
+    extraction_service = TicketExtractionService(ticket_client=deps.jira_client)
     ticket_data = await extraction_service.extract_ticket(ticket_id, cfg)
 
     if not isinstance(ticket_data, dict):

@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import pathlib
 from typing import List, Optional
 
 from .ingestion import enrich_batch, load_json, save_json, upload_to_index
 from .ingestion.enrichment import ENRICHMENT_MODEL
 from .ingestion.store import DEFAULT_STORE_PATH
-from .extractor import fetch_tickets_from_jira
+from .extractor import fetch_tickets
 from .models import EnrichedTicket
 
 logger = logging.getLogger(__name__)
@@ -47,15 +48,16 @@ def run_historical_ingestion(
     incremental: bool = False,
     upload: bool = False,
     index_name: Optional[str] = None,
+    ticket_source: str = "jira",
 ) -> List[EnrichedTicket]:
     """Run the full pipeline: extract -> enrich -> store."""
     out_path = pathlib.Path(output_path)
     if not any(str(ticket_id).strip() for ticket_id in ticket_ids):
-        raise ValueError("ticket_ids are required; historical ingestion now always fetches via Jira")
+        raise ValueError("ticket_ids are required for historical ingestion")
 
     # --- Extract ---
-    logger.info("[PIPELINE] Extracting tickets from Jira")
-    raw_tickets = fetch_tickets_from_jira(ticket_ids=ticket_ids)
+    logger.info("[PIPELINE] Extracting tickets from %s", ticket_source)
+    raw_tickets = fetch_tickets(ticket_ids=ticket_ids, ticket_source=ticket_source)
     logger.info("[PIPELINE] Extracted %d tickets", len(raw_tickets))
 
     # --- Filter already-enriched ---
@@ -106,6 +108,12 @@ Examples:
     parser.add_argument("--incremental", action="store_true", help="Skip already-enriched tickets")
     parser.add_argument("--upload", action="store_true", help="Upload to Azure Search")
     parser.add_argument("--index-name", default=None, help="Azure Search index name")
+    parser.add_argument(
+        "--source",
+        choices=["jira", "neo4j"],
+        default=os.environ.get("INGESTION_TICKET_SOURCE", "jira"),
+        help="Ticket source backend (default: %(default)s).",
+    )
 
     args = parser.parse_args()
 
@@ -116,6 +124,7 @@ Examples:
         incremental=args.incremental,
         upload=args.upload,
         index_name=args.index_name,
+        ticket_source=args.source,
     )
 
 

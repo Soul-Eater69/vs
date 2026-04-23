@@ -14,10 +14,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import pathlib
 import sys
 
-from ...historical.extractor import fetch_tickets_from_jira
+from ...historical.extractor import fetch_tickets
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,17 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser(
-        description="Extract Jira tickets to jira_extraction/<TICKET-ID>.json",
+        description="Extract tickets to jira_extraction/<TICKET-ID>.json",
     )
-    parser.add_argument("tickets", nargs="+", help="Jira ticket IDs (e.g. IDMT-19761)")
+    parser.add_argument("tickets", nargs="+", help="Ticket IDs (e.g. IDMT-19761)")
     parser.add_argument("--no-attachments", action="store_true", help="Skip attachment extraction")
     parser.add_argument("--output-dir", type=pathlib.Path, default=OUTPUT_DIR, help="Output directory")
+    parser.add_argument(
+        "--source",
+        choices=["jira", "neo4j"],
+        default=os.environ.get("INGESTION_TICKET_SOURCE", "jira"),
+        help="Ticket source backend (default: %(default)s).",
+    )
 
     args = parser.parse_args()
     out_dir: pathlib.Path = args.output_dir
@@ -43,8 +50,9 @@ def main() -> None:
 
     logger.info("Extracting %d ticket(s) -> %s/", len(args.tickets), out_dir)
 
-    raw_tickets = fetch_tickets_from_jira(
+    raw_tickets = fetch_tickets(
         ticket_ids=args.tickets,
+        ticket_source=args.source,
         extract_attachments=not args.no_attachments,
     )
 

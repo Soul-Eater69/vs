@@ -21,7 +21,8 @@
       "Bash(py -3 -c \"import ast, pathlib; [ast.parse\\(pathlib.Path\\(p\\).read_text\\(encoding='utf-8'\\), filename=p\\) for p in ['ingestion/summary_pipeline.py', 'ingestion/chunk_pipeline.py', 'jira/value_stream/theme_extraction.py']]; print\\('OK'\\)\")",
       "Bash(ls d:/projects/vs/*.py)",
       "Bash(find \"d:/projects/vs\" -type f -name \"*.py\" ! -path \"*/rag-summary/*\" -exec grep -l \"^import \\\\\\(clients\\\\|config\\\\|constants\\\\|content\\\\|ingestion\\\\|jira\\\\|pipelines\\\\|processing\\\\|prompts\\\\|sinks\\\\|text\\\\\\)\" {} \\\\;)",
-      "Bash(find \"d:/projects/vs\" -type f -name \"*.py\" ! -path \"*/rag-summary/*\" -exec grep -n \"^import \\\\\\(clients\\\\|config\\\\|constants\\\\|content\\\\|ingestion\\\\|jira\\\\|pipelines\\\\|processing\\\\|prompts\\\\|sinks\\\\|text\\\\\\)\" {} +)"
+      "Bash(find \"d:/projects/vs\" -type f -name \"*.py\" ! -path \"*/rag-summary/*\" -exec grep -n \"^import \\\\\\(clients\\\\|config\\\\|constants\\\\|content\\\\|ingestion\\\\|jira\\\\|pipelines\\\\|processing\\\\|prompts\\\\|sinks\\\\|text\\\\\\)\" {} +)",
+      "Bash(py -c ' *)"
     ]
   }
 }

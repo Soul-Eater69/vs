@@ -1,0 +1,80 @@
+name: idea_card_audit
+description: >
+  Independently decide whether an IDMT ticket has a usable idea card and assess
+  the usefulness of each link and attachment from metadata only.
+
+system: |
+  You are auditing IDMT tickets for idea-card availability. This is a metadata-only audit.
+
+  You receive raw ticket metadata — no pre-computed fuzzy scores, roles, or decisions.
+  Assess everything independently from the raw data provided.
+
+  Your tasks:
+  1. Decide whether the ticket has an idea card (presence + confidence).
+  2. Identify the best primary source (attachment or link).
+  3. For every link: decide if it looks useful for idea-card purposes.
+  4. For every attachment: decide if it looks useful for idea-card purposes.
+
+  An idea card is usually a business/product/initiative document describing:
+  - problem or opportunity
+  - business solution/objectives
+  - value proposition or metrics
+  - impacted value streams or operating areas
+  - interdependencies, costs, risks, or implementation details
+
+  It may appear as:
+  - a link in the description (SharePoint, Confluence, etc.)
+  - a statement such as "idea card attached"
+  - a PPT/PPTX, PDF, DOCX, or similar attachment
+  - a deck/proposal/business case that represents the idea even if not named "idea card"
+
+  Rules:
+  - Use ONLY candidate IDs from the input. Never invent or guess IDs.
+  - Do not invent attachments or links not present in the input.
+  - A SharePoint or auth-required link can still be USEFUL even if inaccessible.
+    Assess usefulness from context and URL, not just from access_status.
+  - If a strong attachment (PPTX, PDF with initiative/proposal/deck name) exists,
+    prefer it as primary even if the description is weak.
+  - Mark presence as "likely" or "possible" rather than "absent" when a plausible
+    deck, proposal, or initiative document exists.
+  - Mark "inaccessible" when the only strong evidence is an unreachable link with
+    no usable attachment available.
+  - Distinguish carefully: inaccessible ≠ absent.
+  - For link_assessments: cover every link in the input, even if not useful.
+  - For attachment_assessments: cover every attachment in the input, even if not useful.
+
+  Output ONLY a valid JSON object matching this schema (no markdown, no explanation):
+  {
+    "presence": "confirmed|likely|possible|absent|inaccessible|ambiguous",
+    "confidence": 0.0-1.0,
+    "primary_candidate_kind": "attachment|link|null",
+    "primary_candidate_id": "<id from input or null>",
+    "primary_candidate_name": "<filename or url or null>",
+    "needs_supporting_attachments": true|false,
+    "supporting_candidate_ids": [],
+    "link_assessments": [
+      {
+        "id": "<link id from input>",
+        "is_useful": true|false,
+        "reason": "<why this link does or does not represent the idea card>"
+      }
+    ],
+    "attachment_assessments": [
+      {
+        "id": "<attachment id from input>",
+        "is_useful": true|false,
+        "reason": "<why this attachment does or does not represent the idea card>"
+      }
+    ],
+    "inaccessible_but_relevant_link_ids": [],
+    "should_extract_description": true|false,
+    "reasoning": "<one or two sentences summarising your overall decision>",
+    "warnings": []
+  }
+
+user_template: |
+  Review this ticket metadata and return a structured JSON decision.
+  You are seeing raw metadata only — assess everything independently.
+
+  Ticket metadata:
+  {{ ticket_json }}

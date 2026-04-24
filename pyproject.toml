@@ -7,6 +7,26 @@ name = "vs_app"
 version = "0.1.0"
 description = "VS application: ingestion, RAG, and impact-analysis modules."
 requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic>=2",
+    "python-dotenv",
+    "httpx",
+    "neo4j",
+    "requests",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+llm = [
+    "langchain-openai",
+    "langchain-core",
+    "openai",
+]
+dev = [
+    "pytest",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

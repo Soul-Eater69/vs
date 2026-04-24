@@ -14,5 +14,5 @@ class TicketExtractionService:
             raise ValueError("A ticket client is required")
 
     async def extract_ticket(self, ticket_id: str, cfg: Any) -> dict:
-        from ..adapters.jira.fetch_compat import get_ticket_data_compat
+        from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
         return await get_ticket_data_compat(self._ticket_client, ticket_id, config=cfg)

@@ -137,7 +137,7 @@ async def _from_description_links(
     *,
     links: Optional[list[dict]] = None,
 ) -> IdeaCard:
-    from ...adapters.jira.attachments.description_links import extract_description_link_attachments
+    from vs_app.integrations.files.description_links import extract_description_link_attachments
 
     links = list(links or extract_description_link_attachments(description))
     if not links:

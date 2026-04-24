@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from ..content.retrieval_summary import format_structured_summary_text
 
-from ...adapters.jira.fetch_compat import get_ticket_data_compat
+from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
 from ...adapters.embeddings import embed_batch
 from ...domain.tickets.documents import TicketSummaryDocument
 

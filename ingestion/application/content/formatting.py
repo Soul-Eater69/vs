@@ -19,7 +19,7 @@ def extract_description_text(raw_description: Any) -> str:
     if not raw_description:
         return ""
     if isinstance(raw_description, (dict, list)):
-        from ...adapters.jira.text.text_processing import extract_adf_text
+        from vs_app.modules.tickets.text_processing import extract_adf_text
         return extract_adf_text(raw_description) or ""
     return str(raw_description).strip()
 
@@ -29,7 +29,7 @@ def extract_substantive_comments(comment_field: dict, max_comments: int = 3) -> 
     Return the top N substantive human comments.
     Strips bot noise and chatter.
     """
-    from ...adapters.jira.text.text_processing import extract_comment_texts
+    from vs_app.modules.tickets.text_processing import extract_comment_texts
 
     comments_data = comment_field if isinstance(comment_field, dict) else {}
     return extract_comment_texts(comments_data, max_comments=max_comments)
@@ -48,6 +48,6 @@ def clean_text(text: str) -> str:
 
 def _adf_or_str(value: Any) -> str:
     if isinstance(value, (dict, list)):
-        from ...adapters.jira.text.text_processing import extract_adf_text
+        from vs_app.modules.tickets.text_processing import extract_adf_text
         return extract_adf_text(value) or ""
     return str(value or "").strip()

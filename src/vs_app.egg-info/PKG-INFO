@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: vs_app
+Version: 0.1.0
+Summary: VS application: ingestion, RAG, and impact-analysis modules.
+Requires-Python: >=3.11

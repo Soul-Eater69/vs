@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ingestion.domain.tickets.documents import ChunkDocument
+from vs_app.modules.tickets.documents import ChunkDocument
 
 from ..chunks.hierarchy import find_parent_uid, section_start
 from ..chunks.mapper import build_chunk_provenance

@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Optional
 
-from ingestion.application.content.retrieval_summary import (
+from vs_app.modules.rag.query.retrieval_summary import (
     build_structured_summary_prompt,
     format_structured_summary_text,
     parse_structured_summary_payload,

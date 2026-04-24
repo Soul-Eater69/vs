@@ -171,7 +171,7 @@ def _strip_api_metadata(ticket: dict) -> dict:
 
 def _build_ingestion_config() -> Any:
     try:
-        from pipelines.jira_batch.config import JiraIngestionConfig
+        from vs_app.jobs.jira_batch.config import JiraIngestionConfig
 
         return JiraIngestionConfig()
     except Exception as exc:

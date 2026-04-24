@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional, Union
 
-from ingestion.domain.tickets.documents import HierarchicalTicketResult, TicketSummaryDocument
+from vs_app.modules.tickets.documents import HierarchicalTicketResult, TicketSummaryDocument
 
 from .modes import IngestionMode
 from .service import TicketExtractionService

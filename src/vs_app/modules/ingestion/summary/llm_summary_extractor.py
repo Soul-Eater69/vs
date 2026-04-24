@@ -6,8 +6,8 @@ import logging
 import re
 from typing import Any
 
-from ingestion.adapters.llm import complete_text
-from ingestion.domain.tickets.documents import TicketSummaryDocument
+from vs_app.integrations.llm.client import complete_text
+from vs_app.modules.tickets.documents import TicketSummaryDocument
 
 from .mapper import coerce_key_terms, parse_structured_summary_payload
 from .prompt_builder import (

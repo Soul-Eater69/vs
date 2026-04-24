@@ -5,7 +5,8 @@ from .models import (
     TicketComment,
     ValueStreamLabel,
 )
-from .sources import TicketSource
+from .documents import ChunkDocument, HierarchicalTicketResult, TicketSummaryDocument
+from .sources import TicketFetcher, TicketSource
 from .text_assembly import build_retrieval_text
 from .text_processing import (
     classify_description,
@@ -21,8 +22,12 @@ from .text_processing import (
 __all__ = [
     "LinkedTheme",
     "NormalizedTicket",
+    "ChunkDocument",
+    "HierarchicalTicketResult",
     "TicketAttachment",
     "TicketComment",
+    "TicketFetcher",
+    "TicketSummaryDocument",
     "TicketSource",
     "ValueStreamLabel",
     "build_retrieval_text",

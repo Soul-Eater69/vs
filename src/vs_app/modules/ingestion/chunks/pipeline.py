@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ingestion.adapters.embeddings import embed_batch
-from ingestion.domain.tickets.documents import HierarchicalTicketResult
+from vs_app.integrations.embeddings.client import embed_batch
+from vs_app.modules.tickets.documents import HierarchicalTicketResult
 from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
 
 from .chunk_builder import build_from_attachments, build_from_ticket_body
@@ -107,7 +107,7 @@ def _embed_chunks(docs: list, embedding_client: Any, cfg: Any) -> None:
 def _default_cfg(cfg: Optional[Any]) -> Any:
     if cfg is not None:
         return cfg
-    from pipelines.jira_batch.config import JiraIngestionConfig
+    from vs_app.jobs.jira_batch.config import JiraIngestionConfig
 
     return JiraIngestionConfig()
 

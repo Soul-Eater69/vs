@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ingestion.adapters.embeddings import embed_batch
-from ingestion.domain.tickets.documents import TicketSummaryDocument
+from vs_app.integrations.embeddings.client import embed_batch
+from vs_app.modules.tickets.documents import TicketSummaryDocument
 from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
 
 from .heuristic_summary import build_heuristic_summary
@@ -109,7 +109,7 @@ def _embed(text: str, embedding_client: Any, cfg: Any) -> list[float]:
 def _default_cfg(cfg: Optional[Any]) -> Any:
     if cfg is not None:
         return cfg
-    from pipelines.jira_batch.config import JiraIngestionConfig
+    from vs_app.jobs.jira_batch.config import JiraIngestionConfig
 
     return JiraIngestionConfig()
 

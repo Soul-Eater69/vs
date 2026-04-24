@@ -12,11 +12,11 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from ingestion.ports.ticket_source import TicketFetcher
 from vs_app.integrations.files.attachment_extraction import (
     download_attachment,
     fetch_attachment_content,
 )
+from vs_app.modules.tickets.sources import TicketFetcher
 from vs_app.integrations.files.description_links import extract_description_link_attachments
 
 from .mapper import build_ticket_payload

@@ -6,8 +6,8 @@ import logging
 import re
 from typing import Any, Optional
 
-from ingestion.adapters.llm import complete_text
-from ingestion.domain.tickets.documents import ChunkDocument
+from vs_app.integrations.llm.client import complete_text
+from vs_app.modules.tickets.documents import ChunkDocument
 from vs_app.modules.tickets.text_formatting import (
     clean_text,
     extract_description_text,

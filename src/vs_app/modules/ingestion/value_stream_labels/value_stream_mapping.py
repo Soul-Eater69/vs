@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-from ingestion.application.prompts import (
+from vs_app.modules.prompts.loader import (
     build_jira_value_stream_verifier_prompt,
     build_jira_value_stream_verifier_system_prompt,
 )

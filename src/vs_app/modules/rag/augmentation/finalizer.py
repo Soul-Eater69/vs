@@ -33,7 +33,7 @@ def generate_value_streams(
     )
     system_prompt = build_system_prompt()
 
-    from ingestion.application.prompts import SelectionResult
+    from vs_app.modules.prompts.loader import SelectionResult
 
     result = gen_svc.generate_structured(
         query=prompt,

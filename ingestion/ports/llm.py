@@ -1,19 +1,3 @@
-"""Port: LLM text completion contract."""
+"""Backward-compat shim. Canonical: vs_app.integrations.llm.ports."""
 
-from __future__ import annotations
-
-from typing import Protocol
-
-
-class LLMClient(Protocol):
-    """Structural protocol for any LLM completion client."""
-
-    def complete(
-        self,
-        prompt: str,
-        *,
-        model: str | None = None,
-        max_output_tokens: int = 1200,
-        temperature: float = 0.2,
-        system_prompt: str | None = None,
-    ) -> str: ...
+from vs_app.integrations.llm.ports import *  # noqa: F401,F403

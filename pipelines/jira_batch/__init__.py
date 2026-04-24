@@ -32,7 +32,7 @@ are written automatically to `<storage_dir>/debug/<ticket_key>/`:
     05_debug_report.json        - compact summary of all pipeline decisions
 """
 
-from ...ingestion import (
+from ingestion import (
     IngestionDeps,
     TicketIngestionContext,
     ingest_one_ticket,
@@ -40,7 +40,7 @@ from ...ingestion import (
     ingest_ticket,
     ingest_ticket_payload,
 )
-from ...ingestion.adapters.jira import JiraTicketClient
+from ingestion.adapters.jira import JiraTicketClient
 from .config import JiraIngestionConfig
 from .models import (
     ChunkRecord,
@@ -49,7 +49,12 @@ from .models import (
     TicketInput,
     TriageArtifact,
 )
-from .runtime.runtime_factory import build_ingestion_config
+
+
+def build_ingestion_config(*args, **kwargs):
+    from .runtime.runtime_factory import build_ingestion_config as _impl
+
+    return _impl(*args, **kwargs)
 
 __all__ = [
     # Framework layer

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from ingestion.application.prompts import (
+from vs_app.modules.prompts.loader import (
     build_historical_enrichment_prompt,
     build_historical_enrichment_system_prompt,
 )

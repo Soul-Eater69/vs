@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ingestion.domain.tickets.documents import TicketSummaryDocument
+from vs_app.modules.tickets.documents import TicketSummaryDocument
 
 
 def build_heuristic_summary(

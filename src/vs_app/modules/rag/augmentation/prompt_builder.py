@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from ingestion.application.prompts import (
+from vs_app.modules.prompts.loader import (
     build_historical_selection_prompt,
     build_historical_selection_system_prompt,
 )

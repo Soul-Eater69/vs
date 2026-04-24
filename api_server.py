@@ -1,10 +1,5 @@
-"""
-FastAPI backend for the Value Stream Explorer UI.
+"""Compatibility entrypoint for the canonical VS FastAPI app."""
 
-Run with:
-    uvicorn api_server:app --reload --port 8000
-"""
-
-from api.app import app
+from vs_app.main import app
 
 __all__ = ["app"]

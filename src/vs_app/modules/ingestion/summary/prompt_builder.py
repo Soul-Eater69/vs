@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ingestion.application.prompts import (
+from vs_app.modules.prompts.loader import (
     build_value_stream_classification_prompt,
     load_prompt_yaml,
     render_prompt,

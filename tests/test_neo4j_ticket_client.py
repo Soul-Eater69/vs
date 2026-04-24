@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from jira.neo4j_ticket_client import Neo4jTicketClient
+from ingestion.adapters.neo4j.ticket_client import Neo4jTicketClient
 
 
 def test_get_ticket_data_normalizes_graph_ticket_payload() -> None:

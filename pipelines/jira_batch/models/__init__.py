@@ -46,7 +46,7 @@ class AttachmentMeta(TypedDict, total=False):
 
 class TicketInput(TypedDict, total=False):
     """
-    Output of JiraValueStreamClient.get_ticket_data().
+    Output of JiraTicketClient.get_ticket_data().
     The pipeline expects exactly this shape - see pipeline.py.
     """
     key: Required[str]

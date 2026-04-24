@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ...jira import JiraValueStreamClient
+from ...ingestion.adapters.jira import JiraTicketClient
 from .runtime.runtime_factory import try_build_llm, try_build_embedding_client
 from ...config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, JIRA_BASE_URL, JIRA_TOKEN
 
@@ -137,7 +137,7 @@ async def run_batch(
 
     sem = asyncio.Semaphore(max_concurrent)
 
-    async with JiraValueStreamClient(
+    async with JiraTicketClient(
         base_url=JIRA_BASE_URL,
         token=JIRA_TOKEN,
         verify_ssl=False,

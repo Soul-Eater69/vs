@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 from ...clients.azure_direct_client import AzureDirectSearchClient
 from ...clients.generation_service import GenerationService
 from ...text import clean_ppt_text, condense_idea_card, normalize_for_search
-from ...prompts import build_plain_selection_prompt, build_selection_system_prompt, SelectionResult
+from ...ingestion.application.prompts import build_plain_selection_prompt, build_selection_system_prompt, SelectionResult
 from ..retrieval.pipeline import (
     build_context,
     build_historical_vs_evidence,

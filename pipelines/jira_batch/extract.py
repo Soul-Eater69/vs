@@ -195,7 +195,7 @@ def _extract_text(file_bytes: bytes, ext: str, filename: str = "") -> str:
 
 def _extract_markdown(data: bytes, filename: str) -> str:
     """Extract markdown from any supported file type using MarkItDown."""
-    from processing.extraction.markitdown import extract_markdown
+    from ...ingestion.application.processing.extraction.markitdown import extract_markdown
     return extract_markdown(data, filename)
 
 

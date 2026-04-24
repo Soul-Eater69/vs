@@ -8,13 +8,13 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from ....jira import build_ticket_fetcher
+from ....ingestion.adapters.jira import build_ticket_fetcher, get_ticket_data_compat
 from ..runtime.runtime_factory import (
     build_ingestion_config,
     try_build_llm,
     try_build_embedding_client,
 )
-from ....ingestion.service import IngestionDeps
+from ....ingestion import IngestionDeps
 from ....config import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,8 @@ async def process_ticket(
             return summary, chunks
 
     # --- Fetch once from the selected source ---
-    ticket_data = await deps.jira_client.get_ticket_data(
+    ticket_data = await get_ticket_data_compat(
+        deps.jira_client,
         ticket_id,
         config=cfg,
         llm_client=deps.llm_client,

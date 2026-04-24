@@ -25,7 +25,6 @@ type Tab =
   | 'historicCandidates'
   | 'faissHits'
   | 'mergedCandidates'
-  | 'trace'
   | 'reference'
   | 'raw';
 
@@ -65,7 +64,6 @@ interface SelectedVS {
 
 interface RejectedVS { entity_id: string; entity_name: string; reason: string }
 interface CanonicalVS { id: string; name: string; category: string }
-interface TraceStep { label: string; timing_s?: number; [k: string]: unknown }
 
 interface HistoricalTicketHit {
   ticket_id: string;
@@ -93,7 +91,6 @@ interface PipelineResult {
   source_doc_id?: string;
   approach?: string;
   canonical_value_streams?: CanonicalVS[];
-  trace?: Record<string, TraceStep>;
 }
 
 // --- Colors ---------------------------------------------------------------
@@ -596,27 +593,6 @@ function ComparisonPane({ selected, groundTruth, title }: { selected: SelectedVS
   );
 }
 
-function TracePane({ trace }: { trace?: Record<string, TraceStep> }) {
-  if (!trace || !Object.keys(trace).length) return <Empty text="No trace data - use Summary-RAG for full trace." />;
-  return (
-    <div className="space-y-2">
-      {Object.entries(trace).map(([key, s]) => (
-        <details key={key} className="group rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/50 overflow-hidden">
-          <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
-            <span>{s.label || key}</span>
-            <div className="flex items-center gap-2">
-              {typeof s.timing_s === 'number' && <Pill tone="sky">{s.timing_s}s</Pill>}
-              <I n="chevDown" className="w-3.5 h-3.5 text-zinc-400 transition-transform group-open:rotate-180" />
-            </div>
-          </summary>
-          <pre className="mx-4 mb-4 max-h-80 overflow-auto rounded-lg border border-zinc-100 bg-zinc-50 p-3 text-[11px] leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300 font-mono">
-            {JSON.stringify(s, null, 2)}
-          </pre>
-        </details>
-      ))}
-    </div>
-  );
-}
 
 function ReferencePane({ canonical }: { canonical?: CanonicalVS[] }) {
   if (!canonical?.length) return <Empty text="No canonical value streams loaded." />;
@@ -686,7 +662,7 @@ export default function Home() {
   const [query, setQuery] = useState('');
   const [custom, setCustom] = useState(false);
   const [count, setCount] = useState(12);
-  const [mode, setMode] = useState<'plain' | 'rag' | 'summary-rag' | 'historic-rag'>('summary-rag');
+  const [mode, setMode] = useState<'plain' | 'historic-rag'>('historic-rag');
   const [dark, setDark] = useState(true);
 
   const [step, setStep] = useState<Step>('idle');
@@ -750,10 +726,7 @@ export default function Home() {
       const body: Record<string, unknown> = { fetch_count: count, approach: mode };
       if (custom && query.trim()) body.query_text = query.trim(); else body.doc_id = docId;
 
-      let ep = '/api/generate';
-      if (mode === 'rag') ep = '/api/generate-rag';
-      else if (mode === 'summary-rag') ep = '/api/generate-trace';
-      else if (mode === 'historic-rag') ep = '/api/historic-rag';
+      const ep = mode === 'historic-rag' ? '/api/historic-rag' : '/api/generate';
       const res = await fetch(`${API}${ep}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -863,15 +836,15 @@ export default function Home() {
               <div className="space-y-4">
                 <div>
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Approach</div>
-                  <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-700 dark:bg-zinc-800">
-                    {(['plain', 'rag', 'summary-rag', 'historic-rag'] as const).map(m => (
+                  <div className="grid grid-cols-2 gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-700 dark:bg-zinc-800">
+                    {(['plain', 'historic-rag'] as const).map(m => (
                       <button
                         key={m}
                         onClick={() => setMode(m)}
                         className={`rounded-md py-1.5 text-xs font-semibold transition ${mode === m ? 'bg-sky-500 text-white shadow-sm' :
                           'text-zinc-600 dark:text-zinc-300'}`}
                       >
-                        {m === 'historic-rag' ? 'historic-rag' : m}
+                        {m}
                       </button>
                     ))}
                   </div>
@@ -964,7 +937,6 @@ export default function Home() {
                   ) : (
                     <TabBtn active={tab === 'retrieval'} label="Retrieval" icon="database" count={cands.length} onClick={() => setTab('retrieval')} />
                   )}
-                  <TabBtn active={tab === 'trace'}      label="Trace"      icon="crosshair" count={result.trace ? Object.keys(result.trace).length : undefined} onClick={() => setTab('trace')} />
                   <TabBtn active={tab === 'reference'}  label="Reference"  icon="book"      count={result.canonical_value_streams?.length} onClick={() => setTab('reference')} />
                   <TabBtn active={tab === 'raw'}        label="Raw LLM"    icon="terminal"                                                 onClick={() => setTab('raw')} />
                 </div>
@@ -976,7 +948,6 @@ export default function Home() {
                 {tab === 'historicCandidates' && <RetrievalPane candidates={historicCandidates} emptyText="No historic candidates recovered yet." />}
                 {tab === 'faissHits'          && <FaissHitsPane hits={faissHits} emptyText="No IDMT ticket hits recovered from FAISS yet." />}
                 {tab === 'mergedCandidates'   && <RetrievalPane candidates={mergedCandidates} emptyText="No merged candidates available yet." />}
-                {tab === 'trace'      && <TracePane      trace={result.trace} />}
                 {tab === 'reference'  && <ReferencePane  canonical={result.canonical_value_streams} />}
                 {tab === 'raw'        && <RawPane        raw={result.raw_response} />}
               </Section>

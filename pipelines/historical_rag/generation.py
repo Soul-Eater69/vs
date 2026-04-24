@@ -4,7 +4,7 @@ import logging
 from typing import Iterable, List
 
 from ...clients.generation_service import GenerationService
-from ...prompts import (
+from ...ingestion.application.prompts import (
     SelectionResult,
     build_historical_selection_prompt,
     build_historical_selection_system_prompt,

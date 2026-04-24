@@ -147,7 +147,7 @@ def validate_ticket_input(data: Any, strict: bool = False) -> dict:
     Validate a raw ticket data payload.
 
     Args:
-        data:   Dict output of JiraValueStreamClient.get_ticket_data().
+        data:   Dict output of JiraTicketClient.get_ticket_data().
         strict: If True and Pydantic is installed, run full Pydantic validation
                 (coerces and normalizes values). If False (default), run only
                 the lightweight structural check.

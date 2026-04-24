@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from ...clients.generation_service import GenerationService
 
 from ...constants import CANONICAL_VALUE_STREAMS
-from ...prompts import load_rag_prompts, render_prompt, safe_json_extract
+from ...ingestion.application.prompts import load_rag_prompts, render_prompt, safe_json_extract
 from ...text import clean_ppt_text, normalize_for_search
 from ..retrieval.pipeline import (
     build_historical_vs_evidence,

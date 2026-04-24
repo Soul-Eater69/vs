@@ -6,7 +6,7 @@ import logging
 from typing import List
 
 from ....clients.llm import IDPChatOpenAI
-from ....prompts import (
+from ....ingestion.application.prompts import (
     build_historical_enrichment_prompt,
     build_historical_enrichment_system_prompt,
 )

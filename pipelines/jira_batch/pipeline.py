@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from ...ingestion.adapters.jira import get_ticket_data_compat
 from .extract import (
     build_chunks,
     extract_attachment_texts,
@@ -17,11 +18,11 @@ from .extract import (
     extract_description,
     extract_metadata,
 )
-from ...jira.value_stream.value_stream_mapping import (
+from ...ingestion.adapters.jira.value_stream.value_stream_mapping import (
     resolve_value_stream_mapping,
     resolve_value_stream_epics_mapping,
 )
-from ...processing.metadata import classify_links
+from ...ingestion.application.processing.metadata import classify_links
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,11 @@ async def ingest_ticket(
       - ticket_key, metadata, chunks, value_stream mapping, summary, embeddings
     """
     # 1) Fetch from Jira
-    ticket_data = await jira_client.get_ticket_data(ticket_id, llm_client=llm_client)
+    ticket_data = await get_ticket_data_compat(
+        jira_client,
+        ticket_id,
+        llm_client=llm_client,
+    )
     fields = ticket_data.get("fields", {})
 
     # 2) Extract text

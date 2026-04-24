@@ -16,7 +16,8 @@ import asyncio
 import logging
 from typing import Any, Dict, Iterable, List, Optional
 
-from ...jira.text.text_assembly import (
+from ...ingestion.adapters.jira import get_ticket_data_compat
+from ...ingestion.adapters.jira.text.text_assembly import (
     build_retrieval_text,
     clean_description,
     extract_comment_texts,
@@ -75,7 +76,7 @@ def _project_raw_ticket(
     # Title
     title = str(fields.get("summary") or ticket_id)
 
-    # Value stream labels (already resolved by JiraValueStreamClient.get_ticket_data)
+    # Value stream labels (already resolved by JiraTicketClient.get_ticket_data)
     vs_labels = _dedupe_labels(ticket_data.get("value_stream_names"))
 
     # Comments
@@ -109,7 +110,11 @@ async def _extract_ticket(
 ) -> Optional[RawTicket]:
     """Fetch and extract a single ticket."""
     try:
-        ticket_data = await ticket_client.get_ticket_data(ticket_id, config=config)
+        ticket_data = await get_ticket_data_compat(
+            ticket_client,
+            ticket_id,
+            config=config,
+        )
 
         # Extract attachment text if requested and client supports it
         attachment_texts: List[str] = []
@@ -143,7 +148,7 @@ async def _fetch_tickets_from_source(
     sharepoint_client: Any = None,
     extract_attachments: bool = True,
 ) -> List[RawTicket]:
-    from ...jira import build_ticket_fetcher, normalize_ticket_source
+    from ...ingestion.adapters.jira import build_ticket_fetcher, normalize_ticket_source
 
     resolved_source = normalize_ticket_source(ticket_source)
     extraction_source = _EXTRACTION_SOURCE_BY_TICKET_SOURCE.get(

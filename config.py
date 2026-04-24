@@ -70,6 +70,10 @@ NEO4J_AUTH: tuple[str, str] = (
     os.environ.get("NEO4J_PASSWORD", "neo4j123"),
 )
 NEO4J_DATABASE: str = os.environ.get("NEO4J_DATABASE", "neo4j")
+NEO4J_TICKET_LABEL: str = os.environ.get("NEO4J_TICKET_LABEL", "JIRA")
+NEO4J_TICKET_KEY_PROPERTY: str = os.environ.get("NEO4J_TICKET_KEY_PROPERTY", "key")
+NEO4J_GROUP_LINK_FIELD: str = os.environ.get("NEO4J_GROUP_LINK_FIELD", "inwardIssues")
+NEO4J_ISSUE_TYPE_PROPERTY: str = os.environ.get("NEO4J_ISSUE_TYPE_PROPERTY", "issueType")
 
 JIRA_TOKEN: str = os.environ.get("JIRA_TOKEN", "")
 JIRA_BASE_URL: str = os.environ.get("JIRA_BASE_URL", "").rstrip("/")

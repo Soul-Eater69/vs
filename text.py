@@ -5,12 +5,12 @@ import re
 from typing import Optional
 
 from .clients.llm import IDPChatOpenAI
-from .content.retrieval_summary import (
+from .ingestion.application.content.retrieval_summary import (
     build_structured_summary_prompt,
     format_structured_summary_text,
     parse_structured_summary_payload,
 )
-from .processing.extraction.text_cleaning import clean_extracted_text
+from .ingestion.application.processing.extraction.text_cleaning import clean_extracted_text
 
 logger = logging.getLogger(__name__)
 

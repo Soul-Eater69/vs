@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .pipeline import run_historical_rag_pipeline
-from ...processing.extraction import extract_idea_card_text
+from ...ingestion.application.processing.extraction import extract_idea_card_text
 
 
 def main() -> None:

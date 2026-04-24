@@ -204,7 +204,7 @@ const NODE_TYPES = { step: StepNode };
 
 const STEP_DEFS = [
   { id: 'extract',  x: 0,   icon: 'file' as Ico,     title: 'Extract',   subtitle: 'Clean & summarize text' },
-  { id: 'retrieve', x: 240, icon: 'database' as Ico, title: 'Retrieve',  subtitle: 'FAISS + KG candidates' },
+  { id: 'retrieve', x: 240, icon: 'database' as Ico, title: 'Retrieve',  subtitle: 'VS index + historical support' },
   { id: 'select',   x: 480, icon: 'cpu' as Ico,      title: 'LLM Select', subtitle: 'GPT picks value streams' },
   { id: 'finalize', x: 720, icon: 'award' as Ico,    title: 'Finalize',  subtitle: 'De-dup & output' },
 ];

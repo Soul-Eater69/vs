@@ -12,6 +12,10 @@ VS/
   tests/
   .gitignore
   pyproject.toml
+
+Optional local runtime data:
+  idea_cards/
+  mappings.json
 ```
 
 Canonical app code lives under `src/vs_app/`.
@@ -30,6 +34,32 @@ Canonical app code lives under `src/vs_app/`.
 `prompt_yaml/` remains at repo root intentionally as a runtime prompt resource folder.
 
 `legacy/` contains quarantined old code and should not be imported by runtime code.
+
+## Optional local runtime data
+
+The canonical FastAPI app can serve local idea-card browser data for the frontend.
+
+Optional repo-root runtime data:
+
+```text
+idea_cards/
+mappings.json
+```
+
+`GET /api/idea-cards` reads files from `idea_cards/`.
+`GET /api/mappings` reads `mappings.json`.
+
+These files may be absent in a clean clone. If absent:
+- `/api/idea-cards` returns an empty card list.
+- `/api/mappings` returns 404.
+
+This does not break the historical RAG endpoint. Users can still call:
+
+```text
+POST /rag/value-streams
+```
+
+with `idea_card_text` or a real `ticket_id`.
 
 Canonical run commands:
 

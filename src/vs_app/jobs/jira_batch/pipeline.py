@@ -10,7 +10,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from ...ingestion.adapters.jira import get_ticket_data_compat
+from vs_app.integrations.embeddings.client import embed_batch
+from vs_app.integrations.jira import get_ticket_data_compat
+from vs_app.modules.ingestion.value_stream_labels.link_classification import classify_links
 from .extract import (
     build_chunks,
     extract_attachment_texts,
@@ -18,11 +20,10 @@ from .extract import (
     extract_description,
     extract_metadata,
 )
-from ...ingestion.adapters.jira.value_stream.value_stream_mapping import (
+from vs_app.modules.ingestion.value_stream_labels.value_stream_mapping import (
     resolve_value_stream_mapping,
     resolve_value_stream_epics_mapping,
 )
-from ...ingestion.application.processing.metadata import classify_links
 
 logger = logging.getLogger(__name__)
 
@@ -188,8 +189,6 @@ def _llm_summary(meta: dict, chunks: list[dict], llm_client: Any) -> str:
 
 def _embed_chunks(chunks: list[dict], summary: str, embedding_client: Any) -> None:
     """Embed summary + all chunks in-place."""
-    from ...clients.embedding import embed_batch
-
     texts = [summary] + [c["text"] for c in chunks]
     try:
         embeddings = embed_batch(texts, embedding_client)

@@ -14,7 +14,7 @@ def retrieve_historical_support(
     historical_faiss_dir: str | Path = "ticket_data/_faiss",
     max_ticket_hits: int = 12,
 ) -> dict:
-    from sinks.faiss_store import faiss_index_exists, search_local_faiss
+    from vs_app.integrations.sinks.faiss_store import faiss_index_exists, search_local_faiss
 
     cleaned = clean_ppt_text(query)
 

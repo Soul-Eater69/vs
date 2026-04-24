@@ -8,14 +8,18 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from ....ingestion.adapters.jira import build_ticket_fetcher, get_ticket_data_compat
+from vs_app.container import build_ticket_fetcher
+from vs_app.integrations.jira import get_ticket_data_compat
+from vs_app.integrations.sinks.faiss_store import build_local_faiss_indexes
+from vs_app.modules.ingestion import IngestionDeps
+from vs_app.modules.ingestion.chunks.pipeline import ingest_ticket_chunks_payload
+from vs_app.modules.ingestion.summary.pipeline import ingest_ticket_summary_payload
+from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 from ..runtime.runtime_factory import (
     build_ingestion_config,
     try_build_llm,
     try_build_embedding_client,
 )
-from ....ingestion import IngestionDeps
-from ....config import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -99,7 +103,6 @@ async def process_ticket(
 
     # --- Summary pipeline ---
     if need_summary:
-        from ....ingestion.summary_pipeline import ingest_ticket_summary_payload
         result = await ingest_ticket_summary_payload(
             ticket_data=ticket_data,
             jira_client=deps.jira_client,
@@ -113,7 +116,6 @@ async def process_ticket(
 
     # --- Chunk pipeline ---
     if need_chunks:
-        from ....ingestion.chunk_pipeline import ingest_ticket_chunks_payload
         result = await ingest_ticket_chunks_payload(
             ticket_data=ticket_data,
             jira_client=deps.jira_client,
@@ -238,8 +240,6 @@ async def run_batch(
     faiss_result: Optional[dict] = None
     if build_faiss:
         try:
-            from sinks.faiss_store import build_local_faiss_indexes
-
             faiss_result = build_local_faiss_indexes(
                 output_dir=output_dir,
                 index_dir=faiss_dir or (output_dir / "_faiss"),
@@ -281,16 +281,16 @@ async def main() -> None:
         epilog="""
 Examples:
   # Ingest default tickets — both pipelines:
-  python -m pipelines.jira_batch.jobs.batch_ingest_job --mode both
+  python -m vs_app.jobs.jira_batch.jobs.batch_ingest_job --mode both
 
   # Specific tickets, summary only, no LLM:
-  python -m pipelines.jira_batch.jobs.batch_ingest_job IDMT-4320 IDMT-4335 --mode summary --no-llm
+  python -m vs_app.jobs.jira_batch.jobs.batch_ingest_job IDMT-4320 IDMT-4335 --mode summary --no-llm
 
   # Chunk index only, skip already-done:
-  python -m pipelines.jira_batch.jobs.batch_ingest_job --mode chunks --no-force
+  python -m vs_app.jobs.jira_batch.jobs.batch_ingest_job --mode chunks --no-force
 
   # Fast dry-run (no LLM, no embeddings):
-  python -m pipelines.jira_batch.jobs.batch_ingest_job IDMT-4320 --mode both --no-llm --no-embeddings
+  python -m vs_app.jobs.jira_batch.jobs.batch_ingest_job IDMT-4320 --mode both --no-llm --no-embeddings
 """,
     )
 

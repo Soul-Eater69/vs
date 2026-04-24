@@ -7,7 +7,7 @@ import logging
 import pathlib
 from typing import Dict, List, Optional
 
-from clients.azure_direct_client import AzureDirectSearchClient
+from vs_app.integrations.clients.azure_direct_client import AzureDirectSearchClient
 
 from .corpus_models import EnrichedTicket
 

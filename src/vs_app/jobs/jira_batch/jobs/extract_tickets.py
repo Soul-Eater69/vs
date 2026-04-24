@@ -18,7 +18,7 @@ import os
 import pathlib
 import sys
 
-from ...historical.extractor import fetch_tickets
+from vs_app.modules.rag.corpus.historical_ticket_builder import fetch_tickets
 
 logger = logging.getLogger(__name__)
 

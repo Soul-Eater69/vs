@@ -4,15 +4,24 @@ import logging
 import os
 import threading
 import time
-import urllib3
 
 import httpx
-import requests
 
-from .. import config
+from vs_app import settings as config
 
-# Suppress InsecureRequestWarning from requests (verify=False)
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+try:
+    import urllib3
+except ImportError:  # pragma: no cover - optional dependency in some local envs
+    urllib3 = None
+
+try:
+    import requests
+except ImportError:  # pragma: no cover - optional dependency in some local envs
+    requests = None
+
+# Suppress InsecureRequestWarning from requests (verify=False) when urllib3 is available.
+if urllib3 is not None:  # pragma: no branch
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +65,9 @@ def _fetch_idp_token(
         "password": password,
         "username": user,
     }
+
+    if requests is None:
+        raise RuntimeError("requests is required to fetch IDP auth tokens")
 
     response = requests.post(url, headers=headers, json=data, verify=False)
     response.raise_for_status()

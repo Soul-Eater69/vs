@@ -4,9 +4,9 @@ import logging
 from typing import Any
 
 from ..config import JiraIngestionConfig
-from ....clients.embedding import EmbeddingClient
-from ....clients.llm import IDPChatOpenAI
-from ....config import EMBEDDING_DIMENSION, EMBEDDING_MODEL
+from vs_app.integrations.clients.embedding import EmbeddingClient
+from vs_app.integrations.clients.llm import IDPChatOpenAI
+from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 

@@ -6,12 +6,11 @@ import math
 import time
 from typing import Any, Dict, Iterable, List, Optional
 
-from ...clients.generation_service import GenerationService
-
-from ...constants import CANONICAL_VALUE_STREAMS
-from ...ingestion.application.prompts import load_rag_prompts, render_prompt, safe_json_extract
-from ...text import clean_ppt_text, normalize_for_search
-from ..retrieval.pipeline import (
+from vs_app.integrations.clients.generation_service import GenerationService
+from vs_app.modules.prompts.loader import load_rag_prompts, render_prompt, safe_json_extract
+from vs_app.modules.rag.query.views import clean_ppt_text, normalize_for_search
+from vs_app.shared.constants import CANONICAL_VALUE_STREAMS
+from .retrieval_pipeline import (
     build_historical_vs_evidence,
     load_ticket_vs_maps,
     retrieve_historical_chunks,

@@ -19,7 +19,7 @@ from typing import Any, Optional
 from langchain_core.messages import BaseMessage
 
 from .llm import IDPChatOpenAI
-from .. import config
+from vs_app import settings as config
 
 _SYSTEM_PROMPT = (
     "You are an expert on HCSC value streams. "

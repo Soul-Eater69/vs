@@ -8,7 +8,7 @@ using the `azure-search-documents` SDK.
 
 Usage
 -----
-from src.clients.azure_direct_client import AzureDirectSearchClient
+from vs_app.integrations.clients.azure_direct_client import AzureDirectSearchClient
 
 client = AzureDirectSearchClient()
 
@@ -32,7 +32,7 @@ from azure.identity import ClientSecretCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
 
-from .. import config
+from vs_app import settings as config
 from .embedding import EmbeddingClient
 
 logger = logging.getLogger(__name__)

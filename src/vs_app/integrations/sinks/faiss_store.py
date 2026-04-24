@@ -8,8 +8,8 @@ from typing import Any
 
 from langchain_core.documents import Document
 
-from ..clients.embedding import EmbeddingClient
-from ..ingestion.application.content.retrieval_summary import format_structured_summary_text
+from vs_app.integrations.clients.embedding import EmbeddingClient
+from vs_app.modules.rag.query.retrieval_summary import format_structured_summary_text
 
 logger = logging.getLogger(__name__)
 

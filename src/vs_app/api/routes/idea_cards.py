@@ -12,10 +12,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _IDEA_CARDS_DIR = _REPO_ROOT / "idea_cards"
 _MAPPINGS_PATH = _REPO_ROOT / "mappings.json"
 
-try:
-    from constants import CANONICAL_VALUE_STREAMS
-except Exception:  # pragma: no cover - repo shape can vary during refactors
-    CANONICAL_VALUE_STREAMS = []
+from vs_app.shared.constants import CANONICAL_VALUE_STREAMS
 
 
 @router.get("/api/canonical-value-streams")

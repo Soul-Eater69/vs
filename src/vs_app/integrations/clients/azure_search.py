@@ -6,7 +6,7 @@ search queries (via the IDP gateway which handles vectorization server-side).
 
 Usage
 -----
-from src.clients.azure_search import AzureSearchClient, IDPAISearchRequest
+from vs_app.integrations.clients.azure_search import AzureSearchClient, IDPAISearchRequest
 
 client = AzureSearchClient()
 
@@ -32,7 +32,7 @@ from azure.identity import ClientSecretCredential
 from langchain_core.documents import Document
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
-from .. import config
+from vs_app import settings as config
 from .auth import IDPCustomAuth
 
 logger = logging.getLogger(__name__)
@@ -66,8 +66,8 @@ class IDPAISearchRequest:
         default_factory=lambda: {
             "api_version": "2024-06-01",
             "encoding_format": "float",
-            "dimensions": 0,                        # set from config
-            "model": "string",                      # set from config
+            "dimensions": 0,                        # filled from runtime settings
+            "model": "string",                      # filled from runtime settings
         }
     )
     k_nearest_neighbors: int = 50
@@ -75,7 +75,7 @@ class IDPAISearchRequest:
     skip: int = 0
     order_by: Optional[List[str]] = None
     select: Optional[List[str]] = None
-    semantic_configuration_name: Optional[str] = "default"  # set from config when needed
+    semantic_configuration_name: Optional[str] = "default"  # override from runtime settings when needed
     query_caption: Optional[str] = None
     query_answer: Optional[str] = None
     query_answer_count: int = 5

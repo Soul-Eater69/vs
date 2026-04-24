@@ -13,7 +13,7 @@ def generate_value_streams(
     llm_candidates: List[dict],
     auto_selected: List[dict] | None = None,
 ) -> dict:
-    from clients.generation_service import GenerationService
+    from vs_app.integrations.clients.generation_service import GenerationService
 
     from ..ranking.reranker import sanitize_selected
 

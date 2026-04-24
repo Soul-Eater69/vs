@@ -107,7 +107,7 @@ def _validate_lightweight(data: Any) -> dict:
     Checks only the fields the pipeline strictly requires.
     Raises SchemaValidationError on failure.
     """
-    from pipelines.jira_batch.errors import SchemaValidationError
+    from vs_app.jobs.jira_batch.errors import SchemaValidationError
 
     if not isinstance(data, dict):
         raise SchemaValidationError(f"Expected dict, got {type(data).__name__}")
@@ -158,7 +158,7 @@ def validate_ticket_input(data: Any, strict: bool = False) -> dict:
     Raises:
         SchemaValidationError: if validation fails.
     """
-    from pipelines.jira_batch.errors import SchemaValidationError
+    from vs_app.jobs.jira_batch.errors import SchemaValidationError
 
     if strict and _PYDANTIC_AVAILABLE:
         try:

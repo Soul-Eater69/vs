@@ -276,7 +276,7 @@ def raw_starts_like_bullet(line: str) -> bool:
 
 def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
     """Summarize noisy idea-card text into the same retrieval shape used by indexing."""
-    from clients.llm import IDPChatOpenAI
+    from vs_app.integrations.clients.llm import IDPChatOpenAI
 
     cleaned = clean_opt_text(raw_text)
     input_text = cleaned[:8000]

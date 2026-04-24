@@ -2,7 +2,7 @@
 HTTP-based embedding client targeting the IDP embedding REST endpoint.
 
 Usage:
-    from clients.embedding import EmbeddingClient, embed_batch
+    from vs_app.integrations.clients.embedding import EmbeddingClient, embed_batch
 
     client = EmbeddingClient()
     vector = client.embed("risk adjustment for Medicare")
@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 import httpx
 
-from .. import config
+from vs_app import settings as config
 from .auth import IDPCustomAuth
 
 logger = logging.getLogger(__name__)

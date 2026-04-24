@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ingestion.adapters.neo4j.ticket_client import Neo4jTicketClient
+from vs_app.integrations.neo4j.ticket_source import Neo4jTicketClient
 
 
 def test_get_ticket_data_normalizes_graph_ticket_payload() -> None:
@@ -70,4 +70,3 @@ def test_get_ticket_data_normalizes_graph_ticket_payload() -> None:
     assert any(att.get("is_description_link") for att in attachments)
     assert len(payload["description_attachments"]) == 1
     assert len(fields["attachment"]) == 1
-

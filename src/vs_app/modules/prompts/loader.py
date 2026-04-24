@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 import yaml
 from pydantic import BaseModel, Field
 
-from constants import PROMPT_YAML_DIR, RAG_PROMPTS_PATH
+from vs_app.shared.constants import PROMPT_YAML_DIR, RAG_PROMPTS_PATH
 
 logger = logging.getLogger(__name__)
 

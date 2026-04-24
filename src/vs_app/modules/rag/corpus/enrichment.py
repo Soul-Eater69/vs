@@ -38,7 +38,7 @@ def _make_fallback_vs(vs_labels: List[str], reason: str) -> List[VSAttachment]:
 
 
 def enrich_one(ticket: RawTicket, model: str = ENRICHMENT_MODEL) -> EnrichedTicket:
-    from clients.llm import IDPChatOpenAI
+    from vs_app.integrations.clients.llm import IDPChatOpenAI
 
     base = EnrichedTicket(
         ticket_id=ticket.ticket_id,

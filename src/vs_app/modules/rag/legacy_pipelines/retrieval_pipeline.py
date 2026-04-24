@@ -25,12 +25,15 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
-from ...clients.azure_direct_client import AzureDirectSearchClient
-from ...clients.generation_service import GenerationService
-
-from ...constants import CANONICAL_VALUE_STREAMS, PRECHUNK_DIR
-from ...ingestion.application.prompts import safe_json_extract
-from ...text import clean_ppt_text, extract_signal_sections, normalize_for_search
+from vs_app.integrations.clients.azure_direct_client import AzureDirectSearchClient
+from vs_app.integrations.clients.generation_service import GenerationService
+from vs_app.modules.prompts.loader import safe_json_extract
+from vs_app.modules.rag.query.views import (
+    clean_ppt_text,
+    extract_signal_sections,
+    normalize_for_search,
+)
+from vs_app.shared.constants import CANONICAL_VALUE_STREAMS, PRECHUNK_DIR
 
 logger = logging.getLogger(__name__)
 

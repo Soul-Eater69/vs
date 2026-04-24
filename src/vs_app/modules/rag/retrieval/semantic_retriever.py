@@ -13,7 +13,7 @@ def retrieve_semantic_candidates(
     top_k: int = 12,
     allowed_value_stream_names: Optional[List[str]] = None,
 ) -> List[dict]:
-    from clients.azure_direct_client import AzureDirectSearchClient
+    from vs_app.integrations.clients.azure_direct_client import AzureDirectSearchClient
 
     client = AzureDirectSearchClient()
     allowed = {

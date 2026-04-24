@@ -3,7 +3,7 @@ LangChain-compatible LLM client wired to the IDP OpenAI-compatible gateway.
 
 Usage:
 
-    from src.clients.llm import IDPChatOpenAI
+    from vs_app.integrations.clients.llm import IDPChatOpenAI
 
     llm = IDPChatOpenAI(model="gpt-4-mini-idp")
     reply = llm.invoke([{"role": "user", "content": "Hello"}])
@@ -16,13 +16,27 @@ import os
 from typing import Any, Mapping
 
 import httpx
-import openai
-from langchain_openai import ChatOpenAI
-from langchain_core.outputs import ChatResult, ChatGenerationChunk
 from pydantic import Field, SecretStr
 
-from .. import config
+from vs_app import settings as config
 from .auth import IDPCustomAuth
+
+try:
+    import openai
+except ImportError:  # pragma: no cover - optional dependency for type hints only
+    openai = None
+
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:  # pragma: no cover - optional dependency in some local envs
+    class ChatOpenAI:  # type: ignore[no-redef]
+        pass
+
+try:
+    from langchain_core.outputs import ChatGenerationChunk, ChatResult
+except ImportError:  # pragma: no cover - optional dependency in some local envs
+    ChatResult = Any  # type: ignore[assignment]
+    ChatGenerationChunk = Any  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +89,7 @@ class IDPChatOpenAI(ChatOpenAI):
 
     def _create_chat_result(
         self,
-        response: dict | openai.BaseModel,
+        response: dict | Any,
         generation_info: dict | None = None,
     ) -> ChatResult:
         response_dict = (

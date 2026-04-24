@@ -16,9 +16,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ...ingestion.adapters.jira import JiraTicketClient
+from vs_app.integrations.jira import JiraTicketClient
+from vs_app.integrations.clients.sharepoint import SharePointClient
+from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL, JIRA_BASE_URL, JIRA_TOKEN
 from .runtime.runtime_factory import try_build_llm, try_build_embedding_client
-from ...config import EMBEDDING_DIMENSION, EMBEDDING_MODEL, JIRA_BASE_URL, JIRA_TOKEN
 
 from .pipeline import ingest_ticket, project_chunk_records, project_vs_record
 
@@ -84,7 +85,6 @@ async def process_one(
 def _try_build_sharepoint_client():
     """Build SharePoint client if Graph credentials are available."""
     try:
-        from ...clients.sharepoint import SharePointClient
         # SharePointClient needs a config object; check if env vars exist first
         graph_client_id = os.environ.get("GRAPH_CLIENT_ID")
         if not graph_client_id:

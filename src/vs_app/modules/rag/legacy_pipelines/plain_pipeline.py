@@ -9,11 +9,15 @@ import logging
 import re
 from typing import Dict, List, Optional
 
-from ...clients.azure_direct_client import AzureDirectSearchClient
-from ...clients.generation_service import GenerationService
-from ...text import clean_ppt_text, condense_idea_card, normalize_for_search
-from ...ingestion.application.prompts import build_plain_selection_prompt, build_selection_system_prompt, SelectionResult
-from ..retrieval.pipeline import (
+from vs_app.integrations.clients.azure_direct_client import AzureDirectSearchClient
+from vs_app.integrations.clients.generation_service import GenerationService
+from vs_app.modules.prompts.loader import (
+    SelectionResult,
+    build_plain_selection_prompt,
+    build_selection_system_prompt,
+)
+from vs_app.modules.rag.query.views import clean_ppt_text, condense_idea_card, normalize_for_search
+from .retrieval_pipeline import (
     build_context,
     build_historical_vs_evidence,
     load_ticket_vs_maps,

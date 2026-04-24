@@ -90,7 +90,7 @@ def _verify_names_with_llm(
 
     results: dict[str, str] = {}
     try:
-        from ...clients.llm import complete_text
+        from vs_app.integrations.llm.client import complete_text
     except Exception as exc:
         logger.info("Jira value-stream verifier text helper unavailable: %s", exc)
         return results

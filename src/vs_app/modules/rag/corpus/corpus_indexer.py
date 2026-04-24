@@ -13,7 +13,7 @@ ENRICHMENT_MODEL = "gpt-4o-mini-idp"
 
 def _build_embedding_client() -> Optional[object]:
     try:
-        from clients.embedding import EmbeddingClient
+        from vs_app.integrations.clients.embedding import EmbeddingClient
 
         return EmbeddingClient()
     except Exception as exc:

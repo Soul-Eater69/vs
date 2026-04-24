@@ -3,6 +3,9 @@
 FastAPI app entrypoint:
 - `src/vs_app/main.py`
 
+Run locally with:
+- `uvicorn vs_app.main:app --reload --port 8000`
+
 Current public routes:
 - `GET /health`
 - `POST /ingestion/tickets/{ticket_id}`

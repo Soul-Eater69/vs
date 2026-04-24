@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ingestion.adapters.jira.fetch_compat import get_ticket_data_compat
+from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
 
 
 class _LegacyClient:

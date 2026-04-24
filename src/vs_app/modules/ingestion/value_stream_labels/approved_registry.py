@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import re
 
-from rapidfuzz import fuzz, process
+try:
+    from rapidfuzz import fuzz, process
+except Exception:  # pragma: no cover - optional dependency in local dev
+    fuzz = None
+    process = None
 
 from .helpers import clean_value_stream_name
 
@@ -118,6 +123,23 @@ def approved_value_streams_text() -> str:
     return "\n".join(f"{idx}. {name}" for idx, name in enumerate(APPROVED_VALUE_STREAMS, start=1))
 
 
+def _extract_matches(lookup_key: str, *, limit: int = 3) -> list[tuple[str, float, int | None]]:
+    if process is not None and fuzz is not None:
+        return process.extract(
+            lookup_key,
+            _LOOKUP_KEYS,
+            scorer=fuzz.WRatio,
+            limit=limit,
+        )
+
+    ranked: list[tuple[str, float, int | None]] = []
+    for idx, candidate in enumerate(_LOOKUP_KEYS):
+        score = SequenceMatcher(None, lookup_key, candidate).ratio() * 100.0
+        ranked.append((candidate, score, idx))
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    return ranked[:limit]
+
+
 def canonicalize_approved_value_stream(value: str) -> str | None:
     """Map a Jira-style stream/theme name to the approved canonical list."""
     candidate_keys = _candidate_lookup_keys(value)
@@ -131,12 +153,7 @@ def canonicalize_approved_value_stream(value: str) -> str | None:
 
     best_scores: dict[str, float] = {}
     for lookup_key in candidate_keys:
-        matches = process.extract(
-            lookup_key,
-            _LOOKUP_KEYS,
-            scorer=fuzz.WRatio,
-            limit=3,
-        )
+        matches = _extract_matches(lookup_key, limit=3)
         for matched_key, score, _ in matches:
             canonical_name = _CANONICAL_BY_KEY.get(matched_key)
             if canonical_name is None:

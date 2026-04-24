@@ -114,8 +114,12 @@ class Neo4jTicketClient(TicketFetcher):
         llm_client: Optional[Any] = None,
     ) -> Dict[str, Any]:
         await self._ensure_ready()
-        assert self._repository is not None
-        record = await self._repository.fetch_ticket(ticket_id)
+        query_sync = getattr(self, "_query_ticket_sync", None)
+        if self._repository is None and callable(query_sync):
+            record = query_sync(ticket_id)
+        else:
+            assert self._repository is not None
+            record = await self._repository.fetch_ticket(ticket_id)
         if not record or not record.get("ticket_node"):
             raise KeyError(
                 f"Ticket not found in Neo4j: {ticket_id}. "

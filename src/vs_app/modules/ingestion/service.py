@@ -6,28 +6,24 @@ pipelines -> optional debug persistence. Source-agnostic; no Jira/Neo4j imports.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
-IngestionMode = Literal["summary", "chunks", "both"]
-TicketSourceName = Literal["jira", "neo4j"]
-
-
-@dataclass(slots=True)
-class IngestTicketCommand:
-    ticket_id: str
-    source: TicketSourceName = "jira"
-    mode: IngestionMode = "both"
-    force: bool = False
-    persist_debug: bool = False
+from .modes import IngestionMode, TicketSourceName
+from .schemas import IngestTicketCommand, IngestTicketResult
 
 
-@dataclass(slots=True)
-class IngestTicketResult:
-    ticket_id: str
-    summary: dict | None = None
-    chunks: list[dict] | None = None
-    errors: list[str] | None = None
+class TicketExtractionService:
+    """Facade over a ticket client; bridges use cases to fetch compatibility helpers."""
+
+    def __init__(self, ticket_client: Any | None = None, jira_client: Any | None = None) -> None:
+        self._ticket_client = ticket_client if ticket_client is not None else jira_client
+        if self._ticket_client is None:
+            raise ValueError("A ticket client is required")
+
+    async def extract_ticket(self, ticket_id: str, cfg: Any) -> dict:
+        from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
+
+        return await get_ticket_data_compat(self._ticket_client, ticket_id, config=cfg)
 
 
 class IngestionService:
@@ -70,3 +66,13 @@ class IngestionService:
             chunks=chunk_docs,
             errors=[],
         )
+
+
+__all__ = [
+    "IngestionMode",
+    "IngestTicketCommand",
+    "IngestTicketResult",
+    "IngestionService",
+    "TicketExtractionService",
+    "TicketSourceName",
+]

@@ -1,19 +1,17 @@
-"""
-Historical ticket enrichment pipeline.
+"""Historical ticket enrichment pipeline."""
 
-    Extract (Jira client) -> Enrich (LLM) -> Store (JSON + Azure Search)
+from __future__ import annotations
 
-Each historical ticket gets:
-- A concise business summary
-- Domain tags
-- Each attached value stream classified as "direct" or "implied"
-
-Usage:
-    from historical import run_historical_ingestion
-
-    run_historical_ingestion(ticket_ids=["IDMT-19761"])
-"""
-
-from .pipeline import run_historical_ingestion
+from importlib import import_module
+from typing import Any
 
 __all__ = ["run_historical_ingestion"]
+
+
+def __getattr__(name: str) -> Any:
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module("vs_app.modules.rag.corpus.corpus_indexer")
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

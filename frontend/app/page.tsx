@@ -14,6 +14,7 @@ import {
 
 // --- API ------------------------------------------------------------------
 const API = 'http://localhost:8000';
+const TICKET_KEY_RE = /^[A-Z][A-Z0-9_]*-\d+$/;
 
 // --- Types ----------------------------------------------------------------
 type Step = 'idle' | 'extracting' | 'retrieving' | 'generating' | 'done' | 'error';
@@ -28,7 +29,13 @@ type Tab =
   | 'reference'
   | 'raw';
 
-interface IdeaCard { doc_id: string; display_name: string; has_mapping: boolean }
+interface IdeaCard {
+  doc_id: string;
+  display_name: string;
+  has_mapping: boolean;
+  file_name?: string;
+  extension?: string;
+}
 
 interface Candidate {
   entity_id: string;
@@ -89,7 +96,6 @@ interface PipelineResult {
   ground_truth?: string[];
   ground_truth_title?: string;
   source_doc_id?: string;
-  approach?: string;
   canonical_value_streams?: CanonicalVS[];
 }
 
@@ -658,11 +664,10 @@ function TabBtn({ active, label, icon, count, onClick }: {
 
 export default function Home() {
   const [cards, setCards] = useState<IdeaCard[]>([]);
-  const [docId, setDocId] = useState('');
+  const [selectedCardDocId, setSelectedCardDocId] = useState('');
   const [query, setQuery] = useState('');
   const [custom, setCustom] = useState(false);
-  const [count, setCount] = useState(12);
-  const [mode, setMode] = useState<'plain' | 'historic-rag'>('historic-rag');
+  const [count, setCount] = useState(20);
   const [dark, setDark] = useState(true);
 
   const [step, setStep] = useState<Step>('idle');
@@ -678,18 +683,11 @@ export default function Home() {
     if (saved) setDark(saved === 'dark');
     fetch(`${API}/api/idea-cards`)
       .then(r => r.json())
-      .then(d => { setCards(d.cards ?? []); if (d.cards?.length) setDocId(d.cards[0].doc_id); })
+      .then(d => { setCards(d.cards ?? []); if (d.cards?.length) setSelectedCardDocId(d.cards[0].doc_id); })
       .catch(() => {});
   }, []);
 
-  const maxCandidateCount = mode === 'historic-rag' ? 50 : 30;
-
-  useEffect(() => {
-    setCount(current => {
-      if (mode === 'historic-rag') return current === 12 ? 50 : Math.min(current, 50);
-      return Math.min(current, 30);
-    });
-  }, [mode]);
+  const maxCandidateCount = 50;
 
   const cands = useMemo(() => result?.candidate_value_streams ?? result?.candidates_used ?? [], [result]);
   const vsCandidates = useMemo(() => result?.semantic_candidate_value_streams ?? [], [result]);
@@ -703,8 +701,7 @@ export default function Home() {
     () => Boolean(
       result
       && (
-        result.approach === 'historic-rag'
-        || result.semantic_candidate_value_streams !== undefined
+        result.semantic_candidate_value_streams !== undefined
         || result.historical_candidate_value_streams !== undefined
         || result.historical_ticket_hits !== undefined
         || result.merged_candidate_value_streams !== undefined
@@ -713,6 +710,11 @@ export default function Home() {
     [result],
   );
   const resultCandidateCount = hasHistoricCandidateTabs ? mergedCandidates.length : cands.length;
+  const selectedCard = cards.find(c => c.doc_id === selectedCardDocId);
+  const selectedTicketId = useMemo(() => {
+    const value = String(selectedCard?.doc_id ?? '').trim().toUpperCase();
+    return TICKET_KEY_RE.test(value) ? value : '';
+  }, [selectedCard]);
 
   const toggle = useCallback(() => {
     setDark(d => { const n = !d; localStorage.setItem('vs-theme', n ? 'dark' : 'light'); return n; });
@@ -723,11 +725,16 @@ export default function Home() {
     timer.current = setTimeout(() => setStep('retrieving'), 1500);
 
     try {
-      const body: Record<string, unknown> = { fetch_count: count, approach: mode };
-      if (custom && query.trim()) body.query_text = query.trim(); else body.doc_id = docId;
+      const body: Record<string, unknown> = {
+        top_k_value_streams: count,
+        top_k_historical: count,
+        use_llm_finalizer: true,
+      };
+      if (custom && query.trim()) body.idea_card_text = query.trim();
+      else if (selectedTicketId) body.ticket_id = selectedTicketId;
+      else throw new Error('Selected card is a local doc_id, not a real ticket key. Use Custom Text for this card.');
 
-      const ep = mode === 'historic-rag' ? '/api/historic-rag' : '/api/generate';
-      const res = await fetch(`${API}${ep}`, {
+      const res = await fetch(`${API}/rag/value-streams`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -750,10 +757,10 @@ export default function Home() {
       setStep('error');
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [count, custom, docId, mode, query]);
+  }, [count, custom, query, selectedTicketId]);
 
   const busy = step !== 'idle' && step !== 'done' && step !== 'error';
-  const card = cards.find(c => c.doc_id === docId);
+  const card = selectedCard;
 
   return (
     <div className={`${dark ? 'dark' : ''} min-h-screen bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100`}>
@@ -801,8 +808,8 @@ export default function Home() {
                 {!custom ? (
                   <>
                     <select
-                      value={docId}
-                      onChange={e => setDocId(e.target.value)}
+                      value={selectedCardDocId}
+                      onChange={e => setSelectedCardDocId(e.target.value)}
                       className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-400/40 dark:border-zinc-700 dark:bg-zinc-900"
                     >
                       {cards.map(c => (
@@ -812,6 +819,15 @@ export default function Home() {
                     {card && (
                       <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-2.5 text-xs dark:border-zinc-800 dark:bg-zinc-900/50">
                         <div className="text-zinc-600 dark:text-zinc-400">{card.display_name}</div>
+                        {selectedTicketId ? (
+                          <div className="mt-1 text-sky-600 dark:text-sky-400">
+                            Ticket key: {selectedTicketId}
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-amber-600 dark:text-amber-400">
+                            Local idea-card doc_id only. Use Custom Text to run historical RAG for this card.
+                          </div>
+                        )}
                         {card.has_mapping && (
                           <div className="mt-1 flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                             <I n="check" className="w-3 h-3" /> Ground truth available
@@ -835,40 +851,23 @@ export default function Home() {
             <Section title="Config" icon="sliders">
               <div className="space-y-4">
                 <div>
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Approach</div>
-                  <div className="grid grid-cols-2 gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-700 dark:bg-zinc-800">
-                    {(['plain', 'historic-rag'] as const).map(m => (
-                      <button
-                        key={m}
-                        onClick={() => setMode(m)}
-                        className={`rounded-md py-1.5 text-xs font-semibold transition ${mode === m ? 'bg-sky-500 text-white shadow-sm' :
-                          'text-zinc-600 dark:text-zinc-300'}`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Candidates</span>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Historical RAG Candidates</span>
                     <Pill tone="sky">{count}</Pill>
                   </div>
                   <input type="range" min={5} max={maxCandidateCount} value={count} onChange={e => setCount(+e.target.value)} className="w-full accent-sky-500" />
-                  {mode === 'historic-rag' && (
-                    <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      Historic-RAG can surface up to 50 semantic VS candidates before the merge.
-                    </p>
-                  )}
+                  <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    Historical RAG can surface up to 50 value-stream candidates before the merge.
+                  </p>
                 </div>
                 <button
                   onClick={run}
-                  disabled={busy || (!custom && !docId) || (custom && !query.trim())}
+                  disabled={busy || (!custom && !selectedCardDocId) || (!custom && !selectedTicketId) || (custom && !query.trim())}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-sky-600/20 transition hover:bg-sky-500 active:bg-sky-700 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {busy
                     ? <><I n="loader" className="w-4 h-4" /> Running...</>
-                    : <><I n="play" className="w-4 h-4" /> Run Pipeline</>
+                    : <><I n="play" className="w-4 h-4" /> Run Historical RAG</>
                   }
                 </button>
               </div>
@@ -907,7 +906,7 @@ export default function Home() {
                 </div>
                 <h3 className="text-base font-semibold text-zinc-700 dark:text-zinc-200">Ready</h3>
                 <p className="mt-1 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
-                  Select an idea card and run the pipeline to extract text, retrieve candidates, and let the LLM select value streams.
+                  Select an idea card and run historical RAG to retrieve candidates, merge historical support, and predict value streams.
                 </p>
               </div>
             )}

@@ -631,15 +631,15 @@ def _public_attachment_summary(att: Optional[dict]) -> Optional[dict]:
 
 def _cheap_peek(file_bytes: bytes, ext: str) -> dict:
     if ext in ("pptx", "ppt"):
-        from ingestion.application.processing.extraction.pptx import cheap_peek_pptx
+        from vs_app.integrations.files.pptx_extractor import cheap_peek_pptx
 
         return cheap_peek_pptx(file_bytes)
     if ext == "pdf":
-        from ingestion.application.processing.extraction.pdf import cheap_peek_pdf
+        from vs_app.integrations.files.pdf_extractor import cheap_peek_pdf
 
         return cheap_peek_pdf(file_bytes)
     if ext in ("docx", "doc"):
-        from ingestion.application.processing.extraction.docx import cheap_peek_docx
+        from vs_app.integrations.files.docx_extractor import cheap_peek_docx
 
         return cheap_peek_docx(file_bytes)
     return {}
@@ -648,15 +648,15 @@ def _cheap_peek(file_bytes: bytes, ext: str) -> dict:
 def _full_extract_text(file_bytes: bytes, ext: str) -> dict:
     try:
         if ext in ("pptx", "ppt"):
-            from ingestion.application.processing.extraction.pptx import extract_pptx
+            from vs_app.integrations.files.pptx_extractor import extract_pptx
 
             result = extract_pptx(file_bytes, max_slides=60)
         elif ext == "pdf":
-            from ingestion.application.processing.extraction.pdf import extract_pdf
+            from vs_app.integrations.files.pdf_extractor import extract_pdf
 
             result = extract_pdf(file_bytes, max_pages=60)
         elif ext in ("docx", "doc"):
-            from ingestion.application.processing.extraction.docx import extract_docx
+            from vs_app.integrations.files.docx_extractor import extract_docx
 
             result = extract_docx(file_bytes)
         else:

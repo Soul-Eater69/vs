@@ -9,7 +9,7 @@ from ingestion.application.content.retrieval_summary import (
     format_structured_summary_text,
     parse_structured_summary_payload,
 )
-from ingestion.application.processing.extraction.text_cleaning import clean_extracted_text
+from vs_app.shared.text_cleaning import clean_extracted_text
 
 logger = logging.getLogger(__name__)
 

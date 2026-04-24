@@ -140,14 +140,14 @@ def extract_attachment_leaves(file_bytes: bytes, attachment: dict, cfg: Any) -> 
     try:
         if not extracted.get("chunks"):
             if ext in ("pptx", "ppt"):
-                from ingestion.application.processing.extraction.pptx import extract_pptx
+                from vs_app.integrations.files.pptx_extractor import extract_pptx
 
                 extracted = extract_pptx(
                     file_bytes,
                     max_slides=int(getattr(cfg, "max_slides", 60) or 60),
                 )
             elif ext == "pdf":
-                from ingestion.application.processing.extraction.pdf import extract_pdf
+                from vs_app.integrations.files.pdf_extractor import extract_pdf
 
                 extracted = extract_pdf(
                     file_bytes,
@@ -155,7 +155,7 @@ def extract_attachment_leaves(file_bytes: bytes, attachment: dict, cfg: Any) -> 
                     max_pages=int(getattr(cfg, "max_pages", 60) or 60),
                 )
             elif ext in ("docx", "doc"):
-                from ingestion.application.processing.extraction.docx import extract_docx
+                from vs_app.integrations.files.docx_extractor import extract_docx
 
                 extracted = extract_docx(file_bytes)
             else:

@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from ingestion.application.processing.extraction.text_cleaning import (
+from vs_app.shared.text_cleaning import (
     clean_extracted_text,
     text_looks_weak,
 )
@@ -392,14 +392,14 @@ def _extract_bytes_to_text(file_bytes: bytes, att: dict, cfg: Any) -> str:
 
     try:
         if ext in ("pptx", "ppt"):
-            from ingestion.application.processing.extraction.pptx import extract_pptx
+            from vs_app.integrations.files.pptx_extractor import extract_pptx
 
             result = extract_pptx(
                 file_bytes,
                 max_slides=int(getattr(cfg, "max_slides", 60) or 60),
             )
         elif ext == "pdf":
-            from ingestion.application.processing.extraction.pdf import extract_pdf
+            from vs_app.integrations.files.pdf_extractor import extract_pdf
 
             result = extract_pdf(
                 file_bytes,
@@ -407,7 +407,7 @@ def _extract_bytes_to_text(file_bytes: bytes, att: dict, cfg: Any) -> str:
                 max_pages=int(getattr(cfg, "max_pages", 60) or 60),
             )
         elif ext in ("docx", "doc"):
-            from ingestion.application.processing.extraction.docx import extract_docx
+            from vs_app.integrations.files.docx_extractor import extract_docx
 
             result = extract_docx(file_bytes)
         else:

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Optional
 
 from vs_app.integrations.clients.llm import complete_text
-from vs_app.modules.prompts.loader import load_prompt_yaml, render_prompt, safe_json_extract
+from vs_app.modules.prompts.loader import load_prompt_yaml, safe_json_extract
 
 from .models import AttachmentCandidate, FuzzyDecision, LinkCandidate, LlmDecision
 
@@ -114,7 +115,9 @@ def classify_with_llm(
     ticket_json = _build_clean_llm_input(
         ticket_id, title, description, statements, value_streams, links, attachments
     )
-    user_prompt = render_prompt(user_template, ticket_json=ticket_json)
+    # Use direct substitution — ticket_json contains raw JSON with curly braces,
+    # which would break render_prompt's trailing .format(**kwargs) call.
+    user_prompt = re.sub(r"\{\{\s*ticket_json\s*\}\}", ticket_json, user_template)
 
     try:
         raw = complete_text(

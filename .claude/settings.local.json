@@ -22,7 +22,10 @@
       "Bash(ls d:/projects/vs/*.py)",
       "Bash(find \"d:/projects/vs\" -type f -name \"*.py\" ! -path \"*/rag-summary/*\" -exec grep -l \"^import \\\\\\(clients\\\\|config\\\\|constants\\\\|content\\\\|ingestion\\\\|jira\\\\|pipelines\\\\|processing\\\\|prompts\\\\|sinks\\\\|text\\\\\\)\" {} \\\\;)",
       "Bash(find \"d:/projects/vs\" -type f -name \"*.py\" ! -path \"*/rag-summary/*\" -exec grep -n \"^import \\\\\\(clients\\\\|config\\\\|constants\\\\|content\\\\|ingestion\\\\|jira\\\\|pipelines\\\\|processing\\\\|prompts\\\\|sinks\\\\|text\\\\\\)\" {} +)",
-      "Bash(py -c ' *)"
+      "Bash(py -c ' *)",
+      "Bash(uv run python -c ' *)",
+      "PowerShell(Get-Command uv -ErrorAction SilentlyContinue; where.exe uv 2>$null; \\(Get-ChildItem \"$env:USERPROFILE\" -Recurse -Filter \"uv.exe\" -ErrorAction SilentlyContinue | Select-Object -First 3 FullName\\))",
+      "PowerShell($env:PATH -split \";\" | Where-Object { $_ -ne \"\" })"
     ]
   }
 }

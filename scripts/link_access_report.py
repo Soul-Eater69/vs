@@ -32,12 +32,15 @@ from vs_app.modules.ingestion.idea_cards.models import LinkAccessStatus
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+logging.getLogger("vs_app.modules.ingestion.value_stream_labels").setLevel(logging.ERROR)
 
 _INACCESSIBLE = {
     "auth_required", "forbidden", "sharepoint_auth_required",
     "timeout", "connection_error", "not_found", "unknown_error",
 }
-_MAX_CONCURRENT = int(os.environ.get("AUDIT_MAX_CONCURRENT", "5"))
+# Semaphore only guards Neo4j fetches — link probing is pure HTTP and runs
+# fully parallel across all tickets after the fetch phase.
+_DEFAULT_FETCH_CONCURRENCY = int(os.environ.get("AUDIT_MAX_CONCURRENT", "20"))
 
 
 def _link_row(lnk) -> dict:
@@ -53,52 +56,53 @@ def _link_row(lnk) -> dict:
     }
 
 
-async def _process_ticket(
+async def _fetch_ticket(
     ticket_id: str,
     ticket_client,
-    *,
-    probe_links: bool,
     sem: asyncio.Semaphore,
 ) -> tuple[str, Optional[dict], Optional[str]]:
+    """Phase 1: fetch from Neo4j and extract links (rate-limited)."""
     async with sem:
         try:
             ticket_data = await ticket_client.get_ticket_data(ticket_id)
             fields = ticket_data.get("fields") or {}
-            title = str(fields.get("summary") or ticket_id)
-            description = str(fields.get("description") or "")
-
-            links, statements = extract_description_candidates(description)
-
-            if probe_links and links:
-                probed = await asyncio.gather(*[probe_link(lnk) for lnk in links])
-                links = list(probed)
-
-            # Fuzzy scoring — sets is_useful_fuzzy on each link in place
-            classify_fuzzy(statements, links, attachments=[])
-
-            useful = [lnk for lnk in links if lnk.is_useful_fuzzy]
-            useful_accessible = [
-                lnk for lnk in useful
-                if lnk.access_status == LinkAccessStatus.accessible
-            ]
-            useful_inaccessible = [
-                lnk for lnk in useful
-                if lnk.access_status.value in _INACCESSIBLE
-            ]
-
-            record = {
-                "title": title,
-                "total_links": len(links),
-                "useful_links": len(useful),
-                "useful_accessible": len(useful_accessible),
-                "useful_inaccessible": len(useful_inaccessible),
-                "links": [_link_row(lnk) for lnk in links],
-            }
-            return ticket_id, record, None
-
+            return ticket_id, {
+                "title": str(fields.get("summary") or ticket_id),
+                "description": str(fields.get("description") or ""),
+            }, None
         except Exception as exc:
-            logger.exception("Failed processing %s", ticket_id)
             return ticket_id, None, str(exc)
+
+
+async def _probe_and_score(
+    ticket_id: str,
+    title: str,
+    description: str,
+    probe_links: bool,
+) -> tuple[str, Optional[dict], Optional[str]]:
+    """Phase 2: extract links, probe, score — fully parallel, no semaphore."""
+    try:
+        links, statements = extract_description_candidates(description)
+
+        if probe_links and links:
+            links = list(await asyncio.gather(*[probe_link(lnk) for lnk in links]))
+
+        classify_fuzzy(statements, links, attachments=[])
+
+        useful = [lnk for lnk in links if lnk.is_useful_fuzzy]
+        useful_accessible = [lnk for lnk in useful if lnk.access_status == LinkAccessStatus.accessible]
+        useful_inaccessible = [lnk for lnk in useful if lnk.access_status.value in _INACCESSIBLE]
+
+        return ticket_id, {
+            "title": title,
+            "total_links": len(links),
+            "useful_links": len(useful),
+            "useful_accessible": len(useful_accessible),
+            "useful_inaccessible": len(useful_inaccessible),
+            "links": [_link_row(lnk) for lnk in links],
+        }, None
+    except Exception as exc:
+        return ticket_id, None, str(exc)
 
 
 async def run(
@@ -107,28 +111,42 @@ async def run(
     source: str,
     out_file: Path,
     probe_links: bool,
+    fetch_concurrency: int,
 ) -> None:
-    sem = asyncio.Semaphore(_MAX_CONCURRENT)
-    tickets: dict[str, dict] = {}
-    errors: dict[str, str] = {}
+    sem = asyncio.Semaphore(fetch_concurrency)
 
+    # Phase 1: fetch all tickets from Neo4j (rate-limited)
+    logger.info("Fetching %d tickets (concurrency=%d)...", len(ticket_ids), fetch_concurrency)
     async with build_ticket_fetcher(source=source, verify_ssl=False) as client:
-        results = await asyncio.gather(
-            *[_process_ticket(tid, client, probe_links=probe_links, sem=sem) for tid in ticket_ids]
+        fetched = await asyncio.gather(
+            *[_fetch_ticket(tid, client, sem) for tid in ticket_ids]
         )
 
-    for tid, record, err in results:
+    # Phase 2: probe + score all tickets in parallel (no bottleneck)
+    logger.info("Probing links%s...", "" if probe_links else " (skipped)")
+
+    async def _passthrough_error(tid: str, err: str):
+        return tid, None, err
+
+    scored = await asyncio.gather(
+        *[
+            _probe_and_score(tid, data["title"], data["description"], probe_links)
+            if data else _passthrough_error(tid, err)
+            for tid, data, err in fetched
+        ]
+    )
+
+    tickets: dict[str, dict] = {}
+    errors: dict[str, str] = {}
+    for tid, record, err in scored:
         if err:
             errors[tid] = err
         else:
             tickets[tid] = record
-            useful = record["useful_links"]
-            acc = record["useful_accessible"]
-            inacc = record["useful_inaccessible"]
             logger.info("[%s] total=%d useful=%d accessible=%d inaccessible=%d",
-                        tid, record["total_links"], useful, acc, inacc)
+                        tid, record["total_links"], record["useful_links"],
+                        record["useful_accessible"], record["useful_inaccessible"])
 
-    # Overall stats across all tickets
     all_useful = sum(r["useful_links"] for r in tickets.values())
     all_useful_acc = sum(r["useful_accessible"] for r in tickets.values())
     all_useful_inacc = sum(r["useful_inaccessible"] for r in tickets.values())
@@ -166,6 +184,8 @@ async def main() -> None:
     parser.add_argument("--out-file", default="ticket_data/link_access_report.json")
     parser.add_argument("--no-probe", action="store_true", help="Skip HTTP probing.")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--concurrency", type=int, default=_DEFAULT_FETCH_CONCURRENCY,
+                        help=f"Neo4j fetch concurrency (default: {_DEFAULT_FETCH_CONCURRENCY}).")
     args = parser.parse_args()
 
     raw = json.loads(Path(args.input_ticket_ids).read_text(encoding="utf-8"))
@@ -179,7 +199,13 @@ async def main() -> None:
         return
 
     logger.info("Processing %d tickets", len(ids))
-    await run(ids, source=args.source, out_file=Path(args.out_file), probe_links=not args.no_probe)
+    await run(
+        ids,
+        source=args.source,
+        out_file=Path(args.out_file),
+        probe_links=not args.no_probe,
+        fetch_concurrency=args.concurrency,
+    )
 
 
 if __name__ == "__main__":

@@ -132,10 +132,17 @@ def _extract_matches(lookup_key: str, *, limit: int = 3) -> list[tuple[str, floa
             limit=limit,
         )
 
+    sorted_key = " ".join(sorted(lookup_key.split()))
     ranked: list[tuple[str, float, int | None]] = []
     for idx, candidate in enumerate(_LOOKUP_KEYS):
-        score = SequenceMatcher(None, lookup_key, candidate).ratio() * 100.0
-        ranked.append((candidate, score, idx))
+        direct = SequenceMatcher(None, lookup_key, candidate).ratio() * 100.0
+        token_sort = SequenceMatcher(None, sorted_key, " ".join(sorted(candidate.split()))).ratio() * 100.0
+        short, long_ = (lookup_key, candidate) if len(lookup_key) <= len(candidate) else (candidate, lookup_key)
+        partial = max(
+            SequenceMatcher(None, short, long_[i : i + len(short)]).ratio() * 100.0
+            for i in range(len(long_) - len(short) + 1)
+        ) if long_ else 0.0
+        ranked.append((candidate, max(direct, token_sort, partial), idx))
     ranked.sort(key=lambda item: item[1], reverse=True)
     return ranked[:limit]
 

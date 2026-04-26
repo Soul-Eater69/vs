@@ -51,7 +51,7 @@ def run(input_file: Path, out_file: Path, all_links: bool) -> None:
     logger.info("Testing %d SharePoint links...", len(links_to_test))
     sp = SharePointClient()
     if not sp.access_token:
-        logger.error("Could not obtain Graph token — check GRAPH_ACCESS_TOKEN")
+        logger.error("Could not obtain Graph token — check AZURE_TENANT_ID_SP / GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET")
         return
 
     results = []

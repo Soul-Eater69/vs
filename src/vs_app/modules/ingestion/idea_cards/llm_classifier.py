@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Any, Optional
 
-from vs_app.integrations.clients.llm import complete_text
+from vs_app.integrations.llm.client import complete_text
 from vs_app.modules.prompts.loader import load_prompt_yaml, safe_json_extract
 
 from .models import AttachmentCandidate, FuzzyDecision, LinkCandidate, LlmDecision

@@ -42,7 +42,7 @@ def safe_json_extract(text: str) -> dict:
         except Exception:
             pass
 
-    return {"selected_value_streams": [], "rejected_candidates": []}
+    return {}
 
 
 @lru_cache(maxsize=None)

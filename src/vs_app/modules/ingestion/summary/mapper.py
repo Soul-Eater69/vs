@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
-import re
 from typing import Any, Mapping
+
+from vs_app.modules.prompts.loader import safe_json_extract
 
 
 def parse_structured_summary_payload(
@@ -15,18 +15,10 @@ def parse_structured_summary_payload(
 ) -> dict[str, Any]:
     if not raw:
         return {}
-
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned.strip())
-
-    try:
-        payload = json.loads(cleaned)
-    except json.JSONDecodeError:
-        if logger is not None:
-            logger.warning("JSON parse failed for %s - raw: %.200s", context_id, raw)
-        return {}
-
-    return payload if isinstance(payload, dict) else {}
+    result = safe_json_extract(raw)
+    if not result and logger is not None:
+        logger.warning("JSON parse failed for %s - raw: %.200s", context_id, raw)
+    return result
 
 
 def coerce_key_terms(value: Any) -> list[str]:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
@@ -10,6 +9,7 @@ from typing import Any
 from vs_app.modules.prompts.loader import (
     build_jira_value_stream_verifier_prompt,
     build_jira_value_stream_verifier_system_prompt,
+    safe_json_extract,
 )
 from .approved_registry import (
     APPROVED_VALUE_STREAM_SET,
@@ -60,26 +60,6 @@ def _mapping_cache_key(value: str) -> str:
     return _norm_vs(clean_value_stream_name(value) or value)
 
 
-def _parse_verifier_json(raw: str) -> dict[str, Any]:
-    if not raw:
-        return {}
-
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned.strip())
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(cleaned[start : end + 1])
-            except json.JSONDecodeError:
-                pass
-
-    logger.warning("Failed to parse Jira value-stream verifier JSON: %.200s", raw)
-    return {}
-
 
 def _verify_names_with_llm(
     entries: list[dict[str, str]],
@@ -124,7 +104,7 @@ def _verify_names_with_llm(
         logger.warning("Jira value-stream verifier LLM call failed: %s", exc)
         return results
 
-    parsed = _parse_verifier_json(raw)
+    parsed = safe_json_extract(raw)
     for item in parsed.get("mappings") or []:
         if not isinstance(item, dict):
             continue

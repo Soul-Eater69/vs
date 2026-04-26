@@ -11,7 +11,7 @@ schema: |
 template: |
   You are a senior healthcare business analyst.
 
-  Read the cleaned, section-tagged Jira idea-card ticket below and produce one source-grounded JSON summary optimized for semantic retrieval and human review.
+  Read the cleaned, section-tagged Jira ticket content below and produce one source-grounded JSON summary optimized for semantic retrieval and human review.
 
   Ticket ID: {ticket_id}
 

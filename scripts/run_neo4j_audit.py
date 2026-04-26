@@ -2,13 +2,12 @@
 Metadata-only idea-card audit for Neo4j IDMT tickets.
 
 Usage:
-  py -m vs_app.jobs.idea_card_audit.run_neo4j_audit ^
-    --input-ticket-ids data/valid_idmt_tickets_sample_20.json ^
-    --source neo4j ^
-    --out-file ticket_data/idea_card_audit/idea_card_audit_by_ticket.json ^
-    --probe-links ^
-    --enable-llm ^
-    --llm-every-ticket ^
+  uv run python scripts/run_neo4j_audit.py \
+    --input-ticket-ids data/valid_idmt_tickets_sample_20.json \
+    --out-file ticket_data/idea_card_audit/idea_card_audit_by_ticket.json \
+    --probe-links \
+    --enable-llm \
+    --llm-every-ticket \
     --limit 20
 """
 from __future__ import annotations
@@ -173,79 +172,37 @@ async def main() -> None:
         epilog="""
 Examples:
   # Full audit with LLM on every ticket:
-  py -m vs_app.jobs.idea_card_audit.run_neo4j_audit \\
+  uv run python scripts/run_neo4j_audit.py \\
     --input-ticket-ids data/valid_idmt_tickets_sample_20.json \\
-    --source neo4j \\
     --out-file ticket_data/idea_card_audit/idea_card_audit_by_ticket.json \\
     --probe-links --enable-llm --llm-every-ticket --limit 20
 
   # Fast metadata-only, no LLM:
-  py -m vs_app.jobs.idea_card_audit.run_neo4j_audit \\
+  uv run python scripts/run_neo4j_audit.py \\
     --input-ticket-ids data/valid_idmt_tickets_sample_20.json \\
     --out-file ticket_data/idea_card_audit/idea_card_audit_by_ticket.json
 """,
     )
-    parser.add_argument(
-        "--input-ticket-ids",
-        required=True,
-        metavar="JSON_FILE",
-        help='Path to JSON file with {"ticket_ids": [...]} or a bare list.',
-    )
+    parser.add_argument("--input-ticket-ids", required=True, metavar="JSON_FILE")
     parser.add_argument(
         "--source",
         choices=["jira", "neo4j"],
         default=os.environ.get("INGESTION_TICKET_SOURCE", "neo4j"),
-        help="Ticket source backend (default: neo4j).",
     )
     parser.add_argument(
         "--out-file",
         default="ticket_data/idea_card_audit/idea_card_audit_by_ticket.json",
         metavar="FILE",
-        help="Output JSON file path.",
     )
-    parser.add_argument(
-        "--probe-links",
-        action="store_true",
-        default=False,
-        help="Probe link accessibility via HTTP (checks access, not content).",
-    )
-    parser.add_argument(
-        "--enable-llm",
-        action="store_true",
-        default=False,
-        help="Enable LLM classification.",
-    )
-    parser.add_argument(
-        "--llm-every-ticket",
-        action="store_true",
-        default=False,
-        help="Run LLM on every ticket (default: only uncertain cases).",
-    )
-    parser.add_argument(
-        "--metadata-only",
-        action="store_true",
-        default=True,
-        help="Metadata-only mode — no attachment content peeking (default: True).",
-    )
-    parser.add_argument(
-        "--download-attachments",
-        action="store_true",
-        default=False,
-        help="[future] Enable attachment content download (not implemented in v1).",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Process only the first N ticket IDs.",
-    )
+    parser.add_argument("--probe-links", action="store_true", default=False)
+    parser.add_argument("--enable-llm", action="store_true", default=False)
+    parser.add_argument("--llm-every-ticket", action="store_true", default=False)
+    parser.add_argument("--limit", type=int, default=None, metavar="N")
     parser.add_argument(
         "--concurrency",
         type=int,
         default=_DEFAULT_MAX_CONCURRENT,
         metavar="N",
-        help=f"Max concurrent audits (default: {_DEFAULT_MAX_CONCURRENT}).",
     )
 
     args = parser.parse_args()

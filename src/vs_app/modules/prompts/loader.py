@@ -9,12 +9,13 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import yaml
-from pydantic import BaseModel, Field
 
 from vs_app.shared.constants import PROMPT_YAML_DIR, RAG_PROMPTS_PATH
+# Re-exported for backward compatibility — canonical home is .schemas
+from .schemas import SelectedValueStream, SelectionResult  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -93,21 +94,6 @@ def render_prompt(template: str, **kwargs: Any) -> str:
 
     normalized = re.sub(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}", replace, template)
     return normalized.format(**kwargs)
-
-
-class SelectedValueStream(BaseModel):
-    entity_id: str = Field(description="The entity ID of the value stream")
-    entity_name: str = Field(description="The name of the value stream")
-    confidence: float = Field(
-        description="0.8-1.0 strong direct alignment, 0.5-0.7 partial, 0.3-0.4 weak but plausible"
-    )
-    reason: str = Field(description="Brief: which criteria matched and how")
-
-
-class SelectionResult(BaseModel):
-    selected_value_streams: List[SelectedValueStream] = Field(
-        description="Value streams that are relevant to the idea card"
-    )
 
 
 def build_selection_system_prompt(min_select: int = 10, max_select: int = 14) -> str:

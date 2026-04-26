@@ -32,6 +32,9 @@ class TicketSummaryDocument:
     business_capability: str
     key_terms: list[str]
 
+    stakeholders: list[str] = field(default_factory=list)
+    systems_and_products: list[str] = field(default_factory=list)
+
     value_stream_ids: list[str] = field(default_factory=list)
     value_stream_names: list[str] = field(default_factory=list)
     label_source: str = "jira_issuelinks"
@@ -47,6 +50,8 @@ class TicketSummaryDocument:
             "summary_text": self.summary_text,
             "business_problem": self.business_problem,
             "business_capability": self.business_capability,
+            "stakeholders": self.stakeholders,
+            "systems_and_products": self.systems_and_products,
             "key_terms": self.key_terms,
             "value_stream_ids": self.value_stream_ids,
             "value_stream_names": self.value_stream_names,
@@ -65,6 +70,8 @@ class TicketSummaryDocument:
             business_problem=doc.get("business_problem", ""),
             business_capability=doc.get("business_capability", ""),
             key_terms=doc.get("key_terms", []),
+            stakeholders=doc.get("stakeholders", []),
+            systems_and_products=doc.get("systems_and_products", []),
             value_stream_ids=doc.get("value_stream_ids", []),
             value_stream_names=doc.get("value_stream_names", []),
             label_source=doc.get("label_source", "jira_issuelinks"),

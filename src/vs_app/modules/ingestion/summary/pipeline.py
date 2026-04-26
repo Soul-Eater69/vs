@@ -23,6 +23,7 @@ async def ingest_ticket_summary(
     llm_client: Optional[Any] = None,
     embedding_client: Optional[Any] = None,
     cfg: Optional[Any] = None,
+    sharepoint_client: Optional[Any] = None,
 ) -> TicketSummaryDocument:
     """Full summary-mode pipeline for a single ticket."""
     cfg = _default_cfg(cfg)
@@ -38,6 +39,7 @@ async def ingest_ticket_summary(
         llm_client=llm_client,
         embedding_client=embedding_client,
         cfg=cfg,
+        sharepoint_client=sharepoint_client,
     )
 
 
@@ -47,12 +49,15 @@ async def ingest_ticket_summary_payload(
     llm_client: Optional[Any] = None,
     embedding_client: Optional[Any] = None,
     cfg: Optional[Any] = None,
+    sharepoint_client: Optional[Any] = None,
 ) -> TicketSummaryDocument:
     """Process an already-fetched ticket payload."""
     cfg = _default_cfg(cfg)
     ticket_key = str(ticket_data.get("key", ""))
 
-    consolidated_text = await consolidate_ticket_text(ticket_data, jira_client, cfg)
+    consolidated_text = await consolidate_ticket_text(
+        ticket_data, jira_client, cfg, sharepoint_client=sharepoint_client
+    )
     logger.info("Consolidated %d chars for %s", len(consolidated_text), ticket_key)
 
     if llm_client is not None and not getattr(cfg, "skip_llm_summary", False):

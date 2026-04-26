@@ -6,10 +6,13 @@ import logging
 import re
 from typing import Any
 
+from pydantic import ValidationError
+
 from vs_app.integrations.llm.client import complete_text
+from vs_app.modules.prompts.schemas import SummaryOutput, VsClassificationResult
 from vs_app.modules.tickets.documents import TicketSummaryDocument
 
-from .mapper import coerce_key_terms, parse_structured_summary_payload
+from .mapper import parse_structured_summary_payload
 from .prompt_builder import (
     build_structured_summary_prompt,
     build_value_stream_classification_prompt,
@@ -39,13 +42,16 @@ def summarize_ticket(
 
     raw = _call_llm(prompt, llm_client, cfg)
     parsed = parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)
+    output = _validate(SummaryOutput, parsed, ticket_id)
 
     return TicketSummaryDocument(
         ticket_id=ticket_id,
-        summary_text=parsed.get("summary_text", ""),
-        business_problem=parsed.get("business_problem", ""),
-        business_capability=parsed.get("business_capability", ""),
-        key_terms=coerce_key_terms(parsed.get("key_terms")),
+        summary_text=output.summary_text,
+        business_problem=output.business_problem,
+        business_capability=output.business_capability,
+        key_terms=output.key_terms,
+        stakeholders=output.stakeholders,
+        systems_and_products=output.systems_and_products,
     )
 
 
@@ -79,6 +85,7 @@ def classify_ticket_value_streams(
     )
     raw = _call_llm(prompt, llm_client, cfg)
     parsed = _parse_json(raw, f"{ticket_id}:value_streams")
+    output = _validate(VsClassificationResult, parsed, f"{ticket_id}:value_streams")
 
     name_to_id = {
         name.lower(): normalized_ids[idx] if idx < len(normalized_ids) else ""
@@ -87,30 +94,21 @@ def classify_ticket_value_streams(
     matched: list[dict[str, str]] = []
     seen: set[str] = set()
 
-    for item in parsed.get("value_streams") or []:
-        if not isinstance(item, dict):
-            continue
-        raw_name = str(item.get("vs_name") or "").strip()
-        matched_name = _match_known_value_stream(raw_name, normalized_names)
+    for item in output.value_streams:
+        matched_name = _match_known_value_stream(item.vs_name, normalized_names)
         if not matched_name:
             continue
         key = matched_name.lower()
         if key in seen:
             continue
 
-        inference_type = str(item.get("inference_type") or "direct").strip().lower()
-        if inference_type not in {"direct", "implied"}:
-            inference_type = "direct"
-
-        reason = str(item.get("reason") or "").strip()
-        if not reason:
-            reason = _fallback_reason(label_source)
+        reason = item.reason.strip() or _fallback_reason(label_source)
 
         matched.append(
             {
                 "vs_id": name_to_id.get(key, ""),
                 "vs_name": matched_name,
-                "inference_type": inference_type,
+                "inference_type": item.inference_type,
                 "reason": reason,
             }
         )
@@ -146,6 +144,15 @@ def _call_llm(prompt: str, llm_client: Any, cfg: Any) -> str:
 
 def _parse_json(raw: str, ticket_id: str) -> dict:
     return parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)
+
+
+def _validate(model_cls, payload: dict, context_id: str):
+    """Validate a parsed dict against a Pydantic model; on failure, return defaults."""
+    try:
+        return model_cls.model_validate(payload)
+    except ValidationError as exc:
+        logger.warning("%s output failed schema validation for %s: %s", model_cls.__name__, context_id, exc)
+        return model_cls()
 
 
 def _match_known_value_stream(candidate: str, known_names: list[str]) -> str:

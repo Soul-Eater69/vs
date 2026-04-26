@@ -6,11 +6,14 @@ import logging
 import re
 from typing import Any
 
+from pydantic import ValidationError
+
 from vs_app.modules.prompts.loader import (
     build_jira_value_stream_verifier_prompt,
     build_jira_value_stream_verifier_system_prompt,
     safe_json_extract,
 )
+from vs_app.modules.prompts.schemas import VsVerifierResult
 from .approved_registry import (
     APPROVED_VALUE_STREAM_SET,
     approved_value_streams_text,
@@ -105,17 +108,17 @@ def _verify_names_with_llm(
         return results
 
     parsed = safe_json_extract(raw)
-    for item in parsed.get("mappings") or []:
-        if not isinstance(item, dict):
-            continue
+    try:
+        output = VsVerifierResult.model_validate(parsed)
+    except ValidationError as exc:
+        logger.warning("Jira value-stream verifier output failed schema validation: %s", exc)
+        return results
 
-        raw_name = str(item.get("raw_name") or "").strip()
-        key = _mapping_cache_key(raw_name)
+    for mapping in output.mappings:
+        key = _mapping_cache_key(mapping.raw_name)
         if not key:
             continue
-
-        approved_name = item.get("approved_value_stream")
-        candidate = str(approved_name or "").strip() if approved_name is not None else ""
+        candidate = (mapping.approved_value_stream or "").strip()
         resolved = canonicalize_approved_value_stream(candidate) if candidate else None
         if resolved and resolved in APPROVED_VALUE_STREAM_SET:
             results[key] = resolved

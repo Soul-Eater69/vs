@@ -37,6 +37,8 @@ def format_structured_summary_text(
     summary_text = _field(payload, "summary_text")
     business_problem = _field(payload, "business_problem")
     business_capability = _field(payload, "business_capability")
+    stakeholders = coerce_key_terms(_field(payload, "stakeholders", raw=True))
+    systems_and_products = coerce_key_terms(_field(payload, "systems_and_products", raw=True))
     key_terms = coerce_key_terms(_field(payload, "key_terms", raw=True))
 
     parts: list[str] = []
@@ -46,6 +48,10 @@ def format_structured_summary_text(
         parts.append(f"Problem: {business_problem}")
     if business_capability:
         parts.append(f"Capability: {business_capability}")
+    if stakeholders:
+        parts.append("Stakeholders: " + ", ".join(stakeholders))
+    if systems_and_products:
+        parts.append("Systems & Products: " + ", ".join(systems_and_products))
     if key_terms:
         parts.append("Key Terms: " + ", ".join(key_terms))
 

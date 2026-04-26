@@ -1,15 +1,17 @@
 schema: |
   {
-    "summary_text": "Dense, specific summary of the proposed business change, who is affected, what systems/products are involved, and the operational work involved.",
-    "business_problem": "The concrete business pain point or gap this work addresses.",
-    "business_capability": "The process, capability, workflow, or product capability being created or changed.",
-    "stakeholders": ["3-8 affected groups: member populations, providers, brokers, internal teams, regulatory bodies, etc., named exactly as in the source."],
-    "systems_and_products": ["3-10 named systems, applications, products, channels, or platforms explicitly mentioned in the source."],
-    "key_terms": ["5-10 exact domain terms, process names, healthcare programs, or regulatory references from the source text."]
+    "summary_text": "4 to 6 dense, readable sentences describing the proposed business change, affected users/teams/populations, systems/products touched, operational work involved, and scope or scale when stated.",
+    "business_problem": "Exactly one sentence describing the concrete pain point, gap, friction, compliance need, operational breakdown, or unmet workflow need.",
+    "business_capability": "Exactly one sentence describing the process, workflow, product capability, or system-supported function being created or changed.",
+    "stakeholders": ["Source-exact affected groups, member populations, providers, brokers, internal teams, regulatory bodies, or partner organizations. Empty array allowed when not present."],
+    "systems_and_products": ["Source-exact named systems, applications, products, platforms, channels, or services. Empty array allowed when not present."],
+    "key_terms": ["Source-exact domain terms, process names, healthcare programs, regulatory references, or operational entities not already captured above. Empty array allowed when not present."]
   }
 
 template: |
-  You are a senior healthcare business analyst. Read a Jira idea-card ticket and produce a structured summary optimized for semantic retrieval — not executive writing.
+  You are a senior healthcare business analyst.
+
+  Read the cleaned, section-tagged Jira idea-card ticket below and produce one source-grounded JSON summary optimized for semantic retrieval and human review.
 
   Ticket ID: {ticket_id}
 
@@ -18,43 +20,42 @@ template: |
 
   ## How to read the input
 
-  The content above is assembled from multiple sources, each marked with a header:
+  Input sections may include:
 
-  - `[DESCRIPTION]` — the Jira description text. Treat as authoritative for ticket intent.
-  - `[DOCUMENT: filename]` — text extracted from a Jira attachment.
-  - `[LINKED DOCUMENT: filename]` — text extracted from a SharePoint link in the description.
-  - `[LINKED DOCUMENTS - CONTENT UNAVAILABLE]` — filenames of documents we could not download. Use as weak context only; do not infer their contents.
+  - `[DESCRIPTION]` — authoritative statement of ticket intent.
+  - `[DOCUMENT: filename]` — extracted Jira attachment text.
+  - `[LINKED DOCUMENT: filename]` — extracted SharePoint-linked document text.
+  - `[LINKED DOCUMENTS - CONTENT UNAVAILABLE]` — filenames only; weak context, do not infer contents.
   - `[COMMENT N]` — substantive ticket comments.
 
-  When multiple `[DOCUMENT]` / `[LINKED DOCUMENT]` sections are present, identify which one reads like the primary idea card (proposal, business case, deck, concept slide) and weight it most heavily. Use the others as supporting context. The `[DESCRIPTION]` always takes precedence for the ticket's stated intent.
+  Use `[DESCRIPTION]` as the highest-priority source. When multiple documents are present, weight the document that reads most like the primary idea card, proposal, business case, concept slide, or deck. Use other documents and comments only as supporting context.
 
   ## What to extract
 
-  Produce exactly one JSON object with this shape:
+  Return exactly one valid JSON object with this shape:
   {summary_schema}
 
-  Field discipline:
+  Field guidance:
 
-  - **summary_text** — 4 to 6 dense sentences capturing the proposed business change, the operational work involved, the impacted users / teams / populations, the systems or products touched, and the scope or scale of the change. Prefer concrete source language over abstract phrasing.
-
-  - **business_problem** — exactly one sentence stating the concrete pain point, gap, friction, compliance need, operational breakdown, or unmet workflow need. Do not restate summary_text.
-
-  - **business_capability** — exactly one sentence describing what the business must be able to do: the process, workflow, product capability, or system-supported function being introduced or changed. Do not restate business_problem.
-
-  - **stakeholders** — 3 to 8 source-grounded names of who is impacted: member populations (e.g., "Medicare members", "Group Coverage enrollees"), provider types, broker categories, internal teams, regulatory bodies, partner organizations. Use the wording from the source.
-
-  - **systems_and_products** — 3 to 10 named systems, applications, products, platforms, channels, or services explicitly mentioned in the source. Include only proper-noun or named entities (not generic terms like "the database").
-
-  - **key_terms** — 5 to 10 unique source-grounded nouns or short phrases. Prioritize process names, healthcare programs, regulatory references, and operational entities not already captured under stakeholders or systems_and_products. Do not invent value-stream labels, taxonomy terms, or normalized names.
+  - `summary_text` — favor recall. Include useful semantic surface area while staying source-grounded. Capture the proposed business change, operational work, affected users/teams/populations, systems/products touched, and stated scope or scale.
+  - `business_problem` — exactly one sentence. State the concrete pain point, gap, friction, compliance need, operational breakdown, or unmet workflow need. Do not restate `summary_text`.
+  - `business_capability` — exactly one sentence. State what the business must be able to do: the process, workflow, product capability, or system-supported function being introduced or changed. Do not restate `business_problem`.
+  - `stakeholders` — prioritize precision. Include only source-exact affected groups such as member populations, providers, brokers, internal teams, regulatory bodies, or partner organizations.
+  - `systems_and_products` — prioritize precision. Include only source-exact named systems, applications, products, platforms, channels, or services.
+  - `key_terms` — prioritize precision. Include only source-exact domain terms, process names, healthcare programs, regulatory references, or operational entities not already captured above.
 
   ## Rules
 
-  - Use only the source text as evidence. Do not hallucinate systems, regulations, users, workflows, or business goals.
-  - Ignore Jira mechanics, ticket bookkeeping, owner names, timelines, dates, formatting artifacts, and repeated boilerplate unless they directly describe the business change.
-  - If the source is sparse, keep fields narrow and conservative rather than padding with inference.
-  - If `[LINKED DOCUMENTS - CONTENT UNAVAILABLE]` is present, you may mention what those filenames suggest exists, but do not invent content.
-  - Output ONLY the JSON object: no markdown fences, no commentary, no extra keys, no missing keys. Use string values for the first three fields and an array of strings for `key_terms`. Verify the JSON parses before returning.
+  - Use only the provided source text.
+  - Do not invent, normalize, expand, or infer systems, stakeholders, regulations, workflows, acronyms, or business goals.
+  - Preserve exact source wording and capitalization, including acronyms such as `MA`; do not expand or normalize them.
+  - Empty arrays are allowed for `stakeholders`, `systems_and_products`, and `key_terms` when named values are not present.
+  - Do not pad arrays to meet a minimum count.
+  - Ignore Jira bookkeeping, owner names, dates, timelines, repeated boilerplate, and formatting artifacts unless they directly describe the business change.
+  - If unavailable linked documents are listed, mention only that filenames exist when relevant; do not infer their contents.
+  - Output JSON only: no markdown fences, commentary, extra keys, or missing keys.
+  - Before returning, silently verify that the JSON parses.
 
-  ## Goal
+  ## Context
 
-  A dense, retrieval-quality structured summary that captures the actual business change, operational context, and domain language present in this ticket.
+  The input is capped at 20,000 characters and may include up to four extracted documents. The output is capped at 1,200 tokens. The JSON is embedded for vector retrieval and stored for human inspection, so it should be concise, readable, source-grounded, dense in the summary, and precise in facet arrays.

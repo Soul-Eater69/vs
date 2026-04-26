@@ -298,7 +298,20 @@ Examples:
         "ticket_ids",
         nargs="*",
         metavar="TICKET_ID",
-        help="Ticket IDs to process. Omit to use the default hardcoded list.",
+        help="Ticket IDs to process. Omit to use --input-ticket-ids or the default hardcoded list.",
+    )
+    parser.add_argument(
+        "--input-ticket-ids",
+        metavar="JSON_FILE",
+        default=None,
+        help="Path to a JSON file containing ticket IDs (a list, or a dict with 'ticket_ids' key).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Process only the first N tickets from the resolved list.",
     )
     parser.add_argument(
         "--mode",
@@ -368,7 +381,18 @@ Examples:
     )
 
     args = parser.parse_args()
-    tickets = [t.upper() for t in args.ticket_ids] if args.ticket_ids else DEFAULT_TICKETS
+
+    if args.ticket_ids:
+        tickets = [t.upper() for t in args.ticket_ids]
+    elif args.input_ticket_ids:
+        raw = json.loads(Path(args.input_ticket_ids).read_text(encoding="utf-8"))
+        ids = raw if isinstance(raw, list) else (raw.get("ticket_ids") or [])
+        tickets = [str(t).strip().upper() for t in ids if t]
+    else:
+        tickets = list(DEFAULT_TICKETS)
+
+    if args.limit:
+        tickets = tickets[: args.limit]
 
     await run_batch(
         tickets,

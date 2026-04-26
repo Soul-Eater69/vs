@@ -66,11 +66,13 @@ async def _fetch_ticket(
         try:
             ticket_data = await ticket_client.get_ticket_data(ticket_id)
             fields = ticket_data.get("fields") or {}
+            logger.info("fetched %s", ticket_id)
             return ticket_id, {
                 "title": str(fields.get("summary") or ticket_id),
                 "description": str(fields.get("description") or ""),
             }, None
         except Exception as exc:
+            logger.warning("fetch failed %s: %s", ticket_id, exc)
             return ticket_id, None, str(exc)
 
 

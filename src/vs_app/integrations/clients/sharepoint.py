@@ -1,4 +1,4 @@
-"""SharePoint client via Microsoft Graph API (client credentials)."""
+"""SharePoint client via Microsoft Graph API (bearer token)."""
 from __future__ import annotations
 
 import base64
@@ -12,7 +12,6 @@ import requests
 logger = logging.getLogger(__name__)
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0/"
-_TOKEN_URL = "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
 
 def _get_long_path(path: str) -> str:
@@ -27,32 +26,9 @@ def _ensure_dir(file_path: str) -> None:
 
 class SharePointClient:
     def __init__(self) -> None:
-        self.tenant_id = os.environ.get("AZURE_TENANT_ID", "")
-        self.client_id = os.environ.get("AZURE_CLIENT_ID", "")
-        self.client_secret = os.environ.get("AZURE_CLIENT_SECRET", "")
-        self.access_token: Optional[str] = self.get_access_token()
-
-    def get_access_token(self) -> Optional[str]:
-        if not all([self.tenant_id, self.client_id, self.client_secret]):
-            logger.error("AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET not set")
-            return None
-        try:
-            resp = requests.post(
-                _TOKEN_URL.format(tenant_id=self.tenant_id),
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "scope": "https://graph.microsoft.com/.default",
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            return resp.json().get("access_token")
-        except Exception as exc:
-            logger.error("Error getting access token: %s", exc)
-            return None
+        self.access_token: Optional[str] = os.environ.get("GRAPH_ACCESS_TOKEN") or None
+        if not self.access_token:
+            logger.error("GRAPH_ACCESS_TOKEN not set")
 
     def _auth_headers(self) -> dict:
         return {"Authorization": f"Bearer {self.access_token}"}

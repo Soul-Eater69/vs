@@ -932,7 +932,7 @@ export default function Home() {
               noPad
               badge={<Pill tone={step === 'done' ? 'green' : step === 'error' ? 'red' : step === 'idle' ? 'neutral' : 'sky'}>{step}</Pill>}
             >
-              <PipelineGraph step={step} />
+              <PipelineGraph step={step} stepLabel={stepLabel} stepOnError={stepOnError} />
             </Section>
 
             {/* Error */}

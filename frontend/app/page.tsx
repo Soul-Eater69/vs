@@ -17,7 +17,7 @@ const API = 'http://localhost:8000';
 const TICKET_KEY_RE = /^[A-Z][A-Z0-9_]*-\d+$/;
 
 // --- Types ----------------------------------------------------------------
-type Step = 'idle' | 'extracting' | 'retrieving' | 'generating' | 'done' | 'error';
+type Step = 'idle' | 'extract' | 'condense' | 'semantic' | 'historical' | 'finalize' | 'done' | 'error';
 type Tab =
   | 'selection'
   | 'comparison'
@@ -203,21 +203,27 @@ function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
 const NODE_TYPES = { step: StepNode };
 
 const STEP_DEFS = [
-  { id: 'extract',  x: 0,   icon: 'file' as Ico,     title: 'Extract',   subtitle: 'Clean & summarize text' },
-  { id: 'retrieve', x: 240, icon: 'database' as Ico, title: 'Retrieve',  subtitle: 'VS index + historical support' },
-  { id: 'select',   x: 480, icon: 'cpu' as Ico,      title: 'LLM Select', subtitle: 'GPT picks value streams' },
-  { id: 'finalize', x: 720, icon: 'award' as Ico,    title: 'Finalize',  subtitle: 'De-dup & output' },
+  { id: 'extract',    x: 0,   icon: 'file'     as Ico, title: 'Extract',    subtitle: 'Read idea card' },
+  { id: 'condense',   x: 195, icon: 'zap'      as Ico, title: 'Condense',   subtitle: 'LLM summarize' },
+  { id: 'semantic',   x: 390, icon: 'database' as Ico, title: 'VS Search',  subtitle: 'Azure VS index' },
+  { id: 'historical', x: 585, icon: 'layers'   as Ico, title: 'Historical', subtitle: 'FAISS lookup' },
+  { id: 'finalize',   x: 780, icon: 'cpu'      as Ico, title: 'LLM Select', subtitle: 'GPT picks VS' },
 ];
 
 const FLOW_EDGES_BASE: Edge[] = [
-  { id: 'e1', source: 'extract',  target: 'retrieve', markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e2', source: 'retrieve', target: 'select',   markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e3', source: 'select',   target: 'finalize', markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e1', source: 'extract',    target: 'condense',   markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e2', source: 'condense',   target: 'semantic',   markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e3', source: 'semantic',   target: 'historical', markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e4', source: 'historical', target: 'finalize',   markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
 ];
 
-function PipelineGraph({ step }: { step: Step }) {
-  const seq: Step[] = ['extracting', 'retrieving', 'generating', 'done'];
-  const idx = step === 'error' ? 2 : seq.indexOf(step);
+const PIPELINE_SEQ: Step[] = ['extract', 'condense', 'semantic', 'historical', 'finalize'];
+
+function PipelineGraph({ step, stepLabel, stepOnError }: { step: Step; stepLabel: string; stepOnError: Step }) {
+  const activeIdx = step === 'error' ? PIPELINE_SEQ.indexOf(stepOnError) : PIPELINE_SEQ.indexOf(step);
+  const isDone = step === 'done';
+  const isError = step === 'error';
+  const completedEdges = isDone ? PIPELINE_SEQ.length - 1 : Math.max(0, activeIdx);
 
   const nodes = useMemo<Node<StepNodeData>[]>(() =>
     STEP_DEFS.map((d, i) => ({
@@ -228,20 +234,25 @@ function PipelineGraph({ step }: { step: Step }) {
       selectable: false,
       data: {
         title: d.title,
-        subtitle: d.subtitle,
+        subtitle: i === activeIdx && !isDone && !isError ? (stepLabel || d.subtitle) : d.subtitle,
         icon: d.icon,
-        status: step === 'error' && i >= 2 ? 'error' : i < idx ? 'done' : i === idx ? 'active' : 'idle',
+        status: isDone ? 'done'
+          : isError ? (i < activeIdx ? 'done' : i === activeIdx ? 'error' : 'idle')
+          : activeIdx < 0 ? 'idle'
+          : i < activeIdx ? 'done'
+          : i === activeIdx ? 'active'
+          : 'idle',
       },
     })),
-  [step, idx]);
+  [step, activeIdx, isDone, isError, stepLabel]);
 
   const edges = useMemo<Edge[]>(() =>
     FLOW_EDGES_BASE.map((e, i) => ({
       ...e,
-      animated: i < idx,
-      style: { strokeWidth: 2, stroke: i < idx ? '#10b981' : '#a1a1aa' },
+      animated: i < completedEdges,
+      style: { strokeWidth: 2, stroke: i < completedEdges ? '#10b981' : '#a1a1aa' },
     })),
-  [idx]);
+  [completedEdges]);
 
   return (
     <div className="h-[180px] w-full">
@@ -671,11 +682,13 @@ export default function Home() {
   const [dark, setDark] = useState(true);
 
   const [step, setStep] = useState<Step>('idle');
+  const [stepLabel, setStepLabel] = useState('');
+  const [stepOnError, setStepOnError] = useState<Step>('idle');
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<PipelineResult | null>(null);
   const [tab, setTab] = useState<Tab>('selection');
 
-  const timer = useRef<ReturnType<typeof setTimeout>>(null);
+  const currentPipelineStepRef = useRef<Step>('idle');
 
   // Load cards + theme
   useEffect(() => {
@@ -721,8 +734,8 @@ export default function Home() {
   }, []);
 
   const run = useCallback(async () => {
-    setErr(null); setResult(null); setStep('extracting');
-    timer.current = setTimeout(() => setStep('retrieving'), 1500);
+    setErr(null); setResult(null); setStepLabel(''); setStep('idle');
+    currentPipelineStepRef.current = 'idle';
 
     try {
       const body: Record<string, unknown> = {
@@ -734,26 +747,61 @@ export default function Home() {
       else if (selectedTicketId) body.ticket_id = selectedTicketId;
       else throw new Error('Selected card is a local doc_id, not a real ticket key. Use Custom Text for this card.');
 
-      const res = await fetch(`${API}/rag/value-streams`, {
+      const res = await fetch(`${API}/rag/value-streams/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
 
-      if (timer.current) clearTimeout(timer.current);
       if (!res.ok) {
         const e = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(e.detail ?? 'Failed');
       }
 
-      const data: PipelineResult = await res.json();
-      setStep('generating');
-      await new Promise(r => setTimeout(r, 400));
-      setStep('done');
-      setResult(data);
-      setTab('selection');
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          const lines = part.split('\n');
+          let eventType = '';
+          let data = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+            if (line.startsWith('data: ')) data = line.slice(6);
+          }
+
+          if (eventType === 'step') {
+            const payload = JSON.parse(data) as { step: Step; label: string };
+            currentPipelineStepRef.current = payload.step;
+            setStep(payload.step);
+            setStepLabel(payload.label || '');
+          } else if (eventType === 'result') {
+            const payload = JSON.parse(data) as PipelineResult;
+            setResult(payload);
+            setStepLabel('');
+            setStep('done');
+            setTab('selection');
+          } else if (eventType === 'error') {
+            const payload = JSON.parse(data) as { message: string };
+            setStepOnError(currentPipelineStepRef.current);
+            setStep('error');
+            setErr(payload.message);
+            return;
+          }
+        }
+      }
     } catch (e: unknown) {
-      if (timer.current) clearTimeout(timer.current);
+      setStepOnError(currentPipelineStepRef.current);
       setStep('error');
       setErr(e instanceof Error ? e.message : String(e));
     }

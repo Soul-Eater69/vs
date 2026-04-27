@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 
 from vs_app.api.dependencies import ApiContainer, get_container
 from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
@@ -14,6 +16,10 @@ from vs_app.modules.rag.service import ValueStreamRagCommand
 router = APIRouter(prefix="/rag", tags=["rag"])
 
 _FAISS_DIR = Path(os.environ.get("HISTORICAL_FAISS_DIR", "ticket_data/_faiss"))
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 def _ground_truth_from_faiss(ticket_id: str) -> list[str]:
@@ -37,6 +43,104 @@ def _ground_truth_from_faiss(ticket_id: str) -> list[str]:
     except Exception:
         pass
     return []
+
+
+@router.post("/value-streams/stream")
+async def predict_value_streams_stream(
+    request: ValueStreamRagRequest,
+) -> StreamingResponse:
+    async def generate():
+        from vs_app.modules.rag.query.views import condense_idea_card, clean_ppt_text
+        from vs_app.modules.rag.retrieval.semantic_retriever import retrieve_semantic_candidates
+        from vs_app.modules.rag.retrieval.historical_retriever import retrieve_historical_support
+        from vs_app.modules.rag.augmentation.candidate_merger import merge_candidate_sources
+        from vs_app.modules.rag.augmentation.finalizer import generate_value_streams
+
+        try:
+            top_k = max(request.top_k_historical, request.top_k_value_streams)
+            top_k_vs = min(max(12, top_k), 50)
+            max_llm_candidates = min(max(top_k_vs, 14), 24)
+            faiss_dir = str(_FAISS_DIR)
+
+            # Step 1: Extract
+            yield _sse("step", {"step": "extract", "label": f"Reading {request.ticket_id or 'idea card'}..."})
+            if request.idea_card_text:
+                raw_text = request.idea_card_text
+            elif request.ticket_id:
+                from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
+                raw_text = await asyncio.to_thread(extract_idea_card_text, doc_id=request.ticket_id)
+            else:
+                raise ValueError("No idea card text or ticket ID provided")
+
+            # Step 2: Condense
+            yield _sse("step", {"step": "condense", "label": "Condensing with LLM..."})
+            cleaned_query = await asyncio.to_thread(clean_ppt_text, raw_text)
+            query_for_prompt = await asyncio.to_thread(condense_idea_card, raw_text)
+
+            # Step 3: Semantic VS search
+            yield _sse("step", {"step": "semantic", "label": f"Searching VS index (top {top_k_vs})..."})
+            semantic_candidates = await asyncio.to_thread(
+                retrieve_semantic_candidates,
+                cleaned_query,
+                top_k=top_k_vs,
+            )
+
+            # Step 4: Historical FAISS
+            yield _sse("step", {"step": "historical", "label": "Searching historical FAISS..."})
+            historical = await asyncio.to_thread(
+                retrieve_historical_support,
+                query_for_prompt or cleaned_query,
+                historical_faiss_dir=faiss_dir,
+                max_ticket_hits=min(max(12, top_k), 24),
+            )
+
+            # Step 5: LLM finalize
+            yield _sse("step", {"step": "finalize", "label": "LLM selecting value streams..."})
+            augmented = merge_candidate_sources(
+                semantic_candidates,
+                historical.get("historical_value_stream_support", []),
+                max_llm_candidates=max_llm_candidates,
+            )
+            generated = await asyncio.to_thread(
+                generate_value_streams,
+                query_for_prompt=query_for_prompt or cleaned_query,
+                llm_candidates=augmented["llm_candidates"],
+                auto_selected=augmented["auto_selected_value_streams"],
+            )
+
+            result_payload = {
+                "selected_value_streams": generated["selected_value_streams"],
+                "auto_selected_value_streams": augmented["auto_selected_value_streams"],
+                "llm_selected_value_streams": generated["llm_selected_value_streams"],
+                "rejected_candidates": [],
+                "semantic_candidate_value_streams": semantic_candidates,
+                "historical_candidate_value_streams": historical.get("historical_value_stream_support", []),
+                "merged_candidate_value_streams": augmented["merged_candidates"],
+                "historical_ticket_hits": historical.get("historical_ticket_hits", []),
+                "historical_value_stream_support": historical.get("historical_value_stream_support", []),
+                "candidate_value_streams": augmented["merged_candidates"],
+                "llm_candidates": generated["candidates_used"],
+                "historical_source": historical.get("historical_source", ""),
+                "raw_response": generated["raw_response"],
+                "query_preparation": {
+                    "cleaned_query": cleaned_query,
+                    "query_for_prompt": query_for_prompt,
+                },
+                "warnings": [],
+                "evidence": historical.get("historical_value_stream_support", []),
+                "debug": {},
+                "ground_truth": _ground_truth_from_faiss(request.ticket_id) if request.ticket_id else [],
+            }
+            yield _sse("result", result_payload)
+
+        except Exception as exc:
+            yield _sse("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/value-streams", response_model=ValueStreamRagResponse)

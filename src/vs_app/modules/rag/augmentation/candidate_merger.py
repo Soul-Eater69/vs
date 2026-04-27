@@ -15,6 +15,8 @@ def merge_candidate_sources(
     strong_support_score: float = 0.60,
     moderate_support_count: int = 2,
     moderate_support_score: float = 0.45,
+    strong_implied_support_count: int = 8,
+    strong_implied_support_score: float = 0.75,
 ) -> dict:
     by_name: Dict[str, dict] = {}
 
@@ -117,6 +119,8 @@ def merge_candidate_sources(
             row,
             support_count=strong_support_count,
             min_score=strong_support_score,
+            strong_implied_count=strong_implied_support_count,
+            strong_implied_score=strong_implied_support_score,
         ):
             auto_selected.append(_to_selected_value_stream(row))
             continue
@@ -178,37 +182,45 @@ def _label_source_adjustment(row: dict) -> float:
     return 0.0
 
 
-def _should_auto_include(row: dict, *, support_count: int, min_score: float) -> bool:
+def _should_auto_include(
+    row: dict,
+    *,
+    support_count: int,
+    min_score: float,
+    strong_implied_count: int,
+    strong_implied_score: float,
+) -> bool:
     if row.get("from_semantic"):
         return False
-    if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
-        return False
 
+    best_score = float(row.get("best_support_score", 0.0) or 0.0)
     direct_count = int(row.get("direct_count", 0) or 0)
     total_count = int(row.get("support_count", 0) or 0)
+    weighted_total = _weighted_support_value(row, "weighted_support_count", "support_count")
 
-    if direct_count >= 3 and total_count >= support_count:
+    if direct_count >= 3 and total_count >= support_count and best_score >= min_score:
         return True
 
+    if (
+        total_count >= strong_implied_count
+        and best_score >= strong_implied_score
+        and weighted_total >= 2.0
+    ):
+        return True
+
+    if best_score < min_score:
+        return False
     if total_count < support_count:
         return False
-    if _weighted_support_value(row, "weighted_support_count", "support_count") < max(1.5, support_count * 0.45):
-        return False
-    return _weighted_support_value(row, "weighted_direct_count", "direct_count") >= _weighted_support_value(
-        row,
-        "weighted_implied_count",
-        "implied_count",
-    )
+    return weighted_total >= max(1.5, support_count * 0.45)
 
 
 def _should_auto_include_merged(row: dict, *, min_score: float) -> bool:
     if not (row.get("from_semantic") and row.get("from_historical")):
         return False
-    if float(row.get("semantic_score", 0.0) or 0.0) < 1.5:
-        return False
     if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
         return False
-    if int(row.get("support_count", 0) or 0) < 5:
+    if int(row.get("support_count", 0) or 0) < 3:
         return False
     return True
 

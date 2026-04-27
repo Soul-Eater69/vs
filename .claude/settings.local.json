@@ -31,7 +31,10 @@
       "PowerShell(Get-Command python, pip, uv -ErrorAction SilentlyContinue)",
       "PowerShell(Get-ChildItem \"$env:LOCALAPPDATA\\\\uv\\\\bin\\\\uv.exe\" -ErrorAction SilentlyContinue; Get-ChildItem \"$env:APPDATA\\\\uv\\\\bin\\\\uv.exe\" -ErrorAction SilentlyContinue; Get-ChildItem \"C:\\\\Users\\\\U588867\\\\AppData\\\\Local\\\\uv\\\\bin\\\\uv.exe\" -ErrorAction SilentlyContinue)",
       "PowerShell(& \"C:\\\\Users\\\\mahes\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe\" -m pip install \"markitdown[pptx,docx,pdf,xlsx]\" 2>&1)",
-      "PowerShell(& \"d:\\\\projects\\\\vs\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import markitdown; print\\('ok'\\)\" 2>&1)"
+      "PowerShell(& \"d:\\\\projects\\\\vs\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import markitdown; print\\('ok'\\)\" 2>&1)",
+      "Bash(python -m pytest tests/test_rag_candidate_merger.py -v)",
+      "Bash(py -m pytest tests/test_rag_candidate_merger.py -v)",
+      "Bash(py -c \"import ast; ast.parse\\(open\\('src/vs_app/modules/rag/augmentation/candidate_merger.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

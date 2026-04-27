@@ -45,7 +45,7 @@ class GenerationService:
         model: Optional[str] = None,
         base_url: Optional[str] = config.LLM_BASE_URL,
     ) -> None:
-        model = model or os.environ.get("GENERATION_LLM_MODEL", "gpt-5-mini-idp")
+        model = model or os.environ.get("GENERATION_LLM_MODEL", "gpt-5-idp")
         kwargs = {"model": model}
         if base_url:
             kwargs["openai_api_base"] = base_url

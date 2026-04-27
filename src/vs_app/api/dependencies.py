@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -10,8 +11,6 @@ from vs_app.modules.ingestion.service import IngestionService
 from vs_app.modules.ingestion.summary.pipeline import ingest_ticket_summary_payload
 from vs_app.modules.ingestion.chunks.pipeline import ingest_ticket_chunks_payload
 from vs_app.modules.rag.service import ValueStreamRagCommand, ValueStreamRagService
-from vs_app.modules.tickets.text_assembly import build_retrieval_text
-from vs_app.modules.tickets.text_processing import clean_description, extract_comment_texts
 from vs_app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -115,48 +114,20 @@ class _ApiValueStreamRagService(ValueStreamRagService):
         self._config = config
 
     async def analyze(self, command: ValueStreamRagCommand):
-        if command.idea_card_text or command.query or not command.ticket_id:
+        if command.idea_card_text or command.query:
             return await super().analyze(command)
 
-        query_text = await self._build_query_from_ticket(
-            ticket_id=command.ticket_id,
-            source=command.source,
-        )
-        adjusted_command = replace(command, query=query_text)
-        return await super().analyze(adjusted_command)
+        if not command.ticket_id:
+            return await super().analyze(command)
 
-    async def _build_query_from_ticket(
-        self,
-        *,
-        ticket_id: str,
-        source: str | None,
-    ) -> str:
-        source_name = normalize_ticket_source(source)
-        async with self._ticket_source_factory.build(source=source_name) as ticket_source:
-            ticket_data = await ticket_source.get_ticket_data(ticket_id, config=self._config)
-            attachments = list(ticket_data.get("attachments", []) or [])
-            attachment_texts: list[str] = []
-            if attachments:
-                try:
-                    contents = await ticket_source.fetch_attachment_content(attachments)
-                    attachment_texts = [
-                        str(item.get("text_content") or "").strip()
-                        for item in contents or []
-                        if str(item.get("text_content") or "").strip() and not item.get("error")
-                    ]
-                except Exception as exc:
-                    logger.warning("Attachment extraction unavailable for %s: %s", ticket_id, exc)
+        # ticket_id maps to a local idea card file — read it from disk
+        query_text = await asyncio.to_thread(self._read_idea_card, command.ticket_id)
+        return await super().analyze(replace(command, query=query_text))
 
-        fields = ticket_data.get("fields", {}) or {}
-        description = clean_description(fields.get("description"))
-        comment_texts = extract_comment_texts(fields.get("comment") or {})
-        query_text = build_retrieval_text(
-            title=str(fields.get("summary") or ticket_id),
-            description_cleaned=description,
-            attachment_texts=attachment_texts,
-            comment_texts=comment_texts,
-        )
-        return query_text or str(fields.get("summary") or ticket_id)
+    @staticmethod
+    def _read_idea_card(ticket_id: str) -> str:
+        from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
+        return extract_idea_card_text(doc_id=ticket_id)
 
 
 def _resolve_ticket_source_name(ticket: dict) -> str:

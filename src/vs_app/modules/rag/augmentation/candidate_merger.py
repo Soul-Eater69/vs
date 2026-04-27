@@ -190,32 +190,40 @@ def _should_auto_include(
     strong_implied_count: int,
     strong_implied_score: float,
 ) -> bool:
+    """Tier 2 (direct-tagged) and Tier 3 (heavy-implied) for historical-only rows.
+
+    No moderate fallback — anything that doesn't pass one of the named tiers
+    is sent to the LLM for judgment.
+    """
     if row.get("from_semantic"):
         return False
 
     best_score = float(row.get("best_support_score", 0.0) or 0.0)
+    avg_score = float(row.get("avg_support_score", 0.0) or 0.0)
     direct_count = int(row.get("direct_count", 0) or 0)
     total_count = int(row.get("support_count", 0) or 0)
     weighted_total = _weighted_support_value(row, "weighted_support_count", "support_count")
 
-    if direct_count >= 3 and total_count >= support_count and best_score >= min_score:
+    # Tier 2: direct jira-tagged consensus.
+    if direct_count >= 3 and best_score >= min_score:
         return True
 
+    # Tier 3: heavy implied consensus. The avg_score gate is the key
+    # discriminator — TPs have consistently-similar analogs, FPs have one
+    # peak hit and a long noisy tail.
     if (
         total_count >= strong_implied_count
         and best_score >= strong_implied_score
-        and weighted_total >= 2.0
+        and avg_score >= 0.55
+        and weighted_total >= 2.5
     ):
         return True
 
-    if best_score < min_score:
-        return False
-    if total_count < support_count:
-        return False
-    return weighted_total >= max(1.5, support_count * 0.45)
+    return False
 
 
 def _should_auto_include_merged(row: dict, *, min_score: float) -> bool:
+    """Tier 1: cross-confirmed (semantic + historical agree)."""
     if not (row.get("from_semantic") and row.get("from_historical")):
         return False
     if float(row.get("best_support_score", 0.0) or 0.0) < min_score:

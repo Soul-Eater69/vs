@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Mapping
 
 import httpx
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 
 from vs_app import settings as config
 from .auth import IDPCustomAuth
@@ -39,6 +40,30 @@ except ImportError:  # pragma: no cover - optional dependency in some local envs
     ChatGenerationChunk = Any  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+# Reasoning-class models (o-series, gpt-5*) reject any non-default value for
+# temperature, top_p, presence_penalty, or frequency_penalty. The gateway
+# returns HTTP 400 (invalid_request_error / unsupported_value) when any of
+# those fields is present. We detect these by the model name and strip the
+# offending fields at the client layer so callers can keep passing whatever
+# sampling params they want without each call site having to know which
+# model family is in use.
+_REASONING_MODEL_PATTERN = re.compile(
+    r"^(?:o[1-9]|gpt-5)(?:[-_.].*)?$",
+    re.IGNORECASE,
+)
+_REASONING_FORBIDDEN_PARAMS = (
+    "temperature",
+    "top_p",
+    "presence_penalty",
+    "frequency_penalty",
+)
+
+
+def _is_reasoning_model(model_name: str | None) -> bool:
+    if not model_name:
+        return False
+    return bool(_REASONING_MODEL_PATTERN.match(str(model_name).strip()))
 
 
 def update_completions_uri(req: httpx.Request) -> None:
@@ -82,6 +107,34 @@ class IDPChatOpenAI(ChatOpenAI):
     extra_body: Mapping[str, Any] | None = {"api_version": "2024-04-01-preview"}
     temperature: float | None = 0
     openai_api_base: str = config.LLM_BASE_URL
+
+    # --------------------------------------------------------------------------
+    # Reasoning-model compatibility
+    # --------------------------------------------------------------------------
+
+    @model_validator(mode="after")
+    def _strip_unsupported_reasoning_params(self) -> "IDPChatOpenAI":
+        model_name = getattr(self, "model_name", None) or getattr(self, "model", None)
+        if _is_reasoning_model(model_name):
+            for field in _REASONING_FORBIDDEN_PARAMS:
+                if getattr(self, field, None) is not None:
+                    object.__setattr__(self, field, None)
+            existing_kwargs = dict(getattr(self, "model_kwargs", {}) or {})
+            stripped_kwargs = {
+                k: v for k, v in existing_kwargs.items() if k not in _REASONING_FORBIDDEN_PARAMS
+            }
+            if stripped_kwargs != existing_kwargs:
+                object.__setattr__(self, "model_kwargs", stripped_kwargs)
+        return self
+
+    @property
+    def _default_params(self) -> dict[str, Any]:
+        params = dict(super()._default_params)
+        model_name = getattr(self, "model_name", None) or getattr(self, "model", None)
+        if _is_reasoning_model(model_name):
+            for field in _REASONING_FORBIDDEN_PARAMS:
+                params.pop(field, None)
+        return params
 
     # --------------------------------------------------------------------------
     # IDP response shape adapters

@@ -187,6 +187,7 @@ class HierarchicalTicketResult:
 
     sections: list[ChunkDocument] = field(default_factory=list)
     chunks: list[ChunkDocument] = field(default_factory=list)
+    debug: dict[str, Any] = field(default_factory=dict)
 
     def all_documents(self) -> list[dict]:
         return [d.to_index_doc() for d in self.sections + self.chunks]

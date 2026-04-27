@@ -24,6 +24,10 @@ class JiraIngestionConfig:
     section_only_chunks: bool = True
     section_max_tokens: int = 1200
     section_overlap_tokens: int = 120
+    max_pages: int = 60
+    max_prefetch_attachments: Optional[int] = 8
+    max_prefetch_attachment_size: int = 60_000_000
+    max_chunk_attachments: Optional[int] = 10
 
     embedding_model: str = "text-embedding-3-large"
     llm_model: str = "gpt-5-mini-idp"

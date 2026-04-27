@@ -1,5 +1,3 @@
-"""Chunk-building helpers used by the canonical chunks pipeline."""
-
 from __future__ import annotations
 
 import logging
@@ -22,7 +20,14 @@ logger = logging.getLogger(__name__)
 
 _BODY_PARAGRAPH_MIN_WORDS = 15
 _MAX_BODY_PARAGRAPHS = 40
-_PREFETCHABLE_EXTENSIONS = {"pptx", "ppt", "pdf", "docx", "doc"}
+_PREFETCHABLE_EXTENSIONS = {
+    "pptx", "ppt", "pdf", "docx", "doc", "xlsx", "xls", "csv",
+    "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp",
+}
+_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp"}
+_SPREADSHEET_EXTENSIONS = {"xlsx", "xls", "csv"}
+_GENERIC_CHUNK_TARGET_WORDS = 425
+_GENERIC_CHUNK_MIN_WORDS = 8
 
 
 async def build_from_attachments(
@@ -31,10 +36,19 @@ async def build_from_attachments(
     ticket_data: dict,
     jira_client: Any,
     cfg: Any,
-) -> tuple[list[ChunkDocument], list[ChunkDocument]]:
+) -> tuple[list[ChunkDocument], list[ChunkDocument], dict[str, Any]]:
     attachments = list(ticket_data.get("attachments", []) or [])
+    debug: dict[str, Any] = {
+        "attachment_count_total": len(attachments),
+        "prefetched_attachment_ids": [],
+        "prefetched_attachment_count": 0,
+        "used_attachment_ids": [],
+        "used_attachment_count": 0,
+        "routing": {},
+        "attachment_attempts": [],
+    }
     if not attachments:
-        return [], []
+        return [], [], debug
 
     fields = ticket_data.get("fields", {}) or {}
     ticket_summary = str(fields.get("summary") or ticket_key)
@@ -50,55 +64,108 @@ async def build_from_attachments(
         + attachments
     )
     prefetched = await prefetch_attachment_bytes(jira_client, prefetch_targets, cfg)
-    if not prefetched:
-        return [], []
+    debug["prefetched_attachment_ids"] = list(prefetched.keys())
+    debug["prefetched_attachment_count"] = len(prefetched)
 
-    def cached_download(att: dict) -> bytes:
-        att_id = attachment_key(att)
-        file_bytes = prefetched.get(att_id)
-        if file_bytes is None:
-            raise RuntimeError(f"Not prefetched: {att.get('filename')}")
-        return file_bytes
+    if prefetched:
+        def cached_download(att: dict) -> bytes:
+            att_id = attachment_key(att)
+            file_bytes = prefetched.get(att_id)
+            if file_bytes is None:
+                raise RuntimeError(f"Not prefetched: {att.get('filename')}")
+            return file_bytes
 
-    primary, _supporting, _quality, routing_artifact = route_attachments(
-        attachments=attachments,
-        ticket_summary=ticket_summary,
-        download_fn=cached_download,
-    )
+        primary, _supporting, _quality, routing_artifact = route_attachments(
+            attachments=attachments,
+            ticket_summary=ticket_summary,
+            download_fn=cached_download,
+        )
+    else:
+        primary = seed_primary
+        routing_artifact = seed_artifact
+
+    debug["routing"] = _summarize_routing_artifact(routing_artifact)
     chunk_candidates = get_routing_candidates(routing_artifact)
-    ordered_candidates = unique_attachments(([primary] if primary else []) + chunk_candidates)
+    ordered_candidates = unique_attachments(([primary] if primary else []) + chunk_candidates + attachments)
+    planned_chunk_ids = {
+        str(value).strip()
+        for value in (
+            (routing_artifact.get("processing_plan") or {}).get("chunk_candidates")
+            or []
+        )
+        if str(value).strip()
+    }
 
     processed_docs: list[dict[str, Any]] = []
-    max_docs = int(getattr(cfg, "max_chunk_attachments", 6) or 6)
-    for att in ordered_candidates[:max_docs]:
+    max_docs = _optional_int_limit(getattr(cfg, "max_chunk_attachments", 6))
+    for att in ordered_candidates:
+        if max_docs is not None and len(debug["attachment_attempts"]) >= max_docs:
+            break
+
         att_id = attachment_key(att)
+        att_debug: dict[str, Any] = {
+            "attachment_id": att_id,
+            "filename": str(att.get("filename") or att_id),
+            "attachment_type": str(att.get("ext") or ext_of(att.get("filename", ""))),
+            "doc_role": normalize_doc_role(att),
+            "triage_score": att.get("triage_score"),
+            "selected_for_chunking": att_id in planned_chunk_ids,
+            "download_status": "not_started",
+            "extraction_status": "not_started",
+            "leaf_count": 0,
+            "word_count": 0,
+            "error": "",
+            "used_for_chunking": False,
+        }
+
         file_bytes = prefetched.get(att_id)
         if file_bytes is None:
             try:
                 file_bytes = await jira_client.download_attachment(att)
+                att_debug["download_status"] = "downloaded_on_demand"
             except Exception as exc:
                 logger.info("Attachment download skipped (%s): %s", att.get("filename"), exc)
+                att_debug["download_status"] = "download_failed"
+                att_debug["error"] = str(exc)
+                debug["attachment_attempts"].append(att_debug)
                 continue
+        else:
+            att_debug["download_status"] = "prefetched"
 
-        leaves = extract_attachment_leaves(file_bytes or b"", att, cfg)
-        leaves = [leaf for leaf in leaves if leaf.get("text") and not leaf.get("is_boilerplate")]
+        extraction = extract_attachment_payload(file_bytes or b"", att, cfg)
+        leaves = [leaf for leaf in (extraction.get("leaves") or []) if leaf.get("text") and not leaf.get("is_boilerplate")]
+        att_debug["attachment_type"] = str(extraction.get("ext") or att_debug["attachment_type"])
+        att_debug["extraction_status"] = str(extraction.get("status") or "unknown")
+        att_debug["word_count"] = int(extraction.get("word_count") or 0)
+        att_debug["leaf_count"] = len(leaves)
+        att_debug["error"] = str(extraction.get("error") or "")
+        if _attachment_debug_enabled(cfg):
+            att_debug["raw_extracted_text"] = str(extraction.get("raw_extracted_text") or "")
+            att_debug["leaf_chunks"] = leaves
         if not leaves:
+            debug["attachment_attempts"].append(att_debug)
             continue
+
         processed_docs.append(
             {
                 "attachment_id": att_id,
                 "attachment_name": str(att.get("filename") or att_id),
-                "attachment_type": str(att.get("ext") or ext_of(att.get("filename", ""))),
+                "attachment_type": str(extraction.get("ext") or att.get("ext") or ext_of(att.get("filename", ""))),
                 "source_url": str(att.get("content") or att.get("url") or ticket_key),
                 "doc_role": normalize_doc_role(att),
                 "leaves": leaves,
             }
         )
+        att_debug["used_for_chunking"] = True
+        debug["used_attachment_ids"].append(att_id)
+        debug["attachment_attempts"].append(att_debug)
 
     if not processed_docs:
-        return [], []
+        return [], [], debug
 
-    return materialize_attachment_documents(ticket_key, processed_docs)
+    debug["used_attachment_count"] = len(debug["used_attachment_ids"])
+    sections, leaves = materialize_attachment_documents(ticket_key, processed_docs)
+    return sections, leaves, debug
 
 
 async def prefetch_attachment_bytes(
@@ -106,12 +173,12 @@ async def prefetch_attachment_bytes(
     attachments: list[dict],
     cfg: Any,
 ) -> dict[str, bytes]:
-    max_prefetch = int(getattr(cfg, "max_prefetch_attachments", 8) or 8)
+    max_prefetch = _optional_int_limit(getattr(cfg, "max_prefetch_attachments", 8))
     max_size = int(getattr(cfg, "max_prefetch_attachment_size", 60_000_000) or 60_000_000)
 
     prefetched: dict[str, bytes] = {}
     for att in attachments:
-        if len(prefetched) >= max_prefetch:
+        if max_prefetch is not None and len(prefetched) >= max_prefetch:
             break
         ext = ext_of(att.get("filename", ""))
         size = int(att.get("size", 0) or 0)
@@ -131,12 +198,12 @@ async def prefetch_attachment_bytes(
     return prefetched
 
 
-def extract_attachment_leaves(file_bytes: bytes, attachment: dict, cfg: Any) -> list[dict]:
+def extract_attachment_payload(file_bytes: bytes, attachment: dict, cfg: Any) -> dict[str, Any]:
     ext = str(attachment.get("ext") or ext_of(attachment.get("filename", ""))).lower()
-    doc_role = normalize_doc_role(attachment)
-    weight = doc_role_weight(doc_role)
-
+    filename = str(attachment.get("filename") or f"attachment.{ext or 'bin'}")
     extracted = attachment.get("extracted") or {}
+    raw_extracted_text = ""
+
     try:
         if not extracted.get("chunks"):
             if ext in ("pptx", "ppt"):
@@ -158,11 +225,56 @@ def extract_attachment_leaves(file_bytes: bytes, attachment: dict, cfg: Any) -> 
                 from vs_app.integrations.files.docx_extractor import extract_docx
 
                 extracted = extract_docx(file_bytes)
-            else:
-                return []
     except Exception as exc:
         logger.warning("Attachment extraction failed (%s): %s", attachment.get("filename"), exc)
-        return []
+        return {
+            "ext": ext,
+            "status": "extract_failed",
+            "error": str(exc),
+            "word_count": 0,
+            "raw_extracted_text": "",
+            "leaves": [],
+        }
+
+    raw_extracted_text = _combine_extracted_chunks(extracted)
+    if (not extracted.get("chunks")) or _attachment_debug_enabled(cfg):
+        if not raw_extracted_text:
+            raw_extracted_text = _extract_raw_attachment_text(
+                file_bytes=file_bytes,
+                filename=filename,
+                ext=ext,
+                ocr_enabled=bool(getattr(cfg, "ocr_enabled", False)),
+            )
+    if not extracted.get("chunks") and raw_extracted_text:
+        extracted = {
+            "chunks": _build_generic_text_chunks(raw_extracted_text, attachment, ext),
+        }
+
+    leaves = _convert_extracted_chunks_to_leaves(extracted, attachment, ext)
+    status = "extracted" if leaves else "no_text"
+    return {
+        "ext": ext,
+        "status": status,
+        "error": "",
+        "word_count": len((raw_extracted_text or "").split()) if raw_extracted_text else sum(
+            int(leaf.get("word_count") or 0) for leaf in leaves
+        ),
+        "raw_extracted_text": raw_extracted_text,
+        "leaves": leaves,
+    }
+
+
+def extract_attachment_leaves(file_bytes: bytes, attachment: dict, cfg: Any) -> list[dict]:
+    return list(extract_attachment_payload(file_bytes, attachment, cfg).get("leaves") or [])
+
+
+def _convert_extracted_chunks_to_leaves(
+    extracted: dict[str, Any],
+    attachment: dict,
+    ext: str,
+) -> list[dict]:
+    doc_role = normalize_doc_role(attachment)
+    weight = doc_role_weight(doc_role)
 
     leaves: list[dict] = []
     for idx, raw in enumerate(extracted.get("chunks", []) or []):
@@ -400,11 +512,196 @@ def locator_label(
     return ""
 
 
+def _attachment_debug_enabled(cfg: Any) -> bool:
+    return bool(
+        getattr(cfg, "enable_raw_artifact_persistence", False)
+        or getattr(cfg, "enable_attachment_text_persistence", False)
+        or getattr(cfg, "enable_debug_stage_persistence", False)
+        or getattr(cfg, "enable_prechunk_persistence", False)
+    )
+
+
+def _optional_int_limit(value: Any) -> Optional[int]:
+    if value in (None, "", 0, "0", False):
+        return None
+    try:
+        return max(int(value), 1)
+    except (TypeError, ValueError):
+        return None
+
+
+def _combine_extracted_chunks(extracted: dict[str, Any]) -> str:
+    parts = [str(chunk.get("text") or "").strip() for chunk in (extracted.get("chunks") or [])]
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _extract_raw_attachment_text(
+    *,
+    file_bytes: bytes,
+    filename: str,
+    ext: str,
+    ocr_enabled: bool,
+) -> str:
+    try:
+        if ext in _IMAGE_EXTENSIONS:
+            from vs_app.integrations.files.markitdown_extractor import extract_image_text
+
+            return clean_text(extract_image_text(file_bytes, filename=filename))
+
+        from vs_app.integrations.files.markitdown_extractor import extract_markdown
+
+        raw = extract_markdown(
+            file_bytes,
+            filename,
+            enable_ocr=ocr_enabled,
+        )
+        if raw:
+            return clean_text(raw)
+    except Exception as exc:
+        logger.info("Raw attachment extraction fallback failed (%s): %s", filename, exc)
+
+    if ext == "csv":
+        return clean_text(file_bytes.decode("utf-8", errors="replace"))
+    if ext in _SPREADSHEET_EXTENSIONS:
+        return clean_text(_extract_spreadsheet_text(file_bytes))
+    return ""
+
+
+def _extract_spreadsheet_text(file_bytes: bytes) -> str:
+    try:
+        import io
+        import openpyxl
+    except Exception:
+        return ""
+
+    try:
+        workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    except Exception:
+        return ""
+
+    parts: list[str] = []
+    for worksheet in workbook.worksheets:
+        parts.append(f"## {worksheet.title}")
+        for row in worksheet.iter_rows(values_only=True):
+            cells = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+        parts.append("")
+    return "\n".join(parts).strip()
+
+
+def _build_generic_text_chunks(raw_text: str, attachment: dict, ext: str) -> list[dict]:
+    cleaned = clean_text(raw_text)
+    if not cleaned:
+        return []
+
+    sections = _split_generic_sections(cleaned, fallback_title=str(attachment.get("filename") or "Attachment"))
+    chunks: list[dict] = []
+    chunk_idx = 0
+    for section in sections:
+        paragraphs = [part.strip() for part in re.split(r"\n{2,}", section["body"]) if part.strip()]
+        current: list[str] = []
+        current_words = 0
+
+        def flush() -> None:
+            nonlocal chunk_idx, current, current_words
+            if not current:
+                return
+            text = "\n\n".join(current).strip()
+            words = len(text.split())
+            if words >= _GENERIC_CHUNK_MIN_WORDS:
+                chunks.append(
+                    {
+                        "chunk_id": f"{attachment_key(attachment)}-generic-{chunk_idx}",
+                        "source": source_for_ext(ext),
+                        "text": text,
+                        "section_title": section["title"],
+                        "word_count": words,
+                        "is_boilerplate": False,
+                        "weight_multiplier": 1.0,
+                        "extraction_confidence": 0.75,
+                        "extraction_method": "markitdown_generic",
+                    }
+                )
+                chunk_idx += 1
+            current = []
+            current_words = 0
+
+        for paragraph in paragraphs:
+            words = len(paragraph.split())
+            if current and current_words + words > _GENERIC_CHUNK_TARGET_WORDS:
+                flush()
+            current.append(paragraph)
+            current_words += words
+        flush()
+
+    if not chunks and cleaned.strip():
+        chunks.append(
+            {
+                "chunk_id": f"{attachment_key(attachment)}-generic-0",
+                "source": source_for_ext(ext),
+                "text": cleaned,
+                "section_title": str(attachment.get("filename") or "Attachment"),
+                "word_count": len(cleaned.split()),
+                "is_boilerplate": False,
+                "weight_multiplier": 1.0,
+                "extraction_confidence": 0.7,
+                "extraction_method": "markitdown_generic",
+            }
+        )
+    return chunks
+
+
+def _split_generic_sections(text: str, fallback_title: str) -> list[dict[str, str]]:
+    matches = list(re.finditer(r"(?m)^(#{1,6})\s+(.+)$", text))
+    if not matches:
+        return [{"title": fallback_title, "body": text}]
+
+    sections: list[dict[str, str]] = []
+    preamble = text[:matches[0].start()].strip()
+    if preamble:
+        sections.append({"title": fallback_title, "body": preamble})
+
+    for idx, match in enumerate(matches):
+        title = match.group(2).strip() or fallback_title
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        if body:
+            sections.append({"title": title, "body": body})
+    return sections
+
+
+def _summarize_routing_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+    processing_plan = dict(artifact.get("processing_plan") or {})
+    return {
+        "att_quality": artifact.get("att_quality"),
+        "quality_tier": artifact.get("quality_tier"),
+        "selection_reason": artifact.get("selection_reason"),
+        "attachment_count_total": artifact.get("attachment_count_total"),
+        "attachment_count_viable": artifact.get("attachment_count_viable"),
+        "primary_attachment_id": artifact.get("primary_attachment_id"),
+        "triage_score": artifact.get("triage_score"),
+        "triage_reasons": list(artifact.get("triage_reasons") or []),
+        "primary_attachment": artifact.get("primary_attachment"),
+        "supporting_attachments": list(artifact.get("supporting_attachments") or []),
+        "excluded_attachments": list(artifact.get("excluded_attachments") or []),
+        "per_attachment_scores": list(artifact.get("per_attachment_scores") or []),
+        "processing_plan": {
+            "full_extract": list(processing_plan.get("full_extract") or []),
+            "light_extract": list(processing_plan.get("light_extract") or []),
+            "skip": list(processing_plan.get("skip") or []),
+            "chunk_candidates": list(processing_plan.get("chunk_candidates") or []),
+        },
+    }
+
+
 __all__ = [
     "attachment_key",
     "build_from_attachments",
     "build_from_ticket_body",
     "extract_attachment_leaves",
+    "extract_attachment_payload",
     "ext_of",
     "prefetch_attachment_bytes",
     "unique_attachments",

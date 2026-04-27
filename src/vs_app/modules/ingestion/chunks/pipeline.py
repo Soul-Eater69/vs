@@ -1,13 +1,11 @@
-"""Canonical chunk ingestion pipeline."""
-
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
 
 from vs_app.integrations.embeddings.client import embed_batch
-from vs_app.modules.tickets.documents import HierarchicalTicketResult
 from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
+from vs_app.modules.tickets.documents import HierarchicalTicketResult
 
 from .chunk_builder import build_from_attachments, build_from_ticket_body
 
@@ -56,14 +54,22 @@ async def ingest_ticket_chunks_payload(
         or "jira_issuelinks"
     )
 
-    sections, leaves = await build_from_attachments(
+    sections, leaves, attachment_debug = await build_from_attachments(
         ticket_key=ticket_key,
         ticket_data=ticket_data,
         jira_client=jira_client,
         cfg=cfg,
     )
 
+    body_fallback_used = False
+    body_fallback_reason = ""
     if not leaves:
+        body_fallback_used = True
+        body_fallback_reason = (
+            "no_attachment_leaves"
+            if (attachment_debug.get("attachment_count_total") or 0) > 0
+            else "no_attachments"
+        )
         sections, leaves = build_from_ticket_body(
             ticket_key=ticket_key,
             ticket_data=ticket_data,
@@ -85,6 +91,12 @@ async def ingest_ticket_chunks_payload(
         label_source=label_source,
         sections=sections,
         chunks=leaves,
+        debug={
+            "chunk_source": "ticket_body" if body_fallback_used and leaves else ("attachments" if leaves else "none"),
+            "body_fallback_used": body_fallback_used,
+            "body_fallback_reason": body_fallback_reason,
+            "attachment_processing": attachment_debug,
+        },
     )
 
 

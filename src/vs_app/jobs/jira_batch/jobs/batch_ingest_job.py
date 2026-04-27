@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -14,6 +15,10 @@ from vs_app.integrations.sinks.faiss_store import build_local_faiss_indexes
 from vs_app.modules.ingestion import IngestionDeps
 from vs_app.modules.ingestion.chunks.pipeline import ingest_ticket_chunks_payload
 from vs_app.modules.ingestion.summary.pipeline import ingest_ticket_summary_payload
+from vs_app.modules.tickets.text_formatting import (
+    extract_description_text,
+    extract_substantive_comments,
+)
 from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 from ..runtime.runtime_factory import (
     build_ingestion_config,
@@ -48,6 +53,88 @@ def dump_json(data: Any, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False, default=str)
+
+
+def dump_text(data: str, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(data or "", encoding="utf-8")
+
+
+def _safe_fs_name(value: str, fallback: str = "artifact") -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    cleaned = cleaned.strip("._")
+    return cleaned or fallback
+
+
+def _summarize_chunk_debug(debug: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(debug, dict):
+        return {}
+    out = dict(debug)
+    attachment_processing = dict(out.get("attachment_processing") or {})
+    attempts = []
+    for row in attachment_processing.get("attachment_attempts", []) or []:
+        if not isinstance(row, dict):
+            continue
+        sanitized = dict(row)
+        sanitized.pop("raw_extracted_text", None)
+        sanitized.pop("leaf_chunks", None)
+        attempts.append(sanitized)
+    if attachment_processing:
+        attachment_processing["attachment_attempts"] = attempts
+        out["attachment_processing"] = attachment_processing
+    return out
+
+
+def _persist_chunk_debug_artifacts(
+    *,
+    ticket_dir: Path,
+    ticket_data: dict[str, Any],
+    chunk_debug: dict[str, Any] | None,
+) -> None:
+    raw_dir = ticket_dir / "raw"
+    files_dir = ticket_dir / "files"
+    fields = ticket_data.get("fields", {}) or {}
+
+    description = extract_description_text(fields.get("description"))
+    comments = extract_substantive_comments(fields.get("comment") or {}, max_comments=50)
+    attachments = list(ticket_data.get("attachments") or [])
+
+    dump_text(description, raw_dir / "description.txt")
+    dump_json({"comments": comments}, raw_dir / "comments.json")
+    dump_json(
+        {
+            "ticket_key": ticket_data.get("key"),
+            "summary": str(fields.get("summary") or ""),
+            "attachment_count": len(attachments),
+            "attachments": [
+                {
+                    "attachment_id": str(att.get("id") or att.get("attachment_id") or att.get("filename") or ""),
+                    "filename": str(att.get("filename") or ""),
+                    "size": att.get("size"),
+                    "content": att.get("content"),
+                    "mimeType": att.get("mimeType"),
+                }
+                for att in attachments
+            ],
+        },
+        raw_dir / "attachment_inventory.json",
+    )
+    dump_json(_summarize_chunk_debug(chunk_debug), raw_dir / "chunk_debug.json")
+
+    attachment_processing = (chunk_debug or {}).get("attachment_processing") or {}
+    for index, attempt in enumerate(attachment_processing.get("attachment_attempts", []) or [], start=1):
+        if not isinstance(attempt, dict):
+            continue
+        label = attempt.get("filename") or attempt.get("attachment_id") or f"attachment-{index}"
+        attempt_dir = files_dir / f"{index:02d}__{_safe_fs_name(str(label), fallback=f'attachment_{index:02d}')}"
+        meta = dict(attempt)
+        raw_text = str(meta.pop("raw_extracted_text", "") or "")
+        leaf_chunks = meta.pop("leaf_chunks", None)
+        dump_json(meta, attempt_dir / "metadata.json")
+        if raw_text:
+            dump_text(raw_text, attempt_dir / "raw_extracted.md")
+        if leaf_chunks:
+            dump_json({"chunks": leaf_chunks}, attempt_dir / "leaf_chunks.json")
 
 
 async def process_ticket(
@@ -123,6 +210,7 @@ async def process_ticket(
             embedding_client=deps.embedding_client,
             cfg=cfg,
         )
+        chunk_debug_summary = _summarize_chunk_debug(getattr(result, "debug", {}) or {})
         section_docs = [doc.to_index_doc() for doc in result.sections]
         leaf_chunk_docs = [doc.to_index_doc() for doc in result.chunks]
         chunk_docs = result.all_documents()
@@ -134,11 +222,21 @@ async def process_ticket(
                 "label_source": result.label_source,
                 "section_count": len(result.sections),
                 "chunk_count": len(result.chunks),
+                "chunk_source": chunk_debug_summary.get("chunk_source", "none"),
+                "body_fallback_used": bool(chunk_debug_summary.get("body_fallback_used")),
+                "body_fallback_reason": str(chunk_debug_summary.get("body_fallback_reason") or ""),
+                "debug": chunk_debug_summary,
                 "documents": leaf_chunk_docs,
                 "sections": section_docs,
             },
             chunks_file,
         )
+        if bool(getattr(cfg, "enable_raw_artifact_persistence", False)):
+            _persist_chunk_debug_artifacts(
+                ticket_dir=ticket_dir,
+                ticket_data=ticket_data,
+                chunk_debug=getattr(result, "debug", {}) or {},
+            )
         logger.info(
             "%s  chunks → %s  (%d sections, %d chunks)",
             ticket_id, chunks_file, len(result.sections), len(result.chunks),
@@ -157,6 +255,7 @@ async def run_batch(
     enable_llm: bool,
     enable_embeddings: bool,
     mode: str,
+    persist_debug_artifacts: bool = False,
     build_faiss: bool = False,
     faiss_dir: Optional[Path] = None,
 ) -> None:
@@ -169,6 +268,12 @@ async def run_batch(
         skip_llm_keywords=not enable_llm,
         skip_llm_derived=not enable_llm,
     )
+    cfg.enable_raw_artifact_persistence = persist_debug_artifacts
+    cfg.enable_attachment_text_persistence = persist_debug_artifacts
+    cfg.enable_debug_stage_persistence = persist_debug_artifacts
+    cfg.enable_prechunk_persistence = persist_debug_artifacts
+    cfg.max_prefetch_attachments = None if persist_debug_artifacts else cfg.max_prefetch_attachments
+    cfg.max_chunk_attachments = None if persist_debug_artifacts else cfg.max_chunk_attachments
 
     llm_client = try_build_llm(enable=enable_llm, model="gpt-5-mini-idp")
     embedding_client = try_build_embedding_client(
@@ -379,6 +484,14 @@ Examples:
         metavar="DIR",
         help="Output directory for local FAISS indexes (default: <output-dir>/_faiss).",
     )
+    parser.add_argument(
+        "--persist-debug-artifacts",
+        action="store_true",
+        help=(
+            "Write raw chunk-debug artifacts per ticket, including description text and "
+            "per-attachment extracted text under <ticket>/files/."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -403,6 +516,7 @@ Examples:
         enable_llm=args.enable_llm,
         enable_embeddings=args.enable_embeddings,
         mode=args.mode,
+        persist_debug_artifacts=args.persist_debug_artifacts,
         build_faiss=args.build_faiss,
         faiss_dir=Path(args.faiss_dir) if args.faiss_dir else None,
     )

@@ -80,7 +80,7 @@ class IDPChatOpenAI(ChatOpenAI):
     )
 
     extra_body: Mapping[str, Any] | None = {"api_version": "2024-04-01-preview"}
-    temperature: float | None = None
+    temperature: float | None = 1
     openai_api_base: str = config.LLM_BASE_URL
 
     # --------------------------------------------------------------------------

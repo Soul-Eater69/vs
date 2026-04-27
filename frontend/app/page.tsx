@@ -387,6 +387,8 @@ function statusLabel(status?: string) {
 function statusReasonLabel(reason?: string) {
   if (reason === 'cross_confirmed_semantic_and_historical') return 'semantic + historic confirmed';
   if (reason === 'strong_historical_support') return 'strong historic support';
+  if (reason === 'protected_historical_lane') return 'protected historic lane';
+  if (reason === 'protected_confirmed_lane') return 'protected confirmed lane';
   if (reason === 'within_llm_candidate_cap') return 'inside LLM cap';
   if (reason === 'llm_candidate_cap') return 'cut by LLM cap';
   if (reason === 'insufficient_support') return 'insufficient support';

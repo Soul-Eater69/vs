@@ -45,6 +45,7 @@ def merge_candidate_sources(
             "label_sources": [],
             "bucket": "semantic_only",
             "ranking_score": 0.0,
+            "candidate_lane": "unassigned",
             "candidate_status": "unclassified",
             "candidate_status_reason": "",
         }
@@ -77,6 +78,7 @@ def merge_candidate_sources(
                 "label_sources": [],
                 "bucket": "historical_only",
                 "ranking_score": 0.0,
+                "candidate_lane": "unassigned",
                 "candidate_status": "unclassified",
                 "candidate_status_reason": "",
             }
@@ -108,6 +110,7 @@ def merge_candidate_sources(
             row["bucket"] = "historical_only"
         row["historical_strength"] = _historical_strength(row)
         row["ranking_score"] = _ranking_score(row)
+        row["candidate_lane"] = _candidate_lane(row)
 
     merged.sort(
         key=lambda row: float(row.get("ranking_score", 0.0) or 0.0),
@@ -115,8 +118,11 @@ def merge_candidate_sources(
     )
 
     auto_selected: List[dict] = []
-    llm_candidates: List[dict] = []
-    llm_candidate_pool: List[dict] = []
+    llm_candidate_pool: Dict[str, List[dict]] = {
+        "confirmed_direct": [],
+        "historical_recall": [],
+        "semantic_direct": [],
+    }
 
     for row in merged:
         if _should_auto_include_merged(row, min_score=strong_support_score):
@@ -137,27 +143,31 @@ def merge_candidate_sources(
             auto_selected.append(_to_selected_value_stream(row))
             continue
 
-        if row.get("from_semantic") or _should_send_to_llm(
+        lane = str(row.get("candidate_lane") or "")
+        if lane == "confirmed_direct":
+            llm_candidate_pool[lane].append(row)
+            continue
+
+        if lane == "historical_recall" and _should_send_to_llm(
             row,
             support_count=moderate_support_count,
             min_score=moderate_support_score,
         ):
-            llm_candidate_pool.append(row)
+            llm_candidate_pool[lane].append(row)
+            continue
+
+        if lane == "semantic_direct" and _should_send_semantic_to_llm(row):
+            llm_candidate_pool[lane].append(row)
             continue
 
         row["candidate_status"] = "dropped_before_llm"
         row["candidate_status_reason"] = "insufficient_support"
 
-    llm_candidates = llm_candidate_pool[:max_llm_candidates]
-    llm_candidate_names = {_norm_name(str(row.get("entity_name") or "")) for row in llm_candidates}
-    for row in llm_candidate_pool:
-        key = _norm_name(str(row.get("entity_name") or ""))
-        if key in llm_candidate_names:
-            row["candidate_status"] = "sent_to_llm"
-            row["candidate_status_reason"] = "within_llm_candidate_cap"
-        else:
-            row["candidate_status"] = "dropped_before_llm"
-            row["candidate_status_reason"] = "llm_candidate_cap"
+    llm_candidates = _select_llm_candidates(
+        merged,
+        llm_candidate_pool,
+        max_llm_candidates=max_llm_candidates,
+    )
 
     logger.info(
         "[HIST-RAG] %d merged candidates -> %d auto-selected, %d for LLM (cap=%d)",
@@ -185,6 +195,16 @@ def _historical_strength(row: dict) -> float:
         + 0.06 * _weighted_support_value(row, "weighted_implied_count", "implied_count")
         + _label_source_adjustment(row)
     )
+
+
+def _candidate_lane(row: dict) -> str:
+    if row.get("from_semantic") and row.get("from_historical"):
+        return "confirmed_direct"
+    if row.get("from_historical"):
+        return "historical_recall"
+    if row.get("from_semantic"):
+        return "semantic_direct"
+    return "weak_noise"
 
 
 def _ranking_score(row: dict) -> float:
@@ -307,6 +327,13 @@ def _should_send_to_llm(row: dict, *, support_count: int, min_score: float) -> b
     )
 
 
+def _should_send_semantic_to_llm(row: dict) -> bool:
+    """Keep the direct-semantic lane focused on candidates with meaningful relevance."""
+    if not row.get("from_semantic"):
+        return False
+    return float(row.get("semantic_score", 0.0) or 0.0) >= 0.95
+
+
 def _to_selected_value_stream(row: dict) -> dict:
     support_count = int(row.get("support_count", 0) or 0)
     direct_count = int(row.get("direct_count", 0) or 0)
@@ -338,3 +365,69 @@ def _weighted_support_value(row: dict, weighted_key: str, fallback_key: str) -> 
     if weighted is not None:
         return float(weighted or 0.0)
     return float(row.get(fallback_key, 0.0) or 0.0)
+
+
+def _select_llm_candidates(
+    merged: List[dict],
+    llm_candidate_pool: Dict[str, List[dict]],
+    *,
+    max_llm_candidates: int,
+) -> List[dict]:
+    selected_keys: set[str] = set()
+    selected: List[dict] = []
+
+    def select_row(row: dict, reason: str) -> None:
+        key = _norm_name(str(row.get("entity_name") or ""))
+        if not key or key in selected_keys:
+            return
+        selected_keys.add(key)
+        row["candidate_status"] = "sent_to_llm"
+        row["candidate_status_reason"] = reason
+        selected.append(row)
+
+    lane_quotas = {
+        "historical_recall": _lane_quota(max_llm_candidates, ratio=0.30, floor=1, ceiling=6),
+        "confirmed_direct": _lane_quota(max_llm_candidates, ratio=0.20, floor=1, ceiling=4),
+    }
+    lane_reasons = {
+        "historical_recall": "protected_historical_lane",
+        "confirmed_direct": "protected_confirmed_lane",
+    }
+
+    for lane in ("historical_recall", "confirmed_direct"):
+        quota = min(len(llm_candidate_pool.get(lane, [])), lane_quotas[lane])
+        for row in llm_candidate_pool.get(lane, [])[:quota]:
+            if len(selected) >= max_llm_candidates:
+                break
+            select_row(row, lane_reasons[lane])
+
+    if len(selected) < max_llm_candidates:
+        pending_keys = {
+            _norm_name(str(row.get("entity_name") or ""))
+            for lane_rows in llm_candidate_pool.values()
+            for row in lane_rows
+        }
+        for row in merged:
+            if len(selected) >= max_llm_candidates:
+                break
+            key = _norm_name(str(row.get("entity_name") or ""))
+            if key in selected_keys or key not in pending_keys:
+                continue
+            select_row(row, "within_llm_candidate_cap")
+
+    for lane_rows in llm_candidate_pool.values():
+        for row in lane_rows:
+            key = _norm_name(str(row.get("entity_name") or ""))
+            if key in selected_keys:
+                continue
+            row["candidate_status"] = "dropped_before_llm"
+            row["candidate_status_reason"] = "llm_candidate_cap"
+
+    return selected
+
+
+def _lane_quota(total: int, *, ratio: float, floor: int, ceiling: int) -> int:
+    if total <= 0:
+        return 0
+    quota = max(floor, round(total * ratio))
+    return min(quota, ceiling, total)

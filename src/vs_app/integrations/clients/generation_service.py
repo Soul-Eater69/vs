@@ -14,6 +14,7 @@ Usage
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from langchain_core.messages import BaseMessage
@@ -41,9 +42,10 @@ class GenerationService:
 
     def __init__(
         self,
-        model: str = "gpt-4-idp",
+        model: Optional[str] = None,
         base_url: Optional[str] = config.LLM_BASE_URL,
     ) -> None:
+        model = model or os.environ.get("GENERATION_LLM_MODEL", "gpt-5-mini-idp")
         kwargs = {"model": model}
         if base_url:
             kwargs["openai_api_base"] = base_url

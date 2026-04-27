@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Optional
 
@@ -287,7 +288,8 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
     )
 
     try:
-        reply = IDPChatOpenAI(model="gpt-4o-mini-idp").invoke(input=prompt)
+        model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-mini-idp")
+        reply = IDPChatOpenAI(model=model).invoke(input=prompt)
         parsed = parse_structured_summary_payload(
             getattr(reply, "content", "") or "",
             context_id="query_summary",

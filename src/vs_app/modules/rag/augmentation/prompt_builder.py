@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import List
 
 from vs_app.modules.prompts.loader import (
@@ -10,14 +11,15 @@ from vs_app.modules.prompts.loader import (
 
 def build_system_prompt() -> str:
     return build_historical_selection_system_prompt(
-        min_select=6,
+        min_select=4,
         max_select=12,
     )
 
 
 def build_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str:
+    ordered_candidates = _order_candidates_for_llm(candidates)
     blocks = []
-    for idx, row in enumerate(candidates, start=1):
+    for idx, row in enumerate(ordered_candidates, start=1):
         bucket = str(row.get("bucket") or "").strip()
         lane = str(row.get("candidate_lane") or "").strip()
         lines = [
@@ -31,6 +33,10 @@ def build_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str
         description = str(row.get("description") or "").strip()
         if description:
             lines.append(f"Description: {description[:320]}")
+
+        lane_guidance = _lane_guidance(lane)
+        if lane_guidance:
+            lines.append(f"Lane guidance: {lane_guidance}")
 
         if row.get("from_semantic"):
             lines.append(f"Semantic score: {float(row.get('semantic_score', 0.0) or 0.0):.4f}")
@@ -52,14 +58,18 @@ def build_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str
                     " relevant value stream."
                 )
 
-            reasons = [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]
-            if reasons:
-                direct_reasons = [reason for reason in reasons if "/ direct]" in reason]
-                implied_reasons = [reason for reason in reasons if "/ implied]" in reason]
-                ordered = (direct_reasons + implied_reasons)[:3]
-                lines.append("Analog evidence:")
-                for reason in ordered:
-                    lines.append(f"  - {reason}")
+        overlaps = _overlap_candidates(row, ordered_candidates)
+        if overlaps:
+            lines.append(f"Potential overlap/conflict: {', '.join(overlaps[:3])}")
+
+        reasons = [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]
+        if reasons:
+            direct_reasons = [reason for reason in reasons if "/ direct]" in reason]
+            implied_reasons = [reason for reason in reasons if "/ implied]" in reason]
+            ordered = (direct_reasons + implied_reasons)[:3]
+            lines.append("Analog evidence:")
+            for reason in ordered:
+                lines.append(f"  - {reason}")
 
         blocks.append("\n".join(lines))
 
@@ -67,3 +77,56 @@ def build_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str
         query_for_prompt=query_for_prompt,
         candidate_blocks="\n\n".join(blocks),
     )
+
+
+def _order_candidates_for_llm(candidates: List[dict]) -> List[dict]:
+    lane_priority = {
+        "confirmed_direct": 0,
+        "historical_recall": 1,
+        "semantic_direct": 2,
+    }
+    return sorted(
+        list(candidates),
+        key=lambda row: (
+            lane_priority.get(str(row.get("candidate_lane") or ""), 9),
+            -float(row.get("ranking_score", 0.0) or 0.0),
+        ),
+    )
+
+
+def _lane_guidance(lane: str) -> str:
+    if lane == "confirmed_direct":
+        return "Strong direct candidate with both semantic and historical support."
+    if lane == "historical_recall":
+        return (
+            "Gap-fill lane. This candidate may be materially relevant even without explicit wording"
+            " overlap if repeated analog evidence is coherent."
+        )
+    if lane == "semantic_direct":
+        return "Direct semantic lane. Keep only if the business fit is genuinely material."
+    return ""
+
+
+def _overlap_candidates(row: dict, candidates: List[dict]) -> List[str]:
+    current_name = str(row.get("entity_name") or "").strip()
+    current_tokens = _name_tokens(current_name)
+    overlaps: List[str] = []
+    for other in candidates:
+        other_name = str(other.get("entity_name") or "").strip()
+        if not other_name or other_name == current_name:
+            continue
+        other_tokens = _name_tokens(other_name)
+        shared = current_tokens & other_tokens
+        if len(shared) >= 2:
+            overlaps.append(other_name)
+    return overlaps
+
+
+def _name_tokens(name: str) -> set[str]:
+    stop_words = {"and", "for", "the", "to", "of", "in"}
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", (name or "").lower())
+        if token and token not in stop_words
+    }
+    return tokens

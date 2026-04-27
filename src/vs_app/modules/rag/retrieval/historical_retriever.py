@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Iterable, List, Optional
 
 from ..query.views import clean_ppt_text
 logger = logging.getLogger(__name__)
@@ -13,10 +13,17 @@ def retrieve_historical_support(
     *,
     historical_faiss_dir: str | Path = "ticket_data/_faiss",
     max_ticket_hits: int = 12,
+    exclude_ticket_ids: Optional[Iterable[str]] = None,
 ) -> dict:
     from vs_app.integrations.sinks.faiss_store import faiss_index_exists, search_local_faiss
 
     cleaned = clean_ppt_text(query)
+
+    excluded = {
+        str(tid).strip().lower()
+        for tid in (exclude_ticket_ids or [])
+        if str(tid).strip()
+    }
 
     if not faiss_index_exists(index_dir=historical_faiss_dir, kind="summaries"):
         logger.warning("No FAISS index at %s - no historical support available", historical_faiss_dir)
@@ -26,11 +33,12 @@ def retrieve_historical_support(
             "historical_source": "none",
         }
 
+    fetch_k = max_ticket_hits + len(excluded)
     faiss_results = search_local_faiss(
         cleaned,
         index_dir=historical_faiss_dir,
         kind="summaries",
-        top_k=max_ticket_hits,
+        top_k=fetch_k,
     )
 
     ticket_hits: List[dict] = []
@@ -39,6 +47,10 @@ def retrieve_historical_support(
         ticket_id = str(meta.get("ticket_id") or "").strip()
         if not ticket_id:
             continue
+        if ticket_id.lower() in excluded:
+            continue
+        if len(ticket_hits) >= max_ticket_hits:
+            break
         ticket_hits.append({
             "ticket_id": ticket_id,
             "best_score": float(row.get("score", 0.0) or 0.0),

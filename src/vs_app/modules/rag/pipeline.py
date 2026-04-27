@@ -9,6 +9,7 @@ def select_value_streams(
     fetch_count: int = 12,
     historical_faiss_dir: str = "ticket_data/_faiss",
     allowed_value_stream_names: Optional[List[str]] = None,
+    exclude_ticket_ids: Optional[List[str]] = None,
 ) -> dict:
     from .augmentation.candidate_merger import merge_candidate_sources
     from .augmentation.finalizer import generate_value_streams
@@ -30,6 +31,7 @@ def select_value_streams(
         query_for_prompt or cleaned_query,
         historical_faiss_dir=historical_faiss_dir,
         max_ticket_hits=min(max(12, fetch_count), 24),
+        exclude_ticket_ids=exclude_ticket_ids,
     )
 
     augmented = merge_candidate_sources(

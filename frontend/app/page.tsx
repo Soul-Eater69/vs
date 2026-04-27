@@ -41,6 +41,7 @@ interface Candidate {
   entity_id: string;
   entity_name: string;
   score?: number;
+  ranking_score?: number;
   _aggregated_best_score?: number;
   _support_count?: number;
   semantic_score?: number;
@@ -55,6 +56,8 @@ interface Candidate {
   bucket?: string;
   description?: string;
   candidate_source?: string;
+  candidate_status?: string;
+  candidate_status_reason?: string;
   historical_reasons?: string[];
   [k: string]: unknown;
 }
@@ -342,6 +345,7 @@ function scoreOf(c: Candidate) {
   return Number(
     c._aggregated_best_score
     ?? c.score
+    ?? c.ranking_score
     ?? c.semantic_score
     ?? c.historical_strength
     ?? c.best_support_score
@@ -366,6 +370,29 @@ function bucketLabel(candidate: Candidate) {
   return bucket.replace(/_/g, ' ');
 }
 
+function statusTone(status?: string): 'neutral' | 'sky' | 'green' | 'amber' | 'red' {
+  if (status === 'auto_selected') return 'green';
+  if (status === 'sent_to_llm') return 'sky';
+  if (status === 'dropped_before_llm') return 'red';
+  return 'neutral';
+}
+
+function statusLabel(status?: string) {
+  if (status === 'auto_selected') return 'auto-selected';
+  if (status === 'sent_to_llm') return 'sent to LLM';
+  if (status === 'dropped_before_llm') return 'dropped before LLM';
+  return null;
+}
+
+function statusReasonLabel(reason?: string) {
+  if (reason === 'cross_confirmed_semantic_and_historical') return 'semantic + historic confirmed';
+  if (reason === 'strong_historical_support') return 'strong historic support';
+  if (reason === 'within_llm_candidate_cap') return 'inside LLM cap';
+  if (reason === 'llm_candidate_cap') return 'cut by LLM cap';
+  if (reason === 'insufficient_support') return 'insufficient support';
+  return null;
+}
+
 function RetrievalPane({
   candidates,
   emptyText = 'No candidates retrieved yet.',
@@ -380,9 +407,13 @@ function RetrievalPane({
       {candidates.map((c, i) => {
         const score = scoreOf(c);
         const pct = Math.max((score / best) * 100, 4);
+        const rankingScore = Number(c.ranking_score ?? 0) || 0;
         const semanticScore = Number(c.semantic_score ?? 0) || 0;
+        const historicalStrength = Number(c.historical_strength ?? 0) || 0;
         const supportCount = Number(c.support_count ?? c._support_count ?? 0) || 0;
         const historicalBest = Number(c.best_support_score ?? 0) || 0;
+        const candidateStatus = String(c.candidate_status ?? '').trim();
+        const candidateStatusReason = String(c.candidate_status_reason ?? '').trim();
         const note = typeof c.description === 'string' && c.description.trim()
           ? c.description.trim()
           : Array.isArray(c.historical_reasons) && c.historical_reasons.length
@@ -400,7 +431,11 @@ function RetrievalPane({
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {bucket && <Pill tone={bucketTone(String(c.bucket ?? c.candidate_source ?? ''))}>{bucket}</Pill>}
+              {candidateStatus && <Pill tone={statusTone(candidateStatus)}>{statusLabel(candidateStatus)}</Pill>}
+              {candidateStatusReason && <Pill tone="neutral">{statusReasonLabel(candidateStatusReason) ?? candidateStatusReason}</Pill>}
+              {rankingScore > 0 && <Pill tone="green">rank {rankingScore.toFixed(3)}</Pill>}
               {semanticScore > 0 && <Pill tone="sky">semantic {semanticScore.toFixed(3)}</Pill>}
+              {historicalStrength > 0 && <Pill tone="amber">hist strength {historicalStrength.toFixed(3)}</Pill>}
               {historicalBest > 0 && <Pill tone="amber">historic {historicalBest.toFixed(3)}</Pill>}
               {supportCount > 0 && <Pill tone="amber">{supportCount} hits</Pill>}
             </div>

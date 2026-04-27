@@ -87,11 +87,13 @@ async def predict_value_streams_stream(
 
             # Step 4: Historical FAISS
             yield _sse("step", {"step": "historical", "label": "Searching historical FAISS..."})
+            exclude_ids = [request.ticket_id] if request.ticket_id else None
             historical = await asyncio.to_thread(
                 retrieve_historical_support,
                 query_for_prompt or cleaned_query,
                 historical_faiss_dir=faiss_dir,
                 max_ticket_hits=min(max(12, top_k), 24),
+                exclude_ticket_ids=exclude_ids,
             )
 
             # Step 5: LLM finalize

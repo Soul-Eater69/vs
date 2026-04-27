@@ -44,6 +44,9 @@ def merge_candidate_sources(
             "historical_reasons": [],
             "label_sources": [],
             "bucket": "semantic_only",
+            "ranking_score": 0.0,
+            "candidate_status": "unclassified",
+            "candidate_status_reason": "",
         }
 
     for row in historical_support:
@@ -73,6 +76,9 @@ def merge_candidate_sources(
                 "historical_reasons": [],
                 "label_sources": [],
                 "bucket": "historical_only",
+                "ranking_score": 0.0,
+                "candidate_status": "unclassified",
+                "candidate_status_reason": "",
             }
             by_name[key] = existing
 
@@ -101,17 +107,21 @@ def merge_candidate_sources(
         else:
             row["bucket"] = "historical_only"
         row["historical_strength"] = _historical_strength(row)
+        row["ranking_score"] = _ranking_score(row)
 
     merged.sort(
-        key=lambda row: _ranking_score(row),
+        key=lambda row: float(row.get("ranking_score", 0.0) or 0.0),
         reverse=True,
     )
 
     auto_selected: List[dict] = []
     llm_candidates: List[dict] = []
+    llm_candidate_pool: List[dict] = []
 
     for row in merged:
         if _should_auto_include_merged(row, min_score=strong_support_score):
+            row["candidate_status"] = "auto_selected"
+            row["candidate_status_reason"] = "cross_confirmed_semantic_and_historical"
             auto_selected.append(_to_selected_merged(row))
             continue
 
@@ -122,6 +132,8 @@ def merge_candidate_sources(
             strong_implied_count=strong_implied_support_count,
             strong_implied_score=strong_implied_support_score,
         ):
+            row["candidate_status"] = "auto_selected"
+            row["candidate_status_reason"] = "strong_historical_support"
             auto_selected.append(_to_selected_value_stream(row))
             continue
 
@@ -130,9 +142,23 @@ def merge_candidate_sources(
             support_count=moderate_support_count,
             min_score=moderate_support_score,
         ):
-            llm_candidates.append(row)
+            llm_candidate_pool.append(row)
+            continue
 
-    llm_candidates = llm_candidates[:max_llm_candidates]
+        row["candidate_status"] = "dropped_before_llm"
+        row["candidate_status_reason"] = "insufficient_support"
+
+    llm_candidates = llm_candidate_pool[:max_llm_candidates]
+    llm_candidate_names = {_norm_name(str(row.get("entity_name") or "")) for row in llm_candidates}
+    for row in llm_candidate_pool:
+        key = _norm_name(str(row.get("entity_name") or ""))
+        if key in llm_candidate_names:
+            row["candidate_status"] = "sent_to_llm"
+            row["candidate_status_reason"] = "within_llm_candidate_cap"
+        else:
+            row["candidate_status"] = "dropped_before_llm"
+            row["candidate_status_reason"] = "llm_candidate_cap"
+
     logger.info(
         "[HIST-RAG] %d merged candidates -> %d auto-selected, %d for LLM (cap=%d)",
         len(merged),

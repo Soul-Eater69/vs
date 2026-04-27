@@ -90,11 +90,13 @@ class ValueStreamRagService:
         from .pipeline import select_value_streams
 
         query = self._resolve_query(command)
+        exclude_ids = [command.ticket_id] if command.ticket_id else None
         return (self.pipeline_fn or select_value_streams)(
             query,
             fetch_count=self._resolve_fetch_count(command),
             historical_faiss_dir=command.historical_faiss_dir,
             allowed_value_stream_names=command.allowed_value_stream_names,
+            exclude_ticket_ids=exclude_ids,
         )
 
     async def _run_composed_flow(self, command: ValueStreamRagCommand) -> dict:

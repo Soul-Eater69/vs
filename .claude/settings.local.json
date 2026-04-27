@@ -37,7 +37,8 @@
       "Bash(py -c \"import ast; ast.parse\\(open\\('src/vs_app/modules/rag/augmentation/candidate_merger.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(py -c \"import langchain_openai; print\\(langchain_openai.__version__\\)\")",
       "Bash(py -c \"from langchain_openai import ChatOpenAI; import inspect; print\\([m for m in dir\\(ChatOpenAI\\) if 'param' in m.lower\\(\\) or 'payload' in m.lower\\(\\)]\\)\")",
-      "Bash(py -c \"import ast; ast.parse\\(open\\('src/vs_app/integrations/clients/llm.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(py -c \"import ast; ast.parse\\(open\\('src/vs_app/integrations/clients/llm.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(git status *)"
     ]
   }
 }

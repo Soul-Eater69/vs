@@ -23,6 +23,7 @@ llm = [
     "langchain-openai",
     "langchain-core",
     "openai",
+    "markitdown[pptx,docx,pdf,xlsx]",
 ]
 dev = [
     "pytest",

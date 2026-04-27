@@ -23,6 +23,7 @@ class ValueStreamRagResponse(BaseModel):
     warnings: list[Any] = Field(default_factory=list)
     evidence: list[dict] = Field(default_factory=list)
     debug: dict[str, Any] = Field(default_factory=dict)
+    ground_truth: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_result(cls, result: object) -> "ValueStreamRagResponse":

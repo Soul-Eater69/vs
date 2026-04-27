@@ -125,3 +125,30 @@ def test_merge_candidate_sources_protects_historical_recall_from_semantic_crowdi
         row["entity_name"] == "Historical Recovery Candidate"
         for row in result["llm_candidates"]
     )
+
+
+def test_merge_candidate_sources_admits_repeated_implied_recovery_when_weighted_support_is_diluted() -> None:
+    historical_support = [
+        {
+            "entity_id": "hist-2",
+            "entity_name": "Manage Invoice and Payment Receipt",
+            "support_count": 10,
+            "direct_count": 0,
+            "implied_count": 10,
+            "weighted_support_count": 0.82,
+            "weighted_direct_count": 0.0,
+            "weighted_implied_count": 0.82,
+            "best_support_score": 0.845,
+            "avg_support_score": 0.67,
+            "supporting_ticket_ids": ["IDMT-1", "IDMT-2", "IDMT-3", "IDMT-4"],
+            "historical_reasons": ["[IDMT-1 / implied] recurring payment and billing workflow"],
+            "label_sources": ["jira_themes_fallback"],
+        }
+    ]
+
+    result = merge_candidate_sources([], historical_support, max_llm_candidates=4)
+
+    row = result["merged_candidates"][0]
+    assert row["candidate_lane"] == "historical_recall"
+    assert row["candidate_status"] == "sent_to_llm"
+    assert row["candidate_status_reason"] == "protected_historical_lane"

@@ -148,7 +148,7 @@ def merge_candidate_sources(
             llm_candidate_pool[lane].append(row)
             continue
 
-        if lane == "historical_recall" and _should_send_to_llm(
+        if lane == "historical_recall" and _should_send_historical_recall_to_llm(
             row,
             support_count=moderate_support_count,
             min_score=moderate_support_score,
@@ -317,14 +317,27 @@ def _to_selected_merged(row: dict) -> dict:
     }
 
 
-def _should_send_to_llm(row: dict, *, support_count: int, min_score: float) -> bool:
+def _should_send_historical_recall_to_llm(row: dict, *, support_count: int, min_score: float) -> bool:
+    """Admit historical-recall candidates based on repeated coherent analog patterns."""
+    total_count = int(row.get("support_count", 0) or 0)
+    direct_count = int(row.get("direct_count", 0) or 0)
+    implied_count = int(row.get("implied_count", 0) or 0)
+    best_score = float(row.get("best_support_score", 0.0) or 0.0)
+    avg_score = float(row.get("avg_support_score", 0.0) or 0.0)
     weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
-    if int(row.get("support_count", 0) or 0) >= support_count:
+
+    if direct_count >= 2 and best_score >= max(min_score, 0.55):
+        return True
+
+    if total_count >= 3 and best_score >= 0.70 and avg_score >= 0.58:
+        return True
+
+    if implied_count >= 5 and best_score >= 0.72 and avg_score >= 0.60:
+        return True
+
+    if total_count >= support_count:
         return weighted_support >= max(1.0, support_count * 0.4)
-    return (
-        float(row.get("best_support_score", 0.0) or 0.0) >= min_score
-        and weighted_support >= 0.5
-    )
+    return best_score >= min_score and weighted_support >= 0.5
 
 
 def _should_send_semantic_to_llm(row: dict) -> bool:

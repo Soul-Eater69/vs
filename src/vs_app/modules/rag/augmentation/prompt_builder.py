@@ -19,11 +19,14 @@ def build_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str
     blocks = []
     for idx, row in enumerate(candidates, start=1):
         bucket = str(row.get("bucket") or "").strip()
+        lane = str(row.get("candidate_lane") or "").strip()
         lines = [
             f"{idx}. {row.get('entity_name', '')}",
             f"Entity ID: {row.get('entity_id', '')}",
             f"Evidence bucket: {bucket or 'unknown'}",
         ]
+        if lane:
+            lines.append(f"Candidate lane: {lane}")
 
         description = str(row.get("description") or "").strip()
         if description:
@@ -42,6 +45,12 @@ def build_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str
                 f"best similarity {float(row.get('best_support_score', 0.0) or 0.0):.4f}, "
                 f"average similarity {float(row.get('avg_support_score', 0.0) or 0.0):.4f}"
             )
+            if lane == "historical_recall":
+                lines.append(
+                    "Historical role: implied gap-fill candidate. Semantic retrieval likely missed this,"
+                    " so judge it by whether the analog pattern suggests an unstated but materially"
+                    " relevant value stream."
+                )
 
             reasons = [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]
             if reasons:

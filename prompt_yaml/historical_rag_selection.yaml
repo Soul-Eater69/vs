@@ -5,6 +5,8 @@ system_extension: |
   - semantic_plus_historical: strongest bucket; usually keep unless the connection is clearly weak
   - semantic_only: judge by business fit to the current idea card
   - historical_only: recovered candidate semantic retrieval missed; do not reject only because wording differs
+  - historical_only candidates are often implied gap-fill candidates: they may belong even when the
+    idea card never says the value-stream wording explicitly.
 
   Historical evidence rules:
   - "Analog evidence" lines show the actual summary and canonical functions from each supporting
@@ -12,7 +14,7 @@ system_extension: |
     to the current idea card, and whether the implied connection is defensible.
   - A [ticket / direct] analog means that ticket was explicitly tagged with this value stream.
   - A [ticket / implied] analog means the value stream was inferred from that ticket's functions
-    or downstream relationships — treat it as weaker unless multiple implied analogs agree.
+    or downstream relationships; treat it as weaker unless multiple implied analogs agree.
   - Repeated direct analogs with relevant summaries is strong evidence.
   - Implied-only evidence from a single analog is usually not enough; look for a pattern across
     multiple analogs, or a clear functional bridge visible in the analog evidence lines.
@@ -23,7 +25,10 @@ system_extension: |
   - Favor quality over quantity: prefer 8-10 well-supported selections over 12 marginal ones.
   - Prioritize recall for candidates with both semantic and historical support.
   - Include historical-only candidates when the analog evidence shows a defensible business
-    connection — base this on the analog content, not just the support count.
+    connection; base this on the analog content, not just the support count.
+  - For historical_only gap-fill candidates, do not require the card to literally mention the
+    value stream. The key question is whether repeated analog evidence suggests this value stream
+    is plausibly an unstated part of the initiative.
   - Do not over-penalize vocabulary mismatch when analog summaries show functional overlap.
   - Do not select when analog evidence is clearly from a different domain or the only support
     is weak implied matches with unrelated summaries.
@@ -48,11 +53,16 @@ user: |
   For historical candidates, read the "Analog evidence" lines to judge whether similar
   past tickets genuinely support this value stream for the current idea card.
   Do not require exact wording overlap, but do require a defensible business connection.
+  Historical-only candidates may be implied gap-fillers rather than direct textual matches.
+  Evaluate them as possible missing value streams recovered from analogous past work.
 
   SELECTION RULES:
   - Favor candidates with both semantic and historical support.
-  - For historical-only candidates, the analog evidence lines are your primary signal —
+  - For historical-only candidates, the analog evidence lines are your primary signal;
     judge them by whether the analog cards describe work similar to the current idea card.
+  - If multiple implied analogs point to the same historical-only candidate and the analog work
+    is coherent with the idea card, treat that as meaningful recovery evidence even when the card
+    does not explicitly say the value-stream wording.
   - Repeated direct analogs are stronger than repeated implied analogs.
   - Implied analogs are valid when multiple analogs agree and the functional bridge is clear.
   - Reject when no analog evidence is relevant or the connection is not materially defensible.

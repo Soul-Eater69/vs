@@ -203,6 +203,92 @@ def test_merge_candidate_sources_keeps_weaker_confirmed_candidate_in_llm_review(
     assert result["llm_candidates"][0]["entity_name"] == "Borderline Confirmed Candidate"
 
 
+def test_merge_candidate_sources_sends_four_hit_historical_only_to_llm_review() -> None:
+    historical_support = [
+        {
+            "entity_id": "hist-receive-care",
+            "entity_name": "Receive Care",
+            "support_count": 4,
+            "direct_count": 4,
+            "implied_count": 0,
+            "weighted_support_count": 1.8,
+            "weighted_direct_count": 1.8,
+            "weighted_implied_count": 0.0,
+            "best_support_score": 0.691,
+            "avg_support_score": 0.62,
+            "supporting_ticket_ids": ["IDMT-8255"],
+            "historical_reasons": ["[IDMT-8255 / direct] broad behavioral health hub analog"],
+            "label_sources": ["jira_issuelinks"],
+        }
+    ]
+
+    result = merge_candidate_sources([], historical_support, max_llm_candidates=4)
+
+    row = result["merged_candidates"][0]
+    assert row["candidate_lane"] == "historical_recall"
+    assert row["candidate_status"] == "sent_to_llm"
+    assert row["candidate_status_reason"] == "protected_historical_lane"
+    assert result["auto_selected_value_streams"] == []
+
+
+def test_merge_candidate_sources_sends_eight_hit_moderate_historical_only_to_llm_review() -> None:
+    historical_support = [
+        {
+            "entity_id": "hist-adjudicate",
+            "entity_name": "Adjudicate Claim",
+            "support_count": 8,
+            "direct_count": 4,
+            "implied_count": 4,
+            "weighted_support_count": 2.2,
+            "weighted_direct_count": 1.4,
+            "weighted_implied_count": 0.8,
+            "best_support_score": 0.691,
+            "avg_support_score": 0.61,
+            "supporting_ticket_ids": ["IDMT-8255", "IDMT-8256"],
+            "historical_reasons": ["[IDMT-8255 / implied] broad behavioral health hub analog"],
+            "label_sources": ["jira_issuelinks"],
+        }
+    ]
+
+    result = merge_candidate_sources([], historical_support, max_llm_candidates=4)
+
+    row = result["merged_candidates"][0]
+    assert row["candidate_lane"] == "historical_recall"
+    assert row["candidate_status"] == "sent_to_llm"
+    assert row["candidate_status_reason"] == "protected_historical_lane"
+    assert result["auto_selected_value_streams"] == []
+
+
+def test_merge_candidate_sources_still_auto_selects_extreme_historical_only_consensus() -> None:
+    historical_support = [
+        {
+            "entity_id": "hist-extreme",
+            "entity_name": "Extreme Historical Candidate",
+            "support_count": 6,
+            "direct_count": 4,
+            "implied_count": 2,
+            "weighted_support_count": 2.1,
+            "weighted_direct_count": 1.7,
+            "weighted_implied_count": 0.4,
+            "best_support_score": 0.82,
+            "avg_support_score": 0.68,
+            "supporting_ticket_ids": ["IDMT-1", "IDMT-2", "IDMT-3", "IDMT-4"],
+            "historical_reasons": ["[IDMT-1 / direct] repeated matching workflow"],
+            "label_sources": ["jira_issuelinks"],
+        }
+    ]
+
+    result = merge_candidate_sources([], historical_support, max_llm_candidates=4)
+
+    row = result["merged_candidates"][0]
+    assert row["candidate_lane"] == "historical_recall"
+    assert row["candidate_status"] == "auto_selected"
+    assert row["candidate_status_reason"] == "strong_historical_support"
+    assert [selected["entity_name"] for selected in result["auto_selected_value_streams"]] == [
+        "Extreme Historical Candidate"
+    ]
+
+
 def test_merge_candidate_sources_admits_repeated_implied_recovery_when_weighted_support_is_diluted() -> None:
     historical_support = [
         {

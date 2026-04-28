@@ -11,8 +11,8 @@ def merge_candidate_sources(
     historical_support: List[dict],
     *,
     max_llm_candidates: int = 24,
-    strong_support_count: int = 3,
-    strong_support_score: float = 0.60,
+    strong_support_count: int = 6,
+    strong_support_score: float = 0.78,
     strong_confirmed_support_count: int = 4,
     strong_confirmed_support_score: float = 0.70,
     moderate_support_count: int = 2,
@@ -260,9 +260,11 @@ def _should_auto_include(
     # tagged this VS in jira AND total support is meaningful AND peak score
     # is reasonable.
     if (
-        direct_count >= 3
+        direct_count >= 4
         and total_count >= support_count
         and best_score >= min_score
+        and avg_score >= 0.65
+        and weighted_total >= 2.0
     ):
         return True
 
@@ -274,7 +276,7 @@ def _should_auto_include(
     if (
         total_count >= strong_implied_count
         and best_score >= strong_implied_score
-        and avg_score >= 0.55
+        and avg_score >= 0.65
         and weighted_total >= 2.5
     ):
         return True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Dict, List, Optional
 
 
@@ -27,7 +28,8 @@ def select_value_streams(
         top_k=top_k,
         allowed_value_stream_names=allowed_value_stream_names,
     )
-    historical = retrieve_historical_support(
+    historical = _retrieve_historical_support_compat(
+        retrieve_historical_support,
         query_for_prompt or cleaned_query,
         historical_faiss_dir=historical_faiss_dir,
         max_ticket_hits=min(max(12, fetch_count), 24),
@@ -72,6 +74,23 @@ def select_value_streams(
         },
         "warnings": [],
     }
+
+
+def _retrieve_historical_support_compat(
+    retrieve_historical_support,
+    query: str,
+    *,
+    historical_faiss_dir: str,
+    max_ticket_hits: int,
+    exclude_ticket_ids: Optional[List[str]] = None,
+) -> dict:
+    kwargs = {
+        "historical_faiss_dir": historical_faiss_dir,
+        "max_ticket_hits": max_ticket_hits,
+    }
+    if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
+        kwargs["exclude_ticket_ids"] = exclude_ticket_ids
+    return retrieve_historical_support(query, **kwargs)
 
 
 def run_historical_rag_pipeline(

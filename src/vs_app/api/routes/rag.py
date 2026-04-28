@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 from pathlib import Path
@@ -88,12 +89,16 @@ async def predict_value_streams_stream(
             # Step 4: Historical FAISS
             yield _sse("step", {"step": "historical", "label": "Searching historical FAISS..."})
             exclude_ids = [request.ticket_id] if request.ticket_id else None
+            historical_kwargs = {
+                "historical_faiss_dir": faiss_dir,
+                "max_ticket_hits": min(max(12, top_k), 24),
+            }
+            if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
+                historical_kwargs["exclude_ticket_ids"] = exclude_ids
             historical = await asyncio.to_thread(
                 retrieve_historical_support,
                 query_for_prompt or cleaned_query,
-                historical_faiss_dir=faiss_dir,
-                max_ticket_hits=min(max(12, top_k), 24),
-                exclude_ticket_ids=exclude_ids,
+                **historical_kwargs,
             )
 
             # Step 5: LLM finalize

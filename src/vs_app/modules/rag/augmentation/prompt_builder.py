@@ -30,23 +30,32 @@ def build_direct_candidate_prompt(query_for_prompt: str, candidates: List[dict])
     )
 
 
-def build_historical_gap_prompt(query_for_prompt: str, candidates: List[dict]) -> str:
+def build_historical_gap_prompt(
+    query_for_prompt: str,
+    candidates: List[dict],
+    precedent_candidates: List[dict] | None = None,
+) -> str:
     ordered_candidates = _order_candidates_for_llm(candidates)
     candidate_blocks = _candidate_blocks(ordered_candidates)
+    precedent_context = _precedent_context(precedent_candidates or candidates)
 
     return f"""IDEA CARD:
 
 {query_for_prompt}
 
 TASK:
-You are doing a separate historical gap-fill adjudication pass.
+You are doing a separate historical pattern adjudication pass.
 Semantic retrieval already handled direct wording matches. Your job is to decide whether
-historical-only candidates represent value streams implied by repeatable patterns in similar
-past tickets.
+historical-supported candidates represent value streams implied or confirmed by repeatable
+patterns in similar past tickets.
 
 Historical candidates are not expected to have strong literal wording overlap with the idea card.
 Judge whether the analog evidence shows the same downstream operational work, business lifecycle,
 or recurring capability pattern.
+
+The precedent section groups evidence by prior similar ticket. Treat that bundle view as important:
+if one close prior ticket supported several value streams together, that can reveal a reusable
+business pattern that individual candidate snippets may hide.
 
 CALIBRATION EXAMPLES:
 Positive pattern-induced selection:
@@ -70,7 +79,11 @@ SELECTION RULES:
 - Exclude one-off, generic, or domain-mismatched analogs even when scores are high.
 - Prefer concise reasons that cite the analog pattern, not generic score language.
 
-HISTORICAL GAP-FILL CANDIDATES:
+SIMILAR HISTORICAL PRECEDENTS:
+
+{precedent_context}
+
+HISTORICAL-SUPPORTED CANDIDATES:
 
 {candidate_blocks}"""
 
@@ -132,6 +145,100 @@ def _candidate_blocks(ordered_candidates: List[dict]) -> str:
         blocks.append("\n".join(lines))
 
     return "\n\n".join(blocks)
+
+
+def _precedent_context(candidates: List[dict], *, limit: int = 8) -> str:
+    precedents: dict[str, dict] = {}
+    for row in candidates:
+        name = str(row.get("entity_name") or "").strip()
+        if not name:
+            continue
+
+        parsed_any = False
+        for reason in [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]:
+            parsed = _parse_analog_reason(reason)
+            if not parsed:
+                continue
+            parsed_any = True
+            ticket_id, inference_type, snippet = parsed
+            _add_precedent(precedents, ticket_id, name, inference_type, snippet)
+
+        if parsed_any:
+            continue
+
+        for ticket_id in [str(value).strip() for value in (row.get("supporting_ticket_ids") or []) if str(value).strip()]:
+            inference_type = "direct" if int(row.get("direct_count", 0) or 0) else "implied"
+            _add_precedent(precedents, ticket_id, name, inference_type, "")
+
+    if not precedents:
+        return "No grouped precedent context was available; rely on candidate-level analog evidence."
+
+    rows = sorted(
+        precedents.values(),
+        key=lambda item: (
+            len(item["candidates"]),
+            len(item["direct_candidates"]),
+            len(item["snippets"]),
+        ),
+        reverse=True,
+    )
+
+    blocks: List[str] = []
+    for idx, item in enumerate(rows[:limit], start=1):
+        direct = sorted(item["direct_candidates"])
+        implied = sorted(item["implied_candidates"])
+        candidate_parts = []
+        if direct:
+            candidate_parts.append("direct: " + ", ".join(direct[:8]))
+        if implied:
+            candidate_parts.append("implied: " + ", ".join(implied[:8]))
+        lines = [
+            f"{idx}. {item['ticket_id']}",
+            f"   Pattern-supported value streams: {'; '.join(candidate_parts) if candidate_parts else 'none listed'}",
+        ]
+        for snippet in item["snippets"][:2]:
+            lines.append(f"   Analog summary: {snippet[:260]}")
+        blocks.append("\n".join(lines))
+
+    return "\n\n".join(blocks)
+
+
+def _add_precedent(
+    precedents: dict[str, dict],
+    ticket_id: str,
+    candidate_name: str,
+    inference_type: str,
+    snippet: str,
+) -> None:
+    ticket_key = ticket_id.strip()
+    if not ticket_key:
+        return
+    entry = precedents.setdefault(
+        ticket_key,
+        {
+            "ticket_id": ticket_key,
+            "candidates": set(),
+            "direct_candidates": set(),
+            "implied_candidates": set(),
+            "snippets": [],
+        },
+    )
+    entry["candidates"].add(candidate_name)
+    target = "direct_candidates" if inference_type == "direct" else "implied_candidates"
+    entry[target].add(candidate_name)
+    clean_snippet = " ".join((snippet or "").split())
+    if clean_snippet and clean_snippet not in entry["snippets"]:
+        entry["snippets"].append(clean_snippet)
+
+
+def _parse_analog_reason(reason: str) -> tuple[str, str, str] | None:
+    match = re.match(r"^\[([^/\]]+)\s*/\s*(direct|implied)\]\s*(.*)$", reason, re.IGNORECASE)
+    if not match:
+        return None
+    ticket_id = match.group(1).strip()
+    inference_type = match.group(2).strip().lower()
+    snippet = match.group(3).strip()
+    return ticket_id, inference_type, snippet
 
 
 def _order_candidates_for_llm(candidates: List[dict]) -> List[dict]:

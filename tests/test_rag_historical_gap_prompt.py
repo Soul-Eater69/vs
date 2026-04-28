@@ -12,7 +12,7 @@ def test_split_llm_candidates_separates_historical_gap_lane() -> None:
     direct_candidates, historical_candidates = _split_llm_candidates([direct, historical, semantic])
 
     assert direct_candidates == [direct, semantic]
-    assert historical_candidates == [historical]
+    assert historical_candidates == [direct, historical]
 
 
 def test_historical_gap_prompt_explains_pattern_induced_selection() -> None:
@@ -33,12 +33,29 @@ def test_historical_gap_prompt_explains_pattern_induced_selection() -> None:
                 "historical_reasons": [
                     "[IDMT-1 / implied] recurring billing and payment receipt analog"
                 ],
+            },
+            {
+                "entity_id": "vs-member",
+                "entity_name": "Manage Member Care",
+                "bucket": "historical_only",
+                "candidate_lane": "historical_recall",
+                "from_historical": True,
+                "support_count": 9,
+                "direct_count": 1,
+                "implied_count": 8,
+                "best_support_score": 0.714,
+                "avg_support_score": 0.60,
+                "historical_reasons": [
+                    "[IDMT-1 / direct] recurring billing and payment receipt analog"
+                ],
             }
         ],
     )
 
-    assert "separate historical gap-fill adjudication pass" in prompt
+    assert "separate historical pattern adjudication pass" in prompt
     assert "pattern-induced" in prompt
+    assert "SIMILAR HISTORICAL PRECEDENTS" in prompt
+    assert "Pattern-supported value streams: direct: Manage Member Care; implied: Manage Invoice and Payment Receipt" in prompt
     assert "Do not include \"Align and Execute IT Strategy\"" in prompt
     assert "Manage Invoice and Payment Receipt" in prompt
     assert "Analog evidence" in prompt

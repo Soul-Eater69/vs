@@ -48,6 +48,7 @@ def generate_value_streams(
         output_schema=SelectionResult,
         query_for_prompt=query_for_prompt,
         candidates=historical_gap_candidates,
+        precedent_candidates=historical_gap_candidates,
         prompt_kind="historical_gap",
     )
 
@@ -93,6 +94,7 @@ def _run_selection_pass(
     query_for_prompt: str,
     candidates: List[dict],
     prompt_kind: str,
+    precedent_candidates: List[dict] | None = None,
 ) -> dict:
     from ..ranking.reranker import sanitize_selected
 
@@ -103,8 +105,9 @@ def _run_selection_pass(
         prompt = build_historical_gap_prompt(
             query_for_prompt=query_for_prompt,
             candidates=candidates,
+            precedent_candidates=precedent_candidates,
         )
-        system_prompt = build_system_prompt(min_select=0, max_select=10)
+        system_prompt = build_system_prompt(min_select=0, max_select=12)
     else:
         prompt = build_direct_candidate_prompt(
             query_for_prompt=query_for_prompt,
@@ -123,13 +126,14 @@ def _run_selection_pass(
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:
     direct_candidates: List[dict] = []
-    historical_gap_candidates: List[dict] = []
+    historical_adjudication_candidates: List[dict] = []
     for row in llm_candidates:
-        if str(row.get("candidate_lane") or "") == "historical_recall":
-            historical_gap_candidates.append(row)
-        else:
+        lane = str(row.get("candidate_lane") or "")
+        if lane != "historical_recall":
             direct_candidates.append(row)
-    return direct_candidates, historical_gap_candidates
+        if lane in {"historical_recall", "confirmed_direct"} or bool(row.get("from_historical")):
+            historical_adjudication_candidates.append(row)
+    return direct_candidates, historical_adjudication_candidates
 
 
 def _finalize_selected(

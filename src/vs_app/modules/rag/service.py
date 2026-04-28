@@ -26,6 +26,8 @@ class ValueStreamRagResult:
     selected_value_streams: list[dict]
     auto_selected_value_streams: list[dict]
     llm_selected_value_streams: list[dict]
+    rescued_historical_gap_fill_value_streams: list[dict]
+    dropped_historical_gap_fill_value_streams: list[dict]
     rejected_candidates: list[dict]
     semantic_candidate_value_streams: list[dict]
     historical_candidate_value_streams: list[dict]
@@ -138,6 +140,8 @@ class ValueStreamRagService:
 
         payload.setdefault("auto_selected_value_streams", [])
         payload.setdefault("llm_selected_value_streams", [])
+        payload.setdefault("rescued_historical_gap_fill_value_streams", [])
+        payload.setdefault("dropped_historical_gap_fill_value_streams", [])
         payload.setdefault("rejected_candidates", [])
         payload.setdefault("semantic_candidate_value_streams", list(semantic_candidates or []))
         payload.setdefault("historical_candidate_value_streams", list(historical_support or []))
@@ -190,6 +194,12 @@ class ValueStreamRagService:
             selected_value_streams=list(payload.get("selected_value_streams", []) or []),
             auto_selected_value_streams=list(payload.get("auto_selected_value_streams", []) or []),
             llm_selected_value_streams=list(payload.get("llm_selected_value_streams", []) or []),
+            rescued_historical_gap_fill_value_streams=list(
+                payload.get("rescued_historical_gap_fill_value_streams", []) or []
+            ),
+            dropped_historical_gap_fill_value_streams=list(
+                payload.get("dropped_historical_gap_fill_value_streams", []) or []
+            ),
             rejected_candidates=list(payload.get("rejected_candidates", []) or []),
             semantic_candidate_value_streams=list(payload.get("semantic_candidate_value_streams", []) or []),
             historical_candidate_value_streams=list(payload.get("historical_candidate_value_streams", []) or []),

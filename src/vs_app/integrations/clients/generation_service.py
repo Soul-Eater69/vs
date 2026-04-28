@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from langchain_core.messages import BaseMessage
 
-from .llm import IDPChatOpenAI
+from .llm import IDPChatOpenAI, build_extra_body
 from vs_app import settings as config
 
 _SYSTEM_PROMPT = (
@@ -46,8 +46,13 @@ class GenerationService:
         base_url: Optional[str] = config.LLM_BASE_URL,
     ) -> None:
         model = model or os.environ.get("GENERATION_LLM_MODEL", "gpt-5-idp")
-        temperature = float(os.environ.get("GENERATION_LLM_TEMPERATURE", "0"))
-        kwargs = {"model": model, "temperature": temperature}
+        kwargs = {"model": model}
+        temperature = _optional_float_env("GENERATION_LLM_TEMPERATURE")
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        reasoning_effort = os.environ.get("GENERATION_LLM_REASONING_EFFORT")
+        if reasoning_effort:
+            kwargs["extra_body"] = build_extra_body(reasoning_effort=reasoning_effort)
         if base_url:
             kwargs["openai_api_base"] = base_url
         self._llm = IDPChatOpenAI(**kwargs)
@@ -106,3 +111,10 @@ class GenerationService:
             method="function_calling",
         )
         return structured_llm.invoke(messages)
+
+
+def _optional_float_env(name: str) -> float | None:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return None
+    return float(value)

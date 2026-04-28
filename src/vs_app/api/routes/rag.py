@@ -56,6 +56,7 @@ async def predict_value_streams_stream(
         from vs_app.modules.rag.retrieval.historical_retriever import retrieve_historical_support
         from vs_app.modules.rag.augmentation.candidate_merger import merge_candidate_sources
         from vs_app.modules.rag.augmentation.finalizer import generate_value_streams
+        from vs_app.modules.rag.fingerprints import build_rag_debug_fingerprints
 
         try:
             top_k = max(request.top_k_historical, request.top_k_value_streams)
@@ -114,6 +115,16 @@ async def predict_value_streams_stream(
                 llm_candidates=augmented["llm_candidates"],
                 auto_selected=augmented["auto_selected_value_streams"],
             )
+            debug = build_rag_debug_fingerprints(
+                cleaned_query=cleaned_query,
+                query_for_prompt=query_for_prompt,
+                semantic_candidates=semantic_candidates,
+                historical_support=historical.get("historical_value_stream_support", []),
+                merged_candidates=augmented["merged_candidates"],
+                llm_candidates=generated["candidates_used"],
+                llm_selected=generated["llm_selected_value_streams"],
+                final_selected=generated["selected_value_streams"],
+            )
 
             result_payload = {
                 "selected_value_streams": generated["selected_value_streams"],
@@ -143,7 +154,7 @@ async def predict_value_streams_stream(
                 },
                 "warnings": [],
                 "evidence": historical.get("historical_value_stream_support", []),
-                "debug": {},
+                "debug": debug,
                 "ground_truth": _ground_truth_from_faiss(request.ticket_id) if request.ticket_id else [],
             }
             yield _sse("result", result_payload)

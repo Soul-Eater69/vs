@@ -41,6 +41,14 @@ except ImportError:  # pragma: no cover - optional dependency in some local envs
 logger = logging.getLogger(__name__)
 
 
+def build_extra_body(*, reasoning_effort: str | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {"api_version": "2024-04-01-preview"}
+    effort = (reasoning_effort or os.environ.get("IDP_REASONING_EFFORT") or "").strip()
+    if effort:
+        body["reasoning_effort"] = effort
+    return body
+
+
 def update_completions_uri(req: httpx.Request) -> None:
     if req.url.path == "/chat/completions":
         req.url = req.url.copy_with(path=config.CHAT_COMPLETION_PATH)
@@ -79,8 +87,8 @@ class IDPChatOpenAI(ChatOpenAI):
         exclude=True,
     )
 
-    extra_body: Mapping[str, Any] | None = {"api_version": "2024-04-01-preview"}
-    temperature: float | None = 0
+    extra_body: Mapping[str, Any] | None = Field(default_factory=build_extra_body)
+    temperature: float | None = 1
     openai_api_base: str = config.LLM_BASE_URL
 
     # --------------------------------------------------------------------------
@@ -113,4 +121,3 @@ class IDPChatOpenAI(ChatOpenAI):
                 chunk, default_chunk_class, base_generation_info
             )
         return None
-

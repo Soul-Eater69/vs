@@ -32,13 +32,19 @@ def normalize_for_search(text: Optional[str], max_chars: int = 2500) -> str:
 
 
 def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
-    from vs_app.integrations.clients.llm import IDPChatOpenAI
+    from vs_app.integrations.clients.llm import IDPChatOpenAI, build_extra_body
 
     cleaned = clean_opt_text(raw_text)
     prompt = build_structured_summary_prompt(ticket_id="QUERY", text=cleaned[:8000])
     model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-mini-idp")
-    temperature = float(os.environ.get("CONDENSE_LLM_TEMPERATURE", "0"))
-    reply = IDPChatOpenAI(model=model, temperature=temperature).invoke(input=prompt)
+    kwargs = {"model": model}
+    temperature = _optional_float_env("CONDENSE_LLM_TEMPERATURE")
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    reasoning_effort = os.environ.get("CONDENSE_LLM_REASONING_EFFORT")
+    if reasoning_effort:
+        kwargs["extra_body"] = build_extra_body(reasoning_effort=reasoning_effort)
+    reply = IDPChatOpenAI(**kwargs).invoke(input=prompt)
     parsed = parse_structured_summary_payload(
         getattr(reply, "content", "") or "",
         context_id="query_summary",
@@ -46,3 +52,10 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
     )
     condensed = format_structured_summary_text(parsed, max_chars=max_chars)
     return condensed.replace("\\n", "\n").replace("\\r", "")
+
+
+def _optional_float_env(name: str) -> float | None:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return None
+    return float(value)

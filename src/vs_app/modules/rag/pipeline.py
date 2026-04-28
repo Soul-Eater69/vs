@@ -14,6 +14,7 @@ def select_value_streams(
 ) -> dict:
     from .augmentation.candidate_merger import merge_candidate_sources
     from .augmentation.finalizer import generate_value_streams
+    from .fingerprints import build_rag_debug_fingerprints
     from .query.views import clean_ppt_text, condense_idea_card
     from .retrieval.historical_retriever import retrieve_historical_support
     from .retrieval.semantic_retriever import retrieve_semantic_candidates
@@ -46,6 +47,16 @@ def select_value_streams(
         llm_candidates=augmented["llm_candidates"],
         auto_selected=augmented["auto_selected_value_streams"],
     )
+    debug = build_rag_debug_fingerprints(
+        cleaned_query=cleaned_query,
+        query_for_prompt=query_for_prompt,
+        semantic_candidates=semantic_candidates,
+        historical_support=historical.get("historical_value_stream_support", []),
+        merged_candidates=augmented["merged_candidates"],
+        llm_candidates=generated["candidates_used"],
+        llm_selected=generated["llm_selected_value_streams"],
+        final_selected=generated["selected_value_streams"],
+    )
     return {
         "selected_value_streams": generated["selected_value_streams"],
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],
@@ -73,6 +84,7 @@ def select_value_streams(
             "query_for_prompt": query_for_prompt,
         },
         "warnings": [],
+        "debug": debug,
     }
 
 
@@ -130,4 +142,5 @@ def run_historical_rag_pipeline(
         "raw_response": result.get("raw_response"),
         "query_preparation": result.get("query_preparation", {}),
         "warnings": result.get("warnings", []),
+        "debug": result.get("debug", {}),
     }

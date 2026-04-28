@@ -3,7 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Iterable, List
 
-from .prompt_builder import build_candidate_prompt, build_system_prompt
+from .prompt_builder import (
+    build_direct_candidate_prompt,
+    build_historical_gap_prompt,
+    build_system_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +22,6 @@ def generate_value_streams(
 ) -> dict:
     from vs_app.integrations.clients.generation_service import GenerationService
 
-    from ..ranking.reranker import sanitize_selected
-
     auto_selected = list(auto_selected or [])
     if not llm_candidates:
         return {
@@ -29,24 +31,30 @@ def generate_value_streams(
             "candidates_used": [],
         }
 
-    gen_svc = GenerationService()
-    prompt = build_candidate_prompt(
-        query_for_prompt=query_for_prompt,
-        candidates=llm_candidates,
-    )
-    system_prompt = build_system_prompt()
-
     from vs_app.modules.prompts.loader import SelectionResult
 
-    result = gen_svc.generate_structured(
-        query=prompt,
-        output_schema=SelectionResult,
-        system_prompt=system_prompt,
-    )
-    parsed = result.model_dump() if hasattr(result, "model_dump") else {"selected_value_streams": []}
-    parsed = sanitize_selected(parsed, llm_candidates)
+    gen_svc = GenerationService()
+    direct_candidates, historical_gap_candidates = _split_llm_candidates(llm_candidates)
 
-    llm_selected = parsed.get("selected_value_streams", [])
+    direct_parsed = _run_selection_pass(
+        gen_svc=gen_svc,
+        output_schema=SelectionResult,
+        query_for_prompt=query_for_prompt,
+        candidates=direct_candidates,
+        prompt_kind="direct",
+    )
+    historical_parsed = _run_selection_pass(
+        gen_svc=gen_svc,
+        output_schema=SelectionResult,
+        query_for_prompt=query_for_prompt,
+        candidates=historical_gap_candidates,
+        prompt_kind="historical_gap",
+    )
+
+    llm_selected = _merge_selected(
+        list(direct_parsed.get("selected_value_streams") or []),
+        list(historical_parsed.get("selected_value_streams") or []),
+    )
     (
         final_selected,
         filtered_llm_selected,
@@ -58,7 +66,11 @@ def generate_value_streams(
         llm_selected=llm_selected,
         llm_candidates=llm_candidates,
     )
-    parsed["selected_value_streams"] = filtered_llm_selected
+    parsed = {
+        "selected_value_streams": filtered_llm_selected,
+        "direct_pass": direct_parsed,
+        "historical_gap_pass": historical_parsed,
+    }
     parsed["rescued_confirmed_merged"] = rescued_confirmed_merged
     parsed["rescued_historical_gap_fill"] = rescued_gap_fill
     parsed["dropped_historical_gap_fill"] = dropped_gap_fill
@@ -72,6 +84,52 @@ def generate_value_streams(
         "raw_response": parsed,
         "candidates_used": llm_candidates,
     }
+
+
+def _run_selection_pass(
+    *,
+    gen_svc,
+    output_schema,
+    query_for_prompt: str,
+    candidates: List[dict],
+    prompt_kind: str,
+) -> dict:
+    from ..ranking.reranker import sanitize_selected
+
+    if not candidates:
+        return {"selected_value_streams": [], "rejected_candidates": []}
+
+    if prompt_kind == "historical_gap":
+        prompt = build_historical_gap_prompt(
+            query_for_prompt=query_for_prompt,
+            candidates=candidates,
+        )
+        system_prompt = build_system_prompt(min_select=0, max_select=10)
+    else:
+        prompt = build_direct_candidate_prompt(
+            query_for_prompt=query_for_prompt,
+            candidates=candidates,
+        )
+        system_prompt = build_system_prompt(min_select=4, max_select=12)
+
+    result = gen_svc.generate_structured(
+        query=prompt,
+        output_schema=output_schema,
+        system_prompt=system_prompt,
+    )
+    parsed = result.model_dump() if hasattr(result, "model_dump") else {"selected_value_streams": []}
+    return sanitize_selected(parsed, candidates)
+
+
+def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:
+    direct_candidates: List[dict] = []
+    historical_gap_candidates: List[dict] = []
+    for row in llm_candidates:
+        if str(row.get("candidate_lane") or "") == "historical_recall":
+            historical_gap_candidates.append(row)
+        else:
+            direct_candidates.append(row)
+    return direct_candidates, historical_gap_candidates
 
 
 def _finalize_selected(

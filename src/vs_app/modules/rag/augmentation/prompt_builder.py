@@ -9,15 +9,73 @@ from vs_app.modules.prompts.loader import (
 )
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(min_select: int = 4, max_select: int = 12) -> str:
     return build_historical_selection_system_prompt(
-        min_select=4,
-        max_select=12,
+        min_select=min_select,
+        max_select=max_select,
     )
 
 
 def build_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str:
+    return build_direct_candidate_prompt(query_for_prompt, candidates)
+
+
+def build_direct_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str:
     ordered_candidates = _order_candidates_for_llm(candidates)
+    candidate_blocks = _candidate_blocks(ordered_candidates)
+
+    return build_historical_selection_prompt(
+        query_for_prompt=query_for_prompt,
+        candidate_blocks=candidate_blocks,
+    )
+
+
+def build_historical_gap_prompt(query_for_prompt: str, candidates: List[dict]) -> str:
+    ordered_candidates = _order_candidates_for_llm(candidates)
+    candidate_blocks = _candidate_blocks(ordered_candidates)
+
+    return f"""IDEA CARD:
+
+{query_for_prompt}
+
+TASK:
+You are doing a separate historical gap-fill adjudication pass.
+Semantic retrieval already handled direct wording matches. Your job is to decide whether
+historical-only candidates represent value streams implied by repeatable patterns in similar
+past tickets.
+
+Historical candidates are not expected to have strong literal wording overlap with the idea card.
+Judge whether the analog evidence shows the same downstream operational work, business lifecycle,
+or recurring capability pattern.
+
+CALIBRATION EXAMPLES:
+Positive pattern-induced selection:
+- If the current idea describes network steering, tiering, payment, invoice, utilization, or member
+  operations only indirectly, and multiple similar historical tickets carried a downstream value
+  stream with coherent analog summaries, include that value stream as an implied gap-fill.
+- Example decision: include "Manage Invoice and Payment Receipt" when several similar tickets show
+  recurring billing/payment receipt work even if the current card does not literally say "invoice".
+
+Negative generic false positive:
+- Do not include "Align and Execute IT Strategy" merely because the card mentions a roadmap,
+  strategy, modernization, or phased plan. Include it only when the work is actually IT strategy
+  execution rather than business capability delivery.
+- Do not include generic enterprise/process streams when the analog summaries are from a different
+  operational domain.
+
+SELECTION RULES:
+- Evaluate every historical candidate independently.
+- Include when repeated analog evidence shows a defensible implied value stream.
+- Multiple coherent implied analogs can be enough; direct Jira-linked analogs are stronger.
+- Exclude one-off, generic, or domain-mismatched analogs even when scores are high.
+- Prefer concise reasons that cite the analog pattern, not generic score language.
+
+HISTORICAL GAP-FILL CANDIDATES:
+
+{candidate_blocks}"""
+
+
+def _candidate_blocks(ordered_candidates: List[dict]) -> str:
     blocks = []
     for idx, row in enumerate(ordered_candidates, start=1):
         bucket = str(row.get("bucket") or "").strip()
@@ -73,10 +131,7 @@ def build_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str
 
         blocks.append("\n".join(lines))
 
-    return build_historical_selection_prompt(
-        query_for_prompt=query_for_prompt,
-        candidate_blocks="\n\n".join(blocks),
-    )
+    return "\n\n".join(blocks)
 
 
 def _order_candidates_for_llm(candidates: List[dict]) -> List[dict]:

@@ -23,6 +23,8 @@ from .helpers import clean_value_stream_name
 
 logger = logging.getLogger(__name__)
 
+_SUMMARY_SEPARATOR_RE = re.compile(r"\s[-\u2013\u2014]\s+|:\s+|-\s+")
+
 
 # ---------------------------------------------------------------------------
 # Dedup / normalization helpers
@@ -60,7 +62,7 @@ def _dedupe_names(names: list[str]) -> list[str]:
 
 
 def _mapping_cache_key(value: str) -> str:
-    return _norm_vs(clean_value_stream_name(value) or value)
+    return _norm_vs(value) or _norm_vs(clean_value_stream_name(value) or value)
 
 
 
@@ -126,10 +128,28 @@ def _verify_names_with_llm(
     return results
 
 
-def _resolve_approved_name(raw_name: str) -> str | None:
-    cleaned = clean_value_stream_name(raw_name) or raw_name
+def _candidate_name_variants(raw_name: str, cleaned_name: str | None = None) -> list[str]:
+    variants: list[str] = []
+    for value in (raw_name, cleaned_name):
+        text = str(value or "").strip()
+        if not text:
+            continue
 
-    for candidate in (cleaned, raw_name):
+        variants.append(text)
+        for part in _SUMMARY_SEPARATOR_RE.split(text):
+            part = part.strip(" -:")
+            if part:
+                variants.append(part)
+
+        cleaned = clean_value_stream_name(text)
+        if cleaned:
+            variants.append(cleaned)
+
+    return _dedupe_names(variants)
+
+
+def _resolve_approved_name(raw_name: str, cleaned_name: str | None = None) -> str | None:
+    for candidate in _candidate_name_variants(raw_name, cleaned_name):
         resolved = canonicalize_approved_value_stream(candidate)
         if resolved:
             return resolved
@@ -154,7 +174,7 @@ def canonicalize_value_stream_names(
     unresolved: list[dict[str, str]] = []
     for name in deduped:
         cleaned = clean_value_stream_name(name) or name
-        resolved = _resolve_approved_name(name)
+        resolved = _resolve_approved_name(name, cleaned)
 
         if resolved:
             canonical.append(resolved)
@@ -231,9 +251,10 @@ def resolve_value_stream_mapping(
     per_link_names: list[str] = []
     unresolved_entries: list[dict[str, Any]] = []
     for link in vs_links:
-        raw_summary = str(link.get("summary") or "")
-        cleaned = clean_value_stream_name(raw_summary) or raw_summary
-        resolved = _resolve_approved_name(raw_summary)
+        summary = str(link.get("summary") or "")
+        raw_summary = str(link.get("summary_raw") or summary)
+        cleaned = clean_value_stream_name(summary) or clean_value_stream_name(raw_summary) or summary or raw_summary
+        resolved = _resolve_approved_name(raw_summary, cleaned)
 
         if resolved:
             verified_links.append(link)

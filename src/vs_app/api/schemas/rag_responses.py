@@ -9,6 +9,7 @@ class ValueStreamRagResponse(BaseModel):
     selected_value_streams: list[dict] = Field(default_factory=list)
     auto_selected_value_streams: list[dict] = Field(default_factory=list)
     llm_selected_value_streams: list[dict] = Field(default_factory=list)
+    rescued_confirmed_merged_value_streams: list[dict] = Field(default_factory=list)
     rescued_historical_gap_fill_value_streams: list[dict] = Field(default_factory=list)
     dropped_historical_gap_fill_value_streams: list[dict] = Field(default_factory=list)
     rejected_candidates: list[dict] = Field(default_factory=list)
@@ -33,6 +34,9 @@ class ValueStreamRagResponse(BaseModel):
             selected_value_streams=list(getattr(result, "selected_value_streams", []) or []),
             auto_selected_value_streams=list(getattr(result, "auto_selected_value_streams", []) or []),
             llm_selected_value_streams=list(getattr(result, "llm_selected_value_streams", []) or []),
+            rescued_confirmed_merged_value_streams=list(
+                getattr(result, "rescued_confirmed_merged_value_streams", []) or []
+            ),
             rescued_historical_gap_fill_value_streams=list(
                 getattr(result, "rescued_historical_gap_fill_value_streams", []) or []
             ),

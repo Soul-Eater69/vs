@@ -8,6 +8,7 @@ from .prompt_builder import build_candidate_prompt, build_system_prompt
 logger = logging.getLogger(__name__)
 
 _HISTORICAL_GAP_FILL_BUDGET = 4
+_CONFIRMED_MERGED_RESCUE_BUDGET = 6
 
 
 def generate_value_streams(
@@ -46,18 +47,26 @@ def generate_value_streams(
     parsed = sanitize_selected(parsed, llm_candidates)
 
     llm_selected = parsed.get("selected_value_streams", [])
-    final_selected, filtered_llm_selected, rescued_gap_fill, dropped_gap_fill = _finalize_selected(
+    (
+        final_selected,
+        filtered_llm_selected,
+        rescued_confirmed_merged,
+        rescued_gap_fill,
+        dropped_gap_fill,
+    ) = _finalize_selected(
         auto_selected=auto_selected,
         llm_selected=llm_selected,
         llm_candidates=llm_candidates,
     )
     parsed["selected_value_streams"] = filtered_llm_selected
+    parsed["rescued_confirmed_merged"] = rescued_confirmed_merged
     parsed["rescued_historical_gap_fill"] = rescued_gap_fill
     parsed["dropped_historical_gap_fill"] = dropped_gap_fill
 
     return {
         "selected_value_streams": final_selected,
         "llm_selected_value_streams": llm_selected,
+        "rescued_confirmed_merged_value_streams": rescued_confirmed_merged,
         "rescued_historical_gap_fill_value_streams": rescued_gap_fill,
         "dropped_historical_gap_fill_value_streams": dropped_gap_fill,
         "raw_response": parsed,
@@ -70,8 +79,9 @@ def _finalize_selected(
     auto_selected: List[dict],
     llm_selected: List[dict],
     llm_candidates: List[dict],
+    confirmed_merged_rescue_budget: int = _CONFIRMED_MERGED_RESCUE_BUDGET,
     historical_gap_fill_budget: int = _HISTORICAL_GAP_FILL_BUDGET,
-) -> tuple[List[dict], List[dict], List[dict], List[dict]]:
+) -> tuple[List[dict], List[dict], List[dict], List[dict], List[dict]]:
     candidates_by_key = _candidate_lookup(llm_candidates)
     filtered_llm_selected: List[dict] = []
     dropped_gap_fill: List[dict] = []
@@ -84,6 +94,12 @@ def _finalize_selected(
         filtered_llm_selected.append(row)
 
     selected_so_far = _merge_selected(auto_selected, filtered_llm_selected)
+    rescued_confirmed_merged = _rescue_confirmed_merged(
+        llm_candidates=llm_candidates,
+        already_selected=selected_so_far,
+        limit=confirmed_merged_rescue_budget,
+    )
+    selected_so_far = _merge_selected(selected_so_far, rescued_confirmed_merged)
     existing_gap_fill_count = sum(
         1
         for row in selected_so_far
@@ -96,7 +112,7 @@ def _finalize_selected(
         limit=remaining_budget,
     )
     final_selected = _merge_selected(selected_so_far, rescued_gap_fill)
-    return final_selected, filtered_llm_selected, rescued_gap_fill, dropped_gap_fill
+    return final_selected, filtered_llm_selected, rescued_confirmed_merged, rescued_gap_fill, dropped_gap_fill
 
 
 def _merge_selected(auto_selected: List[dict], llm_selected: List[dict]) -> List[dict]:
@@ -154,6 +170,31 @@ def _rescue_historical_gap_fill(
     return [_to_gap_fill_selected(row) for row in rescue_pool[:limit]]
 
 
+def _rescue_confirmed_merged(
+    *,
+    llm_candidates: List[dict],
+    already_selected: List[dict],
+    limit: int,
+) -> List[dict]:
+    if limit <= 0:
+        return []
+
+    selected_keys = {
+        _norm_key(str(row.get("entity_name") or ""))
+        for row in already_selected
+        if str(row.get("entity_name") or "").strip()
+    }
+    rescue_pool = [
+        row
+        for row in llm_candidates
+        if _is_confirmed_merged_candidate(row)
+        and _passes_confirmed_merged_evidence(row)
+        and _norm_key(str(row.get("entity_name") or "")) not in selected_keys
+    ]
+    rescue_pool.sort(key=_confirmed_merged_priority, reverse=True)
+    return [_to_confirmed_merged_selected(row) for row in rescue_pool[:limit]]
+
+
 def _candidate_lookup(candidates: List[dict]) -> dict[str, dict]:
     lookup: dict[str, dict] = {}
     for row in candidates:
@@ -182,6 +223,31 @@ def _is_historical_gap_fill_candidate(row: dict | None) -> bool:
         and bool(row.get("from_historical"))
         and not bool(row.get("from_semantic"))
     )
+
+
+def _is_confirmed_merged_candidate(row: dict | None) -> bool:
+    if not row:
+        return False
+    return (
+        str(row.get("candidate_lane") or "") == "confirmed_direct"
+        and bool(row.get("from_historical"))
+        and bool(row.get("from_semantic"))
+    )
+
+
+def _passes_confirmed_merged_evidence(row: dict | None) -> bool:
+    if not row:
+        return False
+    support_count = int(row.get("support_count", 0) or 0)
+    semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
+    best_score = float(row.get("best_support_score", 0.0) or 0.0)
+    weighted_support = float(row.get("weighted_support_count", support_count) or 0.0)
+
+    if best_score < 0.70 or weighted_support < 0.75:
+        return False
+    if support_count >= 5 and semantic_score >= 1.00:
+        return True
+    return support_count >= 3 and semantic_score >= 1.35
 
 
 def _passes_gap_fill_evidence(row: dict | None) -> bool:
@@ -213,6 +279,35 @@ def _gap_fill_priority(row: dict) -> tuple[float, float, float, int, int]:
         int(row.get("direct_count", 0) or 0),
         int(row.get("support_count", 0) or 0),
     )
+
+
+def _confirmed_merged_priority(row: dict) -> tuple[int, float, float, float]:
+    return (
+        int(row.get("support_count", 0) or 0),
+        float(row.get("best_support_score", 0.0) or 0.0),
+        float(row.get("semantic_score", 0.0) or 0.0),
+        float(row.get("ranking_score", 0.0) or 0.0),
+    )
+
+
+def _to_confirmed_merged_selected(row: dict) -> dict:
+    support_count = int(row.get("support_count", 0) or 0)
+    semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
+    best_score = float(row.get("best_support_score", 0.0) or 0.0)
+    confidence = min(0.90, 0.52 + 0.08 * min(support_count, 4) + 0.06 * min(semantic_score, 2.0))
+    return {
+        "entity_id": str(row.get("entity_id") or "").strip(),
+        "entity_name": str(row.get("entity_name") or "").strip(),
+        "confidence": round(confidence, 4),
+        "reason": (
+            "Confirmed merged rescue: semantic retrieval and repeated historical evidence both "
+            f"support this value stream ({support_count} historical hits; semantic score "
+            f"{semantic_score:.3f}, best similarity {best_score:.3f})."
+        ),
+        "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
+        "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
+        "selection_source": "confirmed_merged_rescue",
+    }
 
 
 def _to_gap_fill_selected(row: dict) -> dict:

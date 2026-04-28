@@ -130,6 +130,10 @@ async def predict_value_streams_stream(
                 "selected_value_streams": generated["selected_value_streams"],
                 "auto_selected_value_streams": augmented["auto_selected_value_streams"],
                 "llm_selected_value_streams": generated["llm_selected_value_streams"],
+                "rescued_confirmed_merged_value_streams": generated.get(
+                    "rescued_confirmed_merged_value_streams",
+                    [],
+                ),
                 "rescued_historical_gap_fill_value_streams": generated.get(
                     "rescued_historical_gap_fill_value_streams",
                     [],

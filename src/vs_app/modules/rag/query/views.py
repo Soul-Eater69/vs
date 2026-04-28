@@ -37,7 +37,8 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
     cleaned = clean_opt_text(raw_text)
     prompt = build_structured_summary_prompt(ticket_id="QUERY", text=cleaned[:8000])
     model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-mini-idp")
-    reply = IDPChatOpenAI(model=model).invoke(input=prompt)
+    temperature = float(os.environ.get("CONDENSE_LLM_TEMPERATURE", "0"))
+    reply = IDPChatOpenAI(model=model, temperature=temperature).invoke(input=prompt)
     parsed = parse_structured_summary_payload(
         getattr(reply, "content", "") or "",
         context_id="query_summary",

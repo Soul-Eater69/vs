@@ -46,7 +46,8 @@ class GenerationService:
         base_url: Optional[str] = config.LLM_BASE_URL,
     ) -> None:
         model = model or os.environ.get("GENERATION_LLM_MODEL", "gpt-5-idp")
-        kwargs = {"model": model}
+        temperature = float(os.environ.get("GENERATION_LLM_TEMPERATURE", "0"))
+        kwargs = {"model": model, "temperature": temperature}
         if base_url:
             kwargs["openai_api_base"] = base_url
         self._llm = IDPChatOpenAI(**kwargs)

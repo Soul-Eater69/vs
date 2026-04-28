@@ -80,7 +80,7 @@ class IDPChatOpenAI(ChatOpenAI):
     )
 
     extra_body: Mapping[str, Any] | None = {"api_version": "2024-04-01-preview"}
-    temperature: float | None = 1
+    temperature: float | None = 0
     openai_api_base: str = config.LLM_BASE_URL
 
     # --------------------------------------------------------------------------
@@ -113,5 +113,4 @@ class IDPChatOpenAI(ChatOpenAI):
                 chunk, default_chunk_class, base_generation_info
             )
         return None
-
 

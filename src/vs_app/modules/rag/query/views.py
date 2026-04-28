@@ -36,12 +36,9 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
 
     cleaned = clean_opt_text(raw_text)
     prompt = build_structured_summary_prompt(ticket_id="QUERY", text=cleaned[:8000])
-    model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-mini-idp")
+    model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-idp")
     kwargs = {"model": model}
-    temperature = _optional_float_env("CONDENSE_LLM_TEMPERATURE")
-    if temperature is not None:
-        kwargs["temperature"] = temperature
-    reasoning_effort = os.environ.get("CONDENSE_LLM_REASONING_EFFORT")
+    reasoning_effort = os.environ.get("CONDENSE_LLM_REASONING_EFFORT", "high")
     if reasoning_effort:
         kwargs["extra_body"] = build_extra_body(reasoning_effort=reasoning_effort)
     reply = IDPChatOpenAI(**kwargs).invoke(input=prompt)
@@ -52,10 +49,3 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
     )
     condensed = format_structured_summary_text(parsed, max_chars=max_chars)
     return condensed.replace("\\n", "\n").replace("\\r", "")
-
-
-def _optional_float_env(name: str) -> float | None:
-    value = os.environ.get(name)
-    if value is None or not value.strip():
-        return None
-    return float(value)

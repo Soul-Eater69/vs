@@ -21,7 +21,7 @@ from .corpus_models import (
 
 logger = logging.getLogger(__name__)
 
-ENRICHMENT_MODEL = "gpt-4o-mini-idp"
+ENRICHMENT_MODEL = "gpt-5-idp"
 
 
 def _build_prompt(raw_text: str, vs_labels: List[str]) -> str:

@@ -5,7 +5,7 @@ Usage:
 
     from vs_app.integrations.clients.llm import IDPChatOpenAI
 
-    llm = IDPChatOpenAI(model="gpt-4-mini-idp")
+    llm = IDPChatOpenAI(model="gpt-5-idp")
     reply = llm.invoke([{"role": "user", "content": "Hello"}])
 """
 

@@ -47,10 +47,7 @@ class GenerationService:
     ) -> None:
         model = model or os.environ.get("GENERATION_LLM_MODEL", "gpt-5-idp")
         kwargs = {"model": model}
-        temperature = _optional_float_env("GENERATION_LLM_TEMPERATURE")
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-        reasoning_effort = os.environ.get("GENERATION_LLM_REASONING_EFFORT")
+        reasoning_effort = os.environ.get("GENERATION_LLM_REASONING_EFFORT", "high")
         if reasoning_effort:
             kwargs["extra_body"] = build_extra_body(reasoning_effort=reasoning_effort)
         if base_url:
@@ -111,10 +108,3 @@ class GenerationService:
             method="function_calling",
         )
         return structured_llm.invoke(messages)
-
-
-def _optional_float_env(name: str) -> float | None:
-    value = os.environ.get(name)
-    if value is None or not value.strip():
-        return None
-    return float(value)

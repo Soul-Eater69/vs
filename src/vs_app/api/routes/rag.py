@@ -61,7 +61,7 @@ async def predict_value_streams_stream(
         try:
             top_k = max(request.top_k_historical, request.top_k_value_streams)
             top_k_vs = min(max(12, top_k), 50)
-            max_llm_candidates = min(max(top_k_vs, 14), 24)
+            max_llm_candidates = min(max(top_k_vs, 18), 36)
             faiss_dir = str(_FAISS_DIR)
 
             # Step 1: Extract

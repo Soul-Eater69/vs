@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
@@ -406,18 +407,21 @@ def _select_llm_candidates(
         row["candidate_status_reason"] = reason
         selected.append(row)
 
-    lane_quotas = {
-        "historical_recall": _lane_quota(max_llm_candidates, ratio=0.30, floor=1, ceiling=6),
-        "confirmed_direct": _lane_quota(max_llm_candidates, ratio=0.20, floor=1, ceiling=4),
-    }
+    lane_quotas = _lane_quotas(max_llm_candidates)
     lane_reasons = {
-        "historical_recall": "protected_historical_lane",
         "confirmed_direct": "protected_confirmed_lane",
+        "historical_recall": "protected_historical_lane",
+        "semantic_direct": "protected_semantic_lane",
     }
 
-    for lane in ("historical_recall", "confirmed_direct"):
-        quota = min(len(llm_candidate_pool.get(lane, [])), lane_quotas[lane])
-        for row in llm_candidate_pool.get(lane, [])[:quota]:
+    ordered_pool = {
+        lane: sorted(rows, key=_lane_priority, reverse=True)
+        for lane, rows in llm_candidate_pool.items()
+    }
+
+    for lane in ("confirmed_direct", "historical_recall", "semantic_direct"):
+        quota = min(len(ordered_pool.get(lane, [])), lane_quotas.get(lane, 0))
+        for row in ordered_pool.get(lane, [])[:quota]:
             if len(selected) >= max_llm_candidates:
                 break
             select_row(row, lane_reasons[lane])
@@ -428,7 +432,17 @@ def _select_llm_candidates(
             for lane_rows in llm_candidate_pool.values()
             for row in lane_rows
         }
-        for row in merged:
+        overflow = sorted(
+            [
+                row
+                for lane_rows in ordered_pool.values()
+                for row in lane_rows
+                if _norm_name(str(row.get("entity_name") or "")) in pending_keys
+            ],
+            key=_overflow_priority,
+            reverse=True,
+        )
+        for row in overflow:
             if len(selected) >= max_llm_candidates:
                 break
             key = _norm_name(str(row.get("entity_name") or ""))
@@ -447,8 +461,92 @@ def _select_llm_candidates(
     return selected
 
 
-def _lane_quota(total: int, *, ratio: float, floor: int, ceiling: int) -> int:
+def _lane_quotas(total: int) -> Dict[str, int]:
     if total <= 0:
-        return 0
-    quota = max(floor, round(total * ratio))
-    return min(quota, ceiling, total)
+        return {
+            "confirmed_direct": 0,
+            "historical_recall": 0,
+            "semantic_direct": 0,
+        }
+
+    confirmed = min(max(1, math.ceil(total * 0.30)), 12)
+    historical = min(max(1, math.ceil(total * 0.40)), 16)
+
+    while confirmed + historical > total:
+        if historical >= confirmed and historical > 1:
+            historical -= 1
+        elif confirmed > 1:
+            confirmed -= 1
+        else:
+            break
+
+    semantic = max(0, total - confirmed - historical)
+    if total >= 3 and semantic == 0:
+        if historical > 1:
+            historical -= 1
+        elif confirmed > 1:
+            confirmed -= 1
+        semantic = 1
+
+    return {
+        "confirmed_direct": confirmed,
+        "historical_recall": historical,
+        "semantic_direct": semantic,
+    }
+
+
+def _lane_priority(row: dict) -> tuple:
+    lane = str(row.get("candidate_lane") or "")
+    if lane == "historical_recall":
+        return _historical_lane_priority(row)
+    if lane == "confirmed_direct":
+        return _confirmed_lane_priority(row)
+    if lane == "semantic_direct":
+        return _semantic_lane_priority(row)
+    return (0.0,)
+
+
+def _historical_lane_priority(row: dict) -> tuple:
+    ticket_count = len(
+        {
+            str(ticket_id).strip().lower()
+            for ticket_id in (row.get("supporting_ticket_ids") or [])
+            if str(ticket_id).strip()
+        }
+    )
+    return (
+        ticket_count,
+        int(row.get("support_count", 0) or 0),
+        int(row.get("direct_count", 0) or 0),
+        float(row.get("best_support_score", 0.0) or 0.0),
+        float(row.get("avg_support_score", 0.0) or 0.0),
+        float(row.get("weighted_support_count", 0.0) or 0.0),
+        float(row.get("historical_strength", 0.0) or 0.0),
+        float(row.get("ranking_score", 0.0) or 0.0),
+    )
+
+
+def _confirmed_lane_priority(row: dict) -> tuple:
+    return (
+        float(row.get("ranking_score", 0.0) or 0.0),
+        float(row.get("semantic_score", 0.0) or 0.0),
+        int(row.get("support_count", 0) or 0),
+        float(row.get("best_support_score", 0.0) or 0.0),
+    )
+
+
+def _semantic_lane_priority(row: dict) -> tuple:
+    return (
+        float(row.get("semantic_score", 0.0) or 0.0),
+        float(row.get("ranking_score", 0.0) or 0.0),
+    )
+
+
+def _overflow_priority(row: dict) -> tuple:
+    lane = str(row.get("candidate_lane") or "")
+    lane_weight = {
+        "confirmed_direct": 3,
+        "historical_recall": 2,
+        "semantic_direct": 1,
+    }.get(lane, 0)
+    return (lane_weight, *_lane_priority(row))

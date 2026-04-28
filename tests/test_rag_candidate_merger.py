@@ -75,7 +75,7 @@ def test_merge_candidate_sources_exposes_ranking_and_candidate_status() -> None:
 
     assert semantic_row["ranking_score"] == semantic_row["semantic_score"]
     assert semantic_row["candidate_status"] == "sent_to_llm"
-    assert semantic_row["candidate_status_reason"] == "within_llm_candidate_cap"
+    assert semantic_row["candidate_status_reason"] == "protected_semantic_lane"
     assert semantic_row["candidate_lane"] == "semantic_direct"
 
     assert historical_row["ranking_score"] > 0
@@ -125,6 +125,79 @@ def test_merge_candidate_sources_protects_historical_recall_from_semantic_crowdi
         row["entity_name"] == "Historical Recovery Candidate"
         for row in result["llm_candidates"]
     )
+
+
+def test_merge_candidate_sources_prioritizes_repeated_historical_gap_within_lane() -> None:
+    semantic_candidates = [
+        {
+            "entity_id": f"sem-{idx}",
+            "entity_name": f"Semantic Candidate {idx}",
+            "description": "Direct semantic fit",
+            "semantic_score": 1.8 - (idx * 0.03),
+        }
+        for idx in range(12)
+    ]
+    historical_support = [
+        {
+            "entity_id": "hist-noisy-direct",
+            "entity_name": "Noisy Direct Historical Candidate",
+            "support_count": 2,
+            "direct_count": 2,
+            "implied_count": 0,
+            "weighted_support_count": 1.8,
+            "weighted_direct_count": 1.8,
+            "weighted_implied_count": 0.0,
+            "best_support_score": 0.92,
+            "avg_support_score": 0.58,
+            "supporting_ticket_ids": ["IDMT-1", "IDMT-2"],
+            "historical_reasons": ["[IDMT-1 / direct] narrow analog"],
+            "label_sources": ["jira_issuelinks"],
+        },
+        {
+            "entity_id": "hist-repeated-gap",
+            "entity_name": "Manage Invoice and Payment Receipt",
+            "support_count": 10,
+            "direct_count": 0,
+            "implied_count": 10,
+            "weighted_support_count": 0.88,
+            "weighted_direct_count": 0.0,
+            "weighted_implied_count": 0.88,
+            "best_support_score": 0.867,
+            "avg_support_score": 0.62,
+            "supporting_ticket_ids": [
+                "IDMT-10",
+                "IDMT-11",
+                "IDMT-12",
+                "IDMT-13",
+                "IDMT-14",
+                "IDMT-15",
+            ],
+            "historical_reasons": ["[IDMT-10 / implied] recurring billing analog"],
+            "label_sources": ["jira_themes_fallback"],
+        },
+        {
+            "entity_id": "hist-repeated-util",
+            "entity_name": "Manage Utilization Management Program",
+            "support_count": 6,
+            "direct_count": 0,
+            "implied_count": 6,
+            "weighted_support_count": 0.86,
+            "weighted_direct_count": 0.0,
+            "weighted_implied_count": 0.86,
+            "best_support_score": 0.867,
+            "avg_support_score": 0.62,
+            "supporting_ticket_ids": ["IDMT-20", "IDMT-21", "IDMT-22", "IDMT-23"],
+            "historical_reasons": ["[IDMT-20 / implied] recurring utilization analog"],
+            "label_sources": ["jira_themes_fallback"],
+        },
+    ]
+
+    result = merge_candidate_sources(semantic_candidates, historical_support, max_llm_candidates=5)
+    llm_names = [row["entity_name"] for row in result["llm_candidates"]]
+
+    assert "Manage Invoice and Payment Receipt" in llm_names
+    assert "Manage Utilization Management Program" in llm_names
+    assert len([name for name in llm_names if name.startswith("Semantic Candidate")]) <= 2
 
 
 def test_merge_candidate_sources_auto_selects_strong_confirmed_candidate_with_four_hits() -> None:

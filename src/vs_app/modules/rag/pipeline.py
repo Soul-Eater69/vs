@@ -20,7 +20,7 @@ def select_value_streams(
     from .retrieval.semantic_retriever import retrieve_semantic_candidates
 
     top_k = min(max(12, fetch_count), 50)
-    max_llm_candidates = min(max(top_k, 14), 24)
+    max_llm_candidates = min(max(top_k, 18), 36)
     cleaned_query = clean_ppt_text(query)
     query_for_prompt = condense_idea_card(query, max_chars=3500)
 

@@ -110,7 +110,7 @@ interface PipelineResult {
 type Ico = 'zap' | 'sun' | 'moon' | 'play' | 'loader' | 'search' | 'layers'
          | 'check' | 'x' | 'scale' | 'book' | 'terminal' | 'alert' | 'rocket'
          | 'sliders' | 'file' | 'crosshair' | 'database' | 'cpu' | 'award'
-         | 'chevDown';
+         | 'chevDown' | 'grid' | 'bookmark' | 'bell' | 'help' | 'logout';
 
 function I({ n, className = 'w-4 h-4' }: { n: Ico; className?: string }) {
   const p = {
@@ -139,6 +139,11 @@ function I({ n, className = 'w-4 h-4' }: { n: Ico; className?: string }) {
     case 'cpu':       return <svg {...p}><rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><rect x="9" y="9" width="6" height="6" /><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" /></svg>;
     case 'award':     return <svg {...p}><circle cx="12" cy="8" r="7" /><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" /></svg>;
     case 'chevDown':  return <svg {...p}><polyline points="6 9 12 15 18 9" /></svg>;
+    case 'grid':      return <svg {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>;
+    case 'bookmark':  return <svg {...p}><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" /></svg>;
+    case 'bell':      return <svg {...p}><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></svg>;
+    case 'help':      return <svg {...p}><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>;
+    case 'logout':    return <svg {...p}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>;
     default:          return <svg {...p}><circle cx="12" cy="12" r="1" /></svg>;
   }
 }
@@ -147,29 +152,34 @@ function I({ n, className = 'w-4 h-4' }: { n: Ico; className?: string }) {
 
 function Pill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'sky' | 'green' | 'amber' | 'red' }) {
   const cls: Record<string, string> = {
-    neutral: 'bg-stone-100 text-stone-700 ring-1 ring-stone-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700',
-    sky:     'bg-teal-50 text-teal-800 ring-1 ring-teal-200 dark:bg-teal-950/40 dark:text-teal-200 dark:ring-teal-800',
+    neutral: 'bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:ring-zinc-700',
+    sky:     'bg-teal-50 text-teal-900 ring-1 ring-teal-200 dark:bg-teal-950/50 dark:text-teal-200 dark:ring-teal-800',
     green:   'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-800',
-    amber:   'bg-amber-50 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800',
+    amber:   'bg-amber-50 text-amber-900 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800',
     red:     'bg-rose-50 text-rose-800 ring-1 ring-rose-200 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-800',
   };
-  return <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cls[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide ${cls[tone]}`}>{children}</span>;
 }
 
-function Section({ title, icon, badge, children, noPad }: {
-  title: string; icon: Ico; badge?: React.ReactNode; children: React.ReactNode; noPad?: boolean;
+function Section({ title, icon, badge, children, noPad, subtitle }: {
+  title: string; icon: Ico; badge?: React.ReactNode; children: React.ReactNode; noPad?: boolean; subtitle?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-[28px] border border-stone-200/80 bg-white/95 shadow-[0_22px_60px_-32px_rgba(2,52,54,0.28)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex items-center justify-between gap-3 border-b border-stone-200/80 px-5 py-4 dark:border-zinc-800">
-        <div className="flex items-center gap-3 text-sm font-semibold text-slate-900 dark:text-zinc-100">
-          <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-teal-950 text-white shadow-sm dark:bg-teal-700"><I n={icon} className="w-4 h-4" /></span>
-          {title}
+    <section className="overflow-hidden rounded-md border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)] dark:border-zinc-800 dark:bg-zinc-900">
+      <header className="flex items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50/60 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded bg-hcsc text-white">
+            <I n={icon} className="w-3.5 h-3.5" />
+          </span>
+          <div className="leading-tight">
+            <div className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">{title}</div>
+            {subtitle && <div className="text-[10.5px] text-zinc-500 dark:text-zinc-400">{subtitle}</div>}
+          </div>
         </div>
         {badge}
-      </div>
-      <div className={noPad ? '' : 'p-5'}>{children}</div>
-    </div>
+      </header>
+      <div className={noPad ? '' : 'p-4'}>{children}</div>
+    </section>
   );
 }
 
@@ -178,7 +188,7 @@ function Section({ title, icon, badge, children, noPad }: {
 type StepNodeData = { title: string; subtitle: string; icon: Ico; status: 'idle' | 'active' | 'done' | 'error' };
 
 function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
-  const base = 'w-[180px] rounded-2xl border px-3.5 py-3 shadow-sm transition-all duration-300';
+  const base = 'w-[180px] rounded-md border px-3.5 py-3 shadow-sm transition-all duration-300';
   const v: Record<string, string> = {
     idle:   'border-stone-200 bg-stone-50 text-stone-600 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400',
     active: 'border-teal-300 bg-gradient-to-br from-teal-50 to-cyan-50 text-teal-900 shadow-teal-100 dark:border-teal-500 dark:bg-teal-950/40 dark:text-teal-200 dark:shadow-teal-900/30',
@@ -305,7 +315,7 @@ function SelectionPane({ selected, rejected }: { selected: SelectedVS[]; rejecte
         {[...selected].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)).map((vs, i) => {
           const pct = Math.round((vs.confidence ?? 0) * 100);
           return (
-            <div key={i} className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50/70 p-3.5 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/30">
+            <div key={i} className="rounded-md border border-emerald-200 bg-emerald-50/80 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/30">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{vs.entity_name}</div>
@@ -315,7 +325,7 @@ function SelectionPane({ selected, rejected }: { selected: SelectedVS[]; rejecte
                   'text-amber-600 dark:text-amber-400' : 'text-red-500'}`}>{pct}%</span>
               </div>
               <div className="mt-2 h-1.5 rounded-full bg-emerald-200/70 dark:bg-emerald-900/40">
-                <div className="h-full rounded-full bg-teal-900 transition-all duration-700 dark:bg-emerald-400" style={{ width: `${pct}%` }} />
+                <div className="h-full rounded-full bg-hcsc transition-all duration-700 dark:bg-emerald-400" style={{ width: `${pct}%` }} />
               </div>
               {vs.reason && <p className="mt-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300 border-t
                 border-emerald-200/60 dark:border-emerald-800/40 pt-2">{vs.reason}</p>}
@@ -329,7 +339,7 @@ function SelectionPane({ selected, rejected }: { selected: SelectedVS[]; rejecte
           <div className="mb-2"><Pill tone="red">Rejected ({rejected.length})</Pill></div>
           <div className="space-y-1.5">
             {rejected.map((vs, i) => (
-              <div key={i} className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/50">
+              <div key={i} className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/50">
                 <div className="text-sm text-zinc-700 dark:text-zinc-200">{vs.entity_name}</div>
                 {vs.reason && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{vs.reason}</div>}
               </div>
@@ -423,13 +433,13 @@ function RetrievalPane({
             : '';
         const bucket = bucketLabel(c);
         return (
-          <div key={i} className="rounded-2xl border border-stone-200/90 bg-white px-3.5 py-3 shadow-[0_12px_30px_-24px_rgba(2,52,54,0.3)] dark:border-zinc-800 dark:bg-zinc-900/50">
+          <div key={i} className="rounded-md border border-zinc-200 bg-white px-3.5 py-3 transition hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:border-zinc-700">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <span className="mr-2 text-xs font-mono text-zinc-400">#{i + 1}</span>
                 <span className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{c.entity_name}</span>
               </div>
-              <span className="shrink-0 text-xs font-mono text-teal-800 dark:text-teal-300">{score.toFixed(4)}</span>
+              <span className="shrink-0 text-xs font-mono text-hcsc dark:text-teal-300">{score.toFixed(4)}</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {bucket && <Pill tone={bucketTone(String(c.bucket ?? c.candidate_source ?? ''))}>{bucket}</Pill>}
@@ -442,7 +452,7 @@ function RetrievalPane({
               {supportCount > 0 && <Pill tone="amber">{supportCount} hits</Pill>}
             </div>
             <div className="mt-2 h-1 rounded-full bg-stone-100 dark:bg-zinc-800">
-              <div className="h-full rounded-full bg-teal-900 transition-all dark:bg-teal-400" style={{ width: `${pct}%` }} />
+              <div className="h-full rounded-full bg-hcsc transition-all dark:bg-teal-400" style={{ width: `${pct}%` }} />
             </div>
             {note && <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{note}</p>}
           </div>
@@ -472,7 +482,7 @@ function FaissHitsPane({
         const hasClassified = direct.length > 0 || implied.length > 0;
         const preview = String(hit.summary_preview ?? '').trim();
         return (
-          <div key={`${hit.ticket_id}-${i}`} className="rounded-2xl border border-stone-200/90 bg-white px-3.5 py-3 shadow-[0_12px_30px_-24px_rgba(2,52,54,0.3)] dark:border-zinc-800 dark:bg-zinc-900/50">
+          <div key={`${hit.ticket_id}-${i}`} className="rounded-md border border-zinc-200 bg-white px-3.5 py-3 transition hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:border-zinc-700">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -573,7 +583,7 @@ function ComparisonPane({ selected, groundTruth, title }: { selected: SelectedVS
               { l: 'Recall', v: recall, d: 'Found / ground truth' },
               { l: 'F1', v: f1, d: 'Harmonic mean' },
             ].map(m => (
-              <div key={m.l} className="rounded-2xl border border-stone-200 bg-stone-50/90 p-3.5 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+              <div key={m.l} className="rounded-md border border-zinc-200 bg-white p-3.5 text-center dark:border-zinc-800 dark:bg-zinc-900/50">
                 <div className={`text-2xl font-extrabold ${metricColor(m.v)}`}>{Math.round(m.v * 100)}%</div>
                 <div className="mt-0.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200">{m.l}</div>
                 <div className="text-[10px] text-zinc-500">{m.d}</div>
@@ -585,7 +595,7 @@ function ComparisonPane({ selected, groundTruth, title }: { selected: SelectedVS
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* AI Predicted */}
-        <div className="rounded-2xl border border-stone-200 bg-white p-3.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div className="rounded-md border border-zinc-200 bg-white p-3.5 dark:border-zinc-800 dark:bg-zinc-900/50">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-bold text-zinc-700 dark:text-zinc-200 uppercase tracking-wide">AI Predicted</span>
             <Pill tone="sky">{selected.length}</Pill>
@@ -607,7 +617,7 @@ function ComparisonPane({ selected, groundTruth, title }: { selected: SelectedVS
         </div>
 
         {/* Ground Truth */}
-        <div className="rounded-2xl border border-stone-200 bg-white p-3.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div className="rounded-md border border-zinc-200 bg-white p-3.5 dark:border-zinc-800 dark:bg-zinc-900/50">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-bold text-zinc-700 dark:text-zinc-200 uppercase tracking-wide">Ground Truth</span>
             <Pill tone="green">{gt.length}</Pill>
@@ -664,7 +674,7 @@ function ReferencePane({ canonical }: { canonical?: CanonicalVS[] }) {
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {Object.entries(grouped).sort().map(([cat, items]) => (
-        <div key={cat} className={`rounded-xl border p-3.5 ${catColors[cat] || 'border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50'}`}>
+        <div key={cat} className={`rounded-md border p-3.5 ${catColors[cat] || 'border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50'}`}>
           <div className="mb-2.5 text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{cat}</div>
           <div className="space-y-1">
             {items.map(v => <div key={v.id} className="text-sm text-zinc-700 dark:text-zinc-200">{v.name}</div>)}
@@ -679,7 +689,7 @@ function RawPane({ raw }: { raw?: unknown }) {
   if (raw == null) return <Empty text="No raw LLM output for this run." />;
   const rendered = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
   return (
-    <pre className="max-h-[600px] overflow-auto rounded-2xl border border-stone-200 bg-stone-50 p-4 font-mono text-[11px] leading-relaxed text-zinc-700 whitespace-pre-wrap dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-200">
+    <pre className="idp-scroll max-h-[600px] overflow-auto rounded-md border border-zinc-200 bg-zinc-50 p-4 font-mono text-[11px] leading-relaxed text-zinc-700 whitespace-pre-wrap dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-200">
       {rendered}
     </pre>
   );
@@ -693,18 +703,113 @@ function TabBtn({ active, label, icon, count, onClick }: {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-semibold transition-all ${
+      className={`relative flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-semibold transition ${
         active
-          ? 'border-teal-200 bg-teal-950 text-white shadow-sm dark:border-teal-700 dark:bg-teal-700 dark:text-white'
-          : 'border-stone-200 bg-white text-stone-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50'
+          ? 'border-hcsc text-hcsc dark:border-teal-400 dark:text-teal-300'
+          : 'border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
       }`}
     >
       <I n={icon} className="w-3.5 h-3.5" />
       {label}
       {typeof count === 'number' && count > 0 && (
-        <Pill tone={active ? 'sky' : 'neutral'}>{count}</Pill>
+        <span className={`ml-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold ${active ? 'bg-teal-50 text-teal-900 dark:bg-teal-950/50 dark:text-teal-200' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>{count}</span>
       )}
     </button>
+  );
+}
+
+// --- App shell components -------------------------------------------------
+
+function HCSCMark({ className = 'h-7 w-auto' }: { className?: string }) {
+  return (
+    <div className={`flex items-center ${className}`}>
+      <div className="flex h-9 w-9 items-center justify-center rounded-sm bg-hcsc text-white">
+        <span className="text-[10px] font-black tracking-tight leading-none">HCSC</span>
+      </div>
+      <div className="ml-2 hidden flex-col leading-tight md:flex">
+        <span className="text-[8px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">Health Care</span>
+        <span className="text-[8px] font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">Service Corporation</span>
+      </div>
+    </div>
+  );
+}
+
+function UserAvatar({ initials, name, email }: { initials: string; name: string; email: string }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-hcsc text-[11px] font-bold text-white ring-2 ring-white dark:ring-zinc-900">
+        {initials}
+      </div>
+      <div className="hidden leading-tight md:block">
+        <div className="text-[12px] font-semibold text-zinc-900 dark:text-zinc-100">{name}</div>
+        <div className="text-[10.5px] text-zinc-500 dark:text-zinc-400">{email}</div>
+      </div>
+    </div>
+  );
+}
+
+function TopBar({ dark, onToggle, productName }: { dark: boolean; onToggle: () => void; productName: string }) {
+  return (
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200 bg-white/95 px-5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
+      <div className="flex items-center gap-4">
+        <HCSCMark />
+        <div className="hidden h-7 w-px bg-zinc-200 dark:bg-zinc-800 md:block" />
+        <div className="text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{productName}</div>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button className="hidden h-9 w-9 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 md:flex dark:hover:bg-zinc-800 dark:hover:text-zinc-200" aria-label="Help">
+          <I n="help" className="w-4 h-4" />
+        </button>
+        <button className="hidden h-9 w-9 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 md:flex dark:hover:bg-zinc-800 dark:hover:text-zinc-200" aria-label="Notifications">
+          <I n="bell" className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onToggle}
+          className="flex h-9 w-9 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          aria-label="Toggle theme"
+        >
+          <I n={dark ? 'sun' : 'moon'} className="w-4 h-4" />
+        </button>
+        <div className="mx-2 h-7 w-px bg-zinc-200 dark:bg-zinc-800" />
+        <UserAvatar initials="MC" name="Mahesh Reddy Changal" email="Mahesh_Reddy_Changal@bcbsil.com" />
+      </div>
+    </header>
+  );
+}
+
+function NavRail() {
+  const items: { icon: Ico; label: string; active?: boolean }[] = [
+    { icon: 'grid',     label: 'Apps' },
+    { icon: 'layers',   label: 'Value Streams', active: true },
+    { icon: 'database', label: 'Retrieval' },
+    { icon: 'book',     label: 'Reference' },
+    { icon: 'bookmark', label: 'Saved' },
+    { icon: 'sliders',  label: 'Settings' },
+  ];
+  return (
+    <nav className="hidden h-[calc(100vh-4rem)] w-14 shrink-0 flex-col items-center border-r border-zinc-200 bg-white py-4 dark:border-zinc-800 dark:bg-zinc-900 md:flex">
+      <div className="flex flex-col gap-1.5">
+        {items.map((it) => (
+          <button
+            key={it.label}
+            title={it.label}
+            className={`group relative flex h-10 w-10 items-center justify-center rounded transition ${
+              it.active
+                ? 'bg-hcsc text-white'
+                : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'
+            }`}
+          >
+            <I n={it.icon} className="w-4 h-4" />
+            {it.active && <span className="absolute -left-0.5 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-r bg-white/90" />}
+          </button>
+        ))}
+      </div>
+      <div className="mt-auto">
+        <button title="Sign out" className="flex h-10 w-10 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200">
+          <I n="logout" className="w-4 h-4" />
+        </button>
+      </div>
+    </nav>
   );
 }
 
@@ -848,49 +953,43 @@ export default function Home() {
   const card = selectedCard;
 
   return (
-    <div className={`${dark ? 'dark' : ''} min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(13,79,74,0.10),_transparent_22%),linear-gradient(180deg,_#f7f5f1_0%,_#eef2ef_52%,_#f7f6f2_100%)] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100`}>
-      <div className="mx-auto max-w-[1500px] px-4 py-4 lg:px-6">
-
-        {/* Header */}
-        <header className="mb-5 flex flex-col gap-4 rounded-[30px] border border-stone-200/80 bg-white/95 px-5 py-4 shadow-[0_24px_70px_-38px_rgba(2,52,54,0.35)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-900 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="border-r border-stone-200 pr-4 dark:border-zinc-700">
-              <div className="text-[28px] font-black tracking-tight text-teal-950 dark:text-teal-300">HCSC</div>
-              <div className="-mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">Health Care Service Corporation</div>
-            </div>
-            <div className="space-y-0.5 [&>p:last-child]:hidden">
-              <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-teal-700 dark:text-teal-300">Intelligent Delivery Platform</div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-zinc-100">Value Stream Explorer</h1>
-              <p className="text-[12px] text-stone-500 dark:text-zinc-400">Enterprise review workspace for semantic retrieval, historic evidence, and final VS adjudication.</p>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">HCSC IDP • Idea-card analysis dashboard</p>
+    <div className={`${dark ? 'dark' : ''} min-h-screen bg-surface-muted text-zinc-900 dark:text-zinc-100`}>
+      <TopBar dark={dark} onToggle={toggle} productName="Intelligent Delivery Platform" />
+      <div className="flex">
+        <NavRail />
+        <div className="flex-1 min-w-0">
+          {/* Page header strip */}
+          <div className="border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="mx-auto flex max-w-[1500px] flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-[10.5px] font-semibold uppercase tracking-[0.2em] text-hcsc">Delivery Intelligence</div>
+                <h1 className="mt-0.5 text-[20px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Value Stream Explorer</h1>
+                <p className="mt-0.5 text-[12.5px] text-zinc-500 dark:text-zinc-400">Semantic retrieval, historical evidence, and final VS adjudication for HCSC idea cards.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-sm border border-zinc-200 bg-white px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  Production
+                </span>
+                <span className="hidden rounded-sm border border-zinc-200 bg-white px-2.5 py-1 text-[10.5px] font-mono text-zinc-500 md:inline-block dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">v2.4</span>
+              </div>
             </div>
           </div>
-          <div className="hidden rounded-2xl border border-stone-200 bg-stone-50 px-4 py-2 text-right dark:border-zinc-700 dark:bg-zinc-800 xl:block">
-            <div className="text-xs font-semibold text-slate-800 dark:text-zinc-100">Historic Recall Workspace</div>
-            <div className="text-[11px] text-stone-500 dark:text-zinc-400">HCSC palette applied, analysis layout preserved</div>
-          </div>
-          <button
-            onClick={toggle}
-            className="flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3.5 py-2 text-xs font-medium text-zinc-700 shadow-sm hover:bg-stone-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            <I n={dark ? 'sun' : 'moon'} className="w-3.5 h-3.5" />
-            {dark ? 'Light' : 'Dark'}
-          </button>
-        </header>
 
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="mx-auto max-w-[1500px] px-6 py-5">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
 
           {/* Sidebar ------------------------------------------------------- */}
           <aside className="space-y-4 xl:sticky xl:top-5 self-start">
             <Section title="Input" icon="file">
               <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-1 rounded-2xl border border-stone-200 bg-stone-50 p-1 dark:border-zinc-700 dark:bg-zinc-800">
+                <div className="grid grid-cols-2 gap-1 rounded-md border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-700 dark:bg-zinc-800">
                   {[false, true].map(isCustom => (
                     <button
                       key={String(isCustom)}
                       onClick={() => setCustom(isCustom)}
-                      className={`rounded-md py-1.5 text-xs font-semibold transition ${custom === isCustom ?
-                        'bg-teal-950 text-white shadow-sm dark:bg-teal-700' : 'text-zinc-600 dark:text-zinc-300'}`}
+                      className={`rounded-sm py-1.5 text-xs font-semibold transition ${custom === isCustom ?
+                        'bg-hcsc text-white shadow-sm dark:bg-teal-700' : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100'}`}
                     >
                       {isCustom ? 'Custom Text' : 'Idea Card'}
                     </button>
@@ -902,17 +1001,17 @@ export default function Home() {
                     <select
                       value={selectedCardDocId}
                       onChange={e => setSelectedCardDocId(e.target.value)}
-                      className="w-full rounded-2xl border border-stone-300 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-teal-400/40 dark:border-zinc-700 dark:bg-zinc-900"
+                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-hcsc focus:ring-2 focus:ring-teal-400/30 dark:border-zinc-700 dark:bg-zinc-900"
                     >
                       {cards.map(c => (
                         <option key={c.doc_id} value={c.doc_id}>{c.doc_id} - {c.display_name}</option>
                       ))}
                     </select>
                     {card && (
-                      <div className="rounded-2xl border border-stone-200 bg-stone-50 p-3 text-xs shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+                      <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs dark:border-zinc-800 dark:bg-zinc-900/50">
                         <div className="text-zinc-600 dark:text-zinc-400">{card.display_name}</div>
                         {selectedTicketId ? (
-                          <div className="mt-1 text-teal-800 dark:text-teal-300">
+                          <div className="mt-1 text-hcsc dark:text-teal-300">
                             Ticket key: {selectedTicketId}
                           </div>
                         ) : (
@@ -934,7 +1033,7 @@ export default function Home() {
                     value={query}
                     onChange={e => setQuery(e.target.value)}
                     placeholder="Paste idea card text..."
-                    className="w-full resize-none rounded-2xl border border-stone-300 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-teal-400/40 dark:border-zinc-700 dark:bg-zinc-900"
+                    className="idp-scroll w-full resize-none rounded-md border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-hcsc focus:ring-2 focus:ring-teal-400/30 dark:border-zinc-700 dark:bg-zinc-900"
                   />
                 )}
               </div>
@@ -947,7 +1046,7 @@ export default function Home() {
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Historical RAG Candidates</span>
                     <Pill tone="sky">{count}</Pill>
                   </div>
-                  <input type="range" min={5} max={maxCandidateCount} value={count} onChange={e => setCount(+e.target.value)} className="w-full accent-teal-900 dark:accent-teal-400" />
+                  <input type="range" min={5} max={maxCandidateCount} value={count} onChange={e => setCount(+e.target.value)} className="w-full accent-hcsc dark:accent-teal-400" />
                   <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
                     Historical RAG can surface up to 50 value-stream candidates before the merge.
                   </p>
@@ -955,7 +1054,7 @@ export default function Home() {
                 <button
                   onClick={run}
                   disabled={busy || (!custom && !selectedCardDocId) || (!custom && !selectedTicketId) || (custom && !query.trim())}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-teal-950 px-4 py-3 text-sm font-bold text-white shadow-[0_16px_35px_-18px_rgba(2,52,54,0.65)] transition hover:bg-teal-900 active:bg-teal-950 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-teal-700 dark:hover:bg-teal-600"
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-hcsc px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-hcsc-hover disabled:cursor-not-allowed disabled:opacity-40 dark:bg-teal-700 dark:hover:bg-teal-600"
                 >
                   {busy
                     ? <><I n="loader" className="w-4 h-4" /> Running...</>
@@ -981,7 +1080,7 @@ export default function Home() {
 
             {/* Error */}
             {err && (
-              <div className="flex items-start gap-3 rounded-xl border border-red-300 bg-red-50 px-4 py-3 dark:border-red-800 dark:bg-red-950/30">
+              <div className="flex items-start gap-3 rounded-md border border-red-300 bg-red-50 px-4 py-3 dark:border-red-800 dark:bg-red-950/30">
                 <I n="alert" className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                 <div>
                   <div className="text-sm font-semibold text-red-700 dark:text-red-300">Error</div>
@@ -992,9 +1091,9 @@ export default function Home() {
 
             {/* Idle */}
             {step === 'idle' && !result && (
-              <div className="flex flex-col items-center justify-center rounded-[28px] border border-dashed border-stone-300 bg-white/70 py-20 text-center shadow-sm dark:border-zinc-700 dark:bg-zinc-900/30">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-teal-200 bg-teal-50 text-teal-800 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-400">
-                  <I n="rocket" className="w-6 h-6" />
+              <div className="flex flex-col items-center justify-center rounded-md border border-dashed border-zinc-300 bg-white py-20 text-center dark:border-zinc-700 dark:bg-zinc-900/30">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-md border border-teal-200 bg-teal-50 text-hcsc dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-400">
+                  <I n="rocket" className="w-5 h-5" />
                 </div>
                 <h3 className="text-base font-semibold text-zinc-700 dark:text-zinc-200">Ready</h3>
                 <p className="mt-1 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
@@ -1045,6 +1144,8 @@ export default function Home() {
             )}
 
           </main>
+            </div>
+          </div>
         </div>
       </div>
     </div>

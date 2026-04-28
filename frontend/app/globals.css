@@ -5,13 +5,60 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* HCSC enterprise palette */
+  --hcsc-primary: #003b36;
+  --hcsc-primary-hover: #0d4f4a;
+  --hcsc-primary-soft: #e6edec;
+  --hcsc-accent: #0f766e;
+  --hcsc-accent-soft: #ccfbf1;
+
+  --surface: #ffffff;
+  --surface-muted: #f7f7f5;
+  --surface-sunken: #f1f1ee;
+  --border: #e4e4e0;
+  --border-strong: #d4d4cf;
+
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-tertiary: #71717a;
+
+  --background: var(--surface-muted);
+  --foreground: var(--text-primary);
+}
+
+.dark {
+  --hcsc-primary: #14b8a6;
+  --hcsc-primary-hover: #2dd4bf;
+  --hcsc-primary-soft: #0f3a37;
+  --hcsc-accent: #2dd4bf;
+  --hcsc-accent-soft: #134e4a;
+
+  --surface: #18181b;
+  --surface-muted: #09090b;
+  --surface-sunken: #0a0a0c;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+
+  --text-primary: #fafafa;
+  --text-secondary: #d4d4d8;
+  --text-tertiary: #a1a1aa;
+
+  --background: var(--surface-muted);
+  --foreground: var(--text-primary);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border-subtle: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-hcsc: var(--hcsc-primary);
+  --color-hcsc-hover: var(--hcsc-primary-hover);
+  --color-hcsc-soft: var(--hcsc-primary-soft);
+  --color-hcsc-accent: var(--hcsc-accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -20,4 +67,20 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Refined scrollbar for enterprise feel */
+.idp-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.idp-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.idp-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.idp-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
 }

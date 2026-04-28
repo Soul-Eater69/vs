@@ -127,6 +127,82 @@ def test_merge_candidate_sources_protects_historical_recall_from_semantic_crowdi
     )
 
 
+def test_merge_candidate_sources_auto_selects_strong_confirmed_candidate_with_four_hits() -> None:
+    semantic_candidates = [
+        {
+            "entity_id": "vs-appeal",
+            "entity_name": "Appeal Decision",
+            "description": "Review and reconsider claim or coverage decisions.",
+            "semantic_score": 1.562,
+        }
+    ]
+    historical_support = [
+        {
+            "entity_id": "vs-appeal",
+            "entity_name": "Appeal Decision",
+            "support_count": 4,
+            "direct_count": 2,
+            "implied_count": 2,
+            "weighted_support_count": 1.6,
+            "weighted_direct_count": 1.0,
+            "weighted_implied_count": 0.6,
+            "best_support_score": 0.721,
+            "avg_support_score": 0.62,
+            "supporting_ticket_ids": ["IDMT-1", "IDMT-2", "IDMT-3", "IDMT-4"],
+            "supporting_chunk_ids": ["chunk-1"],
+            "historical_reasons": ["[IDMT-1 / direct] claim appeal workflow"],
+            "label_sources": ["jira_issuelinks"],
+        }
+    ]
+
+    result = merge_candidate_sources(semantic_candidates, historical_support)
+
+    row = result["merged_candidates"][0]
+    assert row["entity_name"] == "Appeal Decision"
+    assert row["candidate_status"] == "auto_selected"
+    assert row["candidate_status_reason"] == "cross_confirmed_semantic_and_historical"
+    assert [selected["entity_name"] for selected in result["auto_selected_value_streams"]] == [
+        "Appeal Decision"
+    ]
+    assert result["llm_candidates"] == []
+
+
+def test_merge_candidate_sources_keeps_weaker_confirmed_candidate_in_llm_review() -> None:
+    semantic_candidates = [
+        {
+            "entity_id": "vs-borderline",
+            "entity_name": "Borderline Confirmed Candidate",
+            "description": "Related but less historically confirmed workflow.",
+            "semantic_score": 1.562,
+        }
+    ]
+    historical_support = [
+        {
+            "entity_id": "vs-borderline",
+            "entity_name": "Borderline Confirmed Candidate",
+            "support_count": 4,
+            "direct_count": 2,
+            "implied_count": 2,
+            "weighted_support_count": 1.6,
+            "weighted_direct_count": 1.0,
+            "weighted_implied_count": 0.6,
+            "best_support_score": 0.69,
+            "avg_support_score": 0.62,
+            "supporting_ticket_ids": ["IDMT-1", "IDMT-2", "IDMT-3", "IDMT-4"],
+            "historical_reasons": ["[IDMT-1 / direct] related workflow"],
+            "label_sources": ["jira_issuelinks"],
+        }
+    ]
+
+    result = merge_candidate_sources(semantic_candidates, historical_support)
+
+    row = result["merged_candidates"][0]
+    assert row["candidate_status"] == "sent_to_llm"
+    assert row["candidate_status_reason"] == "protected_confirmed_lane"
+    assert result["auto_selected_value_streams"] == []
+    assert result["llm_candidates"][0]["entity_name"] == "Borderline Confirmed Candidate"
+
+
 def test_merge_candidate_sources_admits_repeated_implied_recovery_when_weighted_support_is_diluted() -> None:
     historical_support = [
         {

@@ -13,6 +13,8 @@ def merge_candidate_sources(
     max_llm_candidates: int = 24,
     strong_support_count: int = 3,
     strong_support_score: float = 0.60,
+    strong_confirmed_support_count: int = 4,
+    strong_confirmed_support_score: float = 0.70,
     moderate_support_count: int = 2,
     moderate_support_score: float = 0.45,
     strong_implied_support_count: int = 8,
@@ -125,7 +127,11 @@ def merge_candidate_sources(
     }
 
     for row in merged:
-        if _should_auto_include_merged(row, min_score=strong_support_score):
+        if _should_auto_include_merged(
+            row,
+            support_count=strong_confirmed_support_count,
+            min_score=strong_confirmed_support_score,
+        ):
             row["candidate_status"] = "auto_selected"
             row["candidate_status_reason"] = "cross_confirmed_semantic_and_historical"
             auto_selected.append(_to_selected_merged(row))
@@ -276,7 +282,7 @@ def _should_auto_include(
     return False
 
 
-def _should_auto_include_merged(row: dict, *, min_score: float) -> bool:
+def _should_auto_include_merged(row: dict, *, support_count: int, min_score: float) -> bool:
     """Tier 1: cross-confirmed (semantic + historical agree, both strong)."""
     if not (row.get("from_semantic") and row.get("from_historical")):
         return False
@@ -284,7 +290,7 @@ def _should_auto_include_merged(row: dict, *, min_score: float) -> bool:
         return False
     if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
         return False
-    if int(row.get("support_count", 0) or 0) < 5:
+    if int(row.get("support_count", 0) or 0) < support_count:
         return False
     return True
 

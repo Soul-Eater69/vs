@@ -34,10 +34,12 @@ def build_historical_gap_prompt(
     query_for_prompt: str,
     candidates: List[dict],
     precedent_candidates: List[dict] | None = None,
+    historical_ticket_hits: List[dict] | None = None,
 ) -> str:
     ordered_candidates = _order_candidates_for_llm(candidates)
     candidate_blocks = _candidate_blocks(ordered_candidates)
     precedent_context = _precedent_context(precedent_candidates or candidates)
+    faiss_hit_context = _historical_ticket_hit_context(historical_ticket_hits or [])
 
     return f"""IDEA CARD:
 
@@ -82,6 +84,10 @@ SELECTION RULES:
 SIMILAR HISTORICAL PRECEDENTS:
 
 {precedent_context}
+
+TOP RETRIEVED HISTORICAL TICKETS:
+
+{faiss_hit_context}
 
 HISTORICAL-SUPPORTED CANDIDATES:
 
@@ -203,6 +209,45 @@ def _precedent_context(candidates: List[dict], *, limit: int = 8) -> str:
     return "\n\n".join(blocks)
 
 
+def _historical_ticket_hit_context(ticket_hits: List[dict], *, limit: int = 10) -> str:
+    if not ticket_hits:
+        return "No top FAISS ticket-hit context was available; rely on grouped precedents and candidate evidence."
+
+    blocks: List[str] = []
+    for idx, hit in enumerate(ticket_hits[:limit], start=1):
+        ticket_id = str(hit.get("ticket_id") or "").strip() or f"hit-{idx}"
+        title = str(hit.get("title") or "").strip()
+        score = float(hit.get("best_score", 0.0) or 0.0)
+        label_source = str(hit.get("label_source") or "").strip()
+        direct_names = _text_list(hit.get("direct_vs_names") or [])
+        implied_names = _text_list(hit.get("implied_vs_names") or [])
+        fallback_names = _text_list(hit.get("value_stream_names") or hit.get("value_stream_labels") or [])
+        direct_functions = _text_list(hit.get("direct_functions_canonical") or [])
+        implied_functions = _text_list(hit.get("implied_functions_canonical") or [])
+        summary = " ".join(str(hit.get("summary_preview") or "").split())
+
+        if not direct_names and not implied_names and fallback_names:
+            implied_names = fallback_names
+
+        lines = [
+            f"{idx}. {ticket_id}{f' - {title}' if title and title != ticket_id else ''}",
+            f"   Similarity: {score:.4f}",
+        ]
+        if label_source:
+            lines.append(f"   Label source: {label_source}")
+        lines.append(f"   Direct value streams: {', '.join(direct_names[:10]) if direct_names else 'none listed'}")
+        lines.append(f"   Implied value streams: {', '.join(implied_names[:10]) if implied_names else 'none listed'}")
+        if direct_functions:
+            lines.append(f"   Direct functions: {', '.join(direct_functions[:8])}")
+        if implied_functions:
+            lines.append(f"   Implied functions: {', '.join(implied_functions[:8])}")
+        if summary:
+            lines.append(f"   Ticket summary: {summary[:420]}")
+        blocks.append("\n".join(lines))
+
+    return "\n\n".join(blocks)
+
+
 def _add_precedent(
     precedents: dict[str, dict],
     ticket_id: str,
@@ -239,6 +284,21 @@ def _parse_analog_reason(reason: str) -> tuple[str, str, str] | None:
     inference_type = match.group(2).strip().lower()
     snippet = match.group(3).strip()
     return ticket_id, inference_type, snippet
+
+
+def _text_list(values: object) -> List[str]:
+    if not isinstance(values, list):
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
 
 
 def _order_candidates_for_llm(candidates: List[dict]) -> List[dict]:

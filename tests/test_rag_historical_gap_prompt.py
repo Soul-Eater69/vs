@@ -59,3 +59,40 @@ def test_historical_gap_prompt_explains_pattern_induced_selection() -> None:
     assert "Do not include \"Align and Execute IT Strategy\"" in prompt
     assert "Manage Invoice and Payment Receipt" in prompt
     assert "Analog evidence" in prompt
+
+
+def test_historical_gap_prompt_includes_top_faiss_ticket_context() -> None:
+    prompt = build_historical_gap_prompt(
+        query_for_prompt="Roadmap to design and deliver tiered network and steering capabilities.",
+        candidates=[
+            {
+                "entity_id": "vs-member",
+                "entity_name": "Manage Member Care",
+                "bucket": "historical_only",
+                "candidate_lane": "historical_recall",
+                "from_historical": True,
+                "support_count": 9,
+                "direct_count": 1,
+                "implied_count": 8,
+                "best_support_score": 0.714,
+                "avg_support_score": 0.60,
+            }
+        ],
+        historical_ticket_hits=[
+            {
+                "ticket_id": "IDMT-11455",
+                "title": "Tiered network steering roadmap",
+                "best_score": 0.726,
+                "summary_preview": "This initiative proposes a roadmap to design and deliver tiered network and steerage capabilities.",
+                "direct_vs_names": ["Manage Member Care"],
+                "implied_vs_names": ["Establish Provider Network", "Ensure Payment Integrity"],
+                "label_source": "jira_issuelinks",
+            }
+        ],
+    )
+
+    assert "TOP RETRIEVED HISTORICAL TICKETS" in prompt
+    assert "IDMT-11455 - Tiered network steering roadmap" in prompt
+    assert "Direct value streams: Manage Member Care" in prompt
+    assert "Implied value streams: Establish Provider Network, Ensure Payment Integrity" in prompt
+    assert "Ticket summary: This initiative proposes a roadmap" in prompt

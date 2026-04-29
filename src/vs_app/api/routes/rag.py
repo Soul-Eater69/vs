@@ -74,13 +74,10 @@ async def predict_value_streams_stream(
             else:
                 raise ValueError("No idea card text or ticket ID provided")
 
-            # Step 2: Condense
-            yield _sse("step", {"step": "condense", "label": "Condensing with LLM..."})
+            # Step 2: Condense + semantic VS search run in parallel.
+            yield _sse("step", {"step": "prepare", "label": "Condensing and searching VS in parallel..."})
             cleaned_query = await asyncio.to_thread(clean_ppt_text, raw_text)
             condense_task = asyncio.create_task(asyncio.to_thread(condense_idea_card, raw_text))
-
-            # Step 3: Semantic VS search
-            yield _sse("step", {"step": "semantic", "label": f"Searching VS index (top {top_k_vs})..."})
             semantic_task = asyncio.create_task(asyncio.to_thread(
                 retrieve_semantic_candidates,
                 cleaned_query,
@@ -89,7 +86,7 @@ async def predict_value_streams_stream(
 
             query_for_prompt, semantic_candidates = await asyncio.gather(condense_task, semantic_task)
 
-            # Step 4: Historical FAISS
+            # Step 3: Historical FAISS
             yield _sse("step", {"step": "historical", "label": "Searching historical FAISS..."})
             exclude_ids = [request.ticket_id] if request.ticket_id else None
             historical_kwargs = {
@@ -104,19 +101,26 @@ async def predict_value_streams_stream(
                 **historical_kwargs,
             )
 
-            # Step 5: LLM finalize
-            yield _sse("step", {"step": "finalize", "label": "LLM selecting value streams..."})
+            # Step 4: Merge candidates
+            yield _sse("step", {"step": "merge", "label": "Merging semantic and historical candidates..."})
             augmented = merge_candidate_sources(
                 semantic_candidates,
                 historical.get("historical_value_stream_support", []),
                 max_llm_candidates=max_llm_candidates,
             )
+
+            # Step 5: Direct + historical LLM selection run in parallel.
+            yield _sse("step", {"step": "llm_select", "label": "Running direct and historical LLM passes..."})
             generated = await asyncio.to_thread(
                 generate_value_streams,
                 query_for_prompt=query_for_prompt or cleaned_query,
                 llm_candidates=augmented["llm_candidates"],
                 auto_selected=augmented["auto_selected_value_streams"],
+                historical_ticket_hits=historical.get("historical_ticket_hits", []),
             )
+
+            # Step 6: Final response assembly
+            yield _sse("step", {"step": "finalize", "label": "Finalizing selections..."})
             debug = build_rag_debug_fingerprints(
                 cleaned_query=cleaned_query,
                 query_for_prompt=query_for_prompt,
@@ -154,6 +158,16 @@ async def predict_value_streams_stream(
                 "llm_candidates": generated["candidates_used"],
                 "historical_source": historical.get("historical_source", ""),
                 "raw_response": generated["raw_response"],
+                "direct_llm_output": (
+                    generated["raw_response"].get("direct_pass")
+                    if isinstance(generated.get("raw_response"), dict)
+                    else None
+                ),
+                "historical_llm_output": (
+                    generated["raw_response"].get("historical_gap_pass")
+                    if isinstance(generated.get("raw_response"), dict)
+                    else None
+                ),
                 "query_preparation": {
                     "cleaned_query": cleaned_query,
                     "query_for_prompt": query_for_prompt,

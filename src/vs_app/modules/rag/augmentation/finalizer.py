@@ -20,6 +20,7 @@ def generate_value_streams(
     query_for_prompt: str,
     llm_candidates: List[dict],
     auto_selected: List[dict] | None = None,
+    historical_ticket_hits: List[dict] | None = None,
 ) -> dict:
     from vs_app.integrations.clients.generation_service import GenerationService
 
@@ -42,6 +43,7 @@ def generate_value_streams(
         query_for_prompt=query_for_prompt,
         direct_candidates=direct_candidates,
         historical_gap_candidates=historical_gap_candidates,
+        historical_ticket_hits=list(historical_ticket_hits or []),
     )
 
     llm_selected = _merge_selected(
@@ -86,6 +88,7 @@ def _run_selection_passes(
     query_for_prompt: str,
     direct_candidates: List[dict],
     historical_gap_candidates: List[dict],
+    historical_ticket_hits: List[dict],
 ) -> tuple[dict, dict]:
     def run_direct() -> dict:
         if not direct_candidates:
@@ -107,6 +110,7 @@ def _run_selection_passes(
             query_for_prompt=query_for_prompt,
             candidates=historical_gap_candidates,
             precedent_candidates=historical_gap_candidates,
+            historical_ticket_hits=historical_ticket_hits,
             prompt_kind="historical_gap",
         )
 
@@ -127,6 +131,7 @@ def _run_selection_pass(
     candidates: List[dict],
     prompt_kind: str,
     precedent_candidates: List[dict] | None = None,
+    historical_ticket_hits: List[dict] | None = None,
 ) -> dict:
     from ..ranking.reranker import sanitize_selected
 
@@ -138,6 +143,7 @@ def _run_selection_pass(
             query_for_prompt=query_for_prompt,
             candidates=candidates,
             precedent_candidates=precedent_candidates,
+            historical_ticket_hits=historical_ticket_hits,
         )
         system_prompt = build_system_prompt(min_select=0, max_select=12)
     else:

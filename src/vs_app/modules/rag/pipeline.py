@@ -52,7 +52,9 @@ def select_value_streams(
         query_for_prompt=query_for_prompt or cleaned_query,
         llm_candidates=augmented["llm_candidates"],
         auto_selected=augmented["auto_selected_value_streams"],
+        historical_ticket_hits=historical.get("historical_ticket_hits", []),
     )
+    raw_response = generated["raw_response"]
     debug = build_rag_debug_fingerprints(
         cleaned_query=cleaned_query,
         query_for_prompt=query_for_prompt,
@@ -88,7 +90,13 @@ def select_value_streams(
         "candidate_value_streams": augmented["merged_candidates"],
         "llm_candidates": generated["candidates_used"],
         "historical_source": historical.get("historical_source", ""),
-        "raw_response": generated["raw_response"],
+        "raw_response": raw_response,
+        "direct_llm_output": (
+            raw_response.get("direct_pass") if isinstance(raw_response, dict) else None
+        ),
+        "historical_llm_output": (
+            raw_response.get("historical_gap_pass") if isinstance(raw_response, dict) else None
+        ),
         "query_preparation": {
             "cleaned_query": cleaned_query,
             "query_for_prompt": query_for_prompt,

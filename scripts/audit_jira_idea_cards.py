@@ -135,19 +135,25 @@ def _is_bad_neighbor_link(line: str, url: str) -> bool:
     )
 
 
-def _valid_idea_card_link(text: str, url: str) -> bool:
+def _has_idea_card_label(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "idea card" in lowered
+        or "intake form" in lowered
+        or "business case" in lowered
+        or "executive summary" in lowered
+    )
+
+
+def _valid_idea_card_link(text: str, url: str, source_text: str = "") -> bool:
     if not url:
         return False
     line = _line_for_url(text, url)
-    lowered_line = line.lower()
-    if _is_bad_neighbor_link(line, url):
+    if _is_bad_neighbor_link(f"{line}\n{source_text}", url):
         return False
-    return (
-        "idea card" in lowered_line
-        or "intake form" in lowered_line
-        or "business case" in lowered_line
-        or "executive summary" in lowered_line
-    )
+    if _has_idea_card_label(line):
+        return True
+    return bool(source_text and url in text and _has_idea_card_label(source_text))
 
 
 def _normalize_verdict(verdict: dict[str, Any], description: str) -> dict[str, Any]:
@@ -163,7 +169,8 @@ def _normalize_verdict(verdict: dict[str, Any], description: str) -> dict[str, A
         return verdict
 
     link = str(verdict.get("link") or "").strip()
-    if link and not _valid_idea_card_link(description, link):
+    source_text = str(verdict.get("source_text") or "")
+    if link and not _valid_idea_card_link(description, link, source_text):
         verdict["link"] = ""
         verdict["source_location"] = "description_text" if verdict.get("has_idea_card") else "none"
         verdict["reason"] = "LLM-proposed link was not explicitly labeled as the idea card link."

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
 from typing import Iterable, List
 
@@ -33,23 +34,14 @@ def generate_value_streams(
 
     from vs_app.modules.prompts.loader import SelectionResult
 
-    gen_svc = GenerationService()
     direct_candidates, historical_gap_candidates = _split_llm_candidates(llm_candidates)
 
-    direct_parsed = _run_selection_pass(
-        gen_svc=gen_svc,
+    direct_parsed, historical_parsed = _run_selection_passes(
+        generation_service_cls=GenerationService,
         output_schema=SelectionResult,
         query_for_prompt=query_for_prompt,
-        candidates=direct_candidates,
-        prompt_kind="direct",
-    )
-    historical_parsed = _run_selection_pass(
-        gen_svc=gen_svc,
-        output_schema=SelectionResult,
-        query_for_prompt=query_for_prompt,
-        candidates=historical_gap_candidates,
-        precedent_candidates=historical_gap_candidates,
-        prompt_kind="historical_gap",
+        direct_candidates=direct_candidates,
+        historical_gap_candidates=historical_gap_candidates,
     )
 
     llm_selected = _merge_selected(
@@ -85,6 +77,46 @@ def generate_value_streams(
         "raw_response": parsed,
         "candidates_used": llm_candidates,
     }
+
+
+def _run_selection_passes(
+    *,
+    generation_service_cls,
+    output_schema,
+    query_for_prompt: str,
+    direct_candidates: List[dict],
+    historical_gap_candidates: List[dict],
+) -> tuple[dict, dict]:
+    def run_direct() -> dict:
+        if not direct_candidates:
+            return {"selected_value_streams": [], "rejected_candidates": []}
+        return _run_selection_pass(
+            gen_svc=generation_service_cls(),
+            output_schema=output_schema,
+            query_for_prompt=query_for_prompt,
+            candidates=direct_candidates,
+            prompt_kind="direct",
+        )
+
+    def run_historical_gap() -> dict:
+        if not historical_gap_candidates:
+            return {"selected_value_streams": [], "rejected_candidates": []}
+        return _run_selection_pass(
+            gen_svc=generation_service_cls(),
+            output_schema=output_schema,
+            query_for_prompt=query_for_prompt,
+            candidates=historical_gap_candidates,
+            precedent_candidates=historical_gap_candidates,
+            prompt_kind="historical_gap",
+        )
+
+    if direct_candidates and historical_gap_candidates:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            direct_future = executor.submit(run_direct)
+            historical_future = executor.submit(run_historical_gap)
+            return direct_future.result(), historical_future.result()
+
+    return run_direct(), run_historical_gap()
 
 
 def _run_selection_pass(

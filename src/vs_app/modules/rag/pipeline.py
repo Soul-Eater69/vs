@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import inspect
 from typing import Any, Dict, List, Optional
 
@@ -22,13 +23,18 @@ def select_value_streams(
     top_k = min(max(12, fetch_count), 50)
     max_llm_candidates = min(max(top_k, 18), 36)
     cleaned_query = clean_ppt_text(query)
-    query_for_prompt = condense_idea_card(query, max_chars=3500)
 
-    semantic_candidates = retrieve_semantic_candidates(
-        cleaned_query,
-        top_k=top_k,
-        allowed_value_stream_names=allowed_value_stream_names,
-    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        condense_future = executor.submit(condense_idea_card, query, max_chars=3500)
+        semantic_future = executor.submit(
+            retrieve_semantic_candidates,
+            cleaned_query,
+            top_k=top_k,
+            allowed_value_stream_names=allowed_value_stream_names,
+        )
+        query_for_prompt = condense_future.result()
+        semantic_candidates = semantic_future.result()
+
     historical = _retrieve_historical_support_compat(
         retrieve_historical_support,
         query_for_prompt or cleaned_query,

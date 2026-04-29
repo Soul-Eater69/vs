@@ -77,15 +77,17 @@ async def predict_value_streams_stream(
             # Step 2: Condense
             yield _sse("step", {"step": "condense", "label": "Condensing with LLM..."})
             cleaned_query = await asyncio.to_thread(clean_ppt_text, raw_text)
-            query_for_prompt = await asyncio.to_thread(condense_idea_card, raw_text)
+            condense_task = asyncio.create_task(asyncio.to_thread(condense_idea_card, raw_text))
 
             # Step 3: Semantic VS search
             yield _sse("step", {"step": "semantic", "label": f"Searching VS index (top {top_k_vs})..."})
-            semantic_candidates = await asyncio.to_thread(
+            semantic_task = asyncio.create_task(asyncio.to_thread(
                 retrieve_semantic_candidates,
                 cleaned_query,
                 top_k=top_k_vs,
-            )
+            ))
+
+            query_for_prompt, semantic_candidates = await asyncio.gather(condense_task, semantic_task)
 
             # Step 4: Historical FAISS
             yield _sse("step", {"step": "historical", "label": "Searching historical FAISS..."})

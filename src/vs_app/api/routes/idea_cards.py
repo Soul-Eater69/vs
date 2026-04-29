@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Request
 
 
 router = APIRouter(tags=["idea-cards"])
@@ -67,6 +67,47 @@ async def list_idea_cards() -> dict:
             }
         )
     return {"cards": cards}
+
+
+@router.post("/api/idea-cards/extract")
+async def extract_uploaded_idea_card(
+    request: Request,
+    filename: str = Query(..., min_length=1),
+) -> dict:
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded idea card is empty")
+
+    safe_name = Path(filename).name
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in {".pptx", ".ppt", ".pdf", ".docx", ".doc", ".txt", ".md", ".markdown"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported idea-card file type. Use PPTX, PDF, DOCX, TXT, or Markdown.",
+        )
+
+    try:
+        if suffix in {".txt", ".md", ".markdown"}:
+            raw_text = data.decode("utf-8", errors="ignore")
+        else:
+            from vs_app.integrations.files.markitdown_extractor import extract_markdown
+
+            raw_text = extract_markdown(data, safe_name)
+
+        from vs_app.shared.text_cleaning import clean_extracted_text
+
+        text = clean_extracted_text(raw_text)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not extract idea card text: {exc}") from exc
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No text could be extracted from this idea card")
+
+    return {
+        "filename": safe_name,
+        "text": text,
+        "char_count": len(text),
+    }
 
 
 @router.get("/api/mappings")

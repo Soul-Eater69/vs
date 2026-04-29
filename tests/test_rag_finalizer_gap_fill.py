@@ -89,10 +89,12 @@ def test_split_llm_candidates_keeps_direct_and_historical_passes_disjoint() -> N
 
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:
     weak_candidate = _historical_candidate("Receive Care", best=0.691, avg=0.62, support=4)
+    weak_selection = _selected("Receive Care")
+    weak_selection["confidence"] = 0.60
 
     final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
         auto_selected=[],
-        llm_selected=[_selected("Receive Care")],
+        llm_selected=[weak_selection],
         llm_candidates=[weak_candidate],
     )
 
@@ -104,12 +106,12 @@ def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:
     assert dropped[0]["drop_reason"] == "weak_historical_gap_fill_evidence"
 
 
-def test_finalize_selected_keeps_high_confidence_historical_llm_selection() -> None:
+def test_finalize_selected_keeps_confident_historical_llm_selection() -> None:
     candidate = _historical_candidate("Manage Member Care", best=0.64, avg=0.57, support=2)
     candidate["weighted_support_count"] = 0.7
 
     selected = _selected("Manage Member Care")
-    selected["confidence"] = 0.92
+    selected["confidence"] = 0.84
 
     final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
         auto_selected=[],
@@ -124,12 +126,32 @@ def test_finalize_selected_keeps_high_confidence_historical_llm_selection() -> N
     assert [row["entity_name"] for row in final_selected] == ["Manage Member Care"]
 
 
+def test_finalize_selected_keeps_seventy_confidence_historical_llm_selection() -> None:
+    candidate = _historical_candidate("Ensure Payment Integrity", best=0.696, avg=0.58, support=3)
+    candidate["weighted_support_count"] = 0.7
+
+    selected = _selected("Ensure Payment Integrity")
+    selected["confidence"] = 0.70
+
+    final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[selected],
+        llm_candidates=[candidate],
+    )
+
+    assert dropped == []
+    assert rescued_confirmed == []
+    assert rescued == []
+    assert [row["entity_name"] for row in filtered_llm] == ["Ensure Payment Integrity"]
+    assert [row["entity_name"] for row in final_selected] == ["Ensure Payment Integrity"]
+
+
 def test_finalize_selected_still_drops_lower_confidence_weak_historical_selection() -> None:
     candidate = _historical_candidate("Receive Care", best=0.64, avg=0.57, support=2)
     candidate["weighted_support_count"] = 0.7
 
     selected = _selected("Receive Care")
-    selected["confidence"] = 0.86
+    selected["confidence"] = 0.60
 
     final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
         auto_selected=[],

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _HISTORICAL_GAP_FILL_BUDGET = 4
 _CONFIRMED_MERGED_RESCUE_BUDGET = 6
+_HISTORICAL_LLM_KEEP_CONFIDENCE = 0.70
 
 
 def generate_value_streams(
@@ -391,7 +392,7 @@ def _passes_high_confidence_historical_selection(selection: dict, candidate: dic
     if not candidate:
         return False
     confidence = float(selection.get("confidence", 0.0) or 0.0)
-    if confidence < 0.90:
+    if confidence < _HISTORICAL_LLM_KEEP_CONFIDENCE:
         return False
 
     support_count = int(candidate.get("support_count", 0) or 0)
@@ -401,7 +402,7 @@ def _passes_high_confidence_historical_selection(selection: dict, candidate: dic
     avg_score = float(candidate.get("avg_support_score", 0.0) or 0.0)
     weighted_support = float(candidate.get("weighted_support_count", 0.0) or 0.0)
 
-    if best_score < 0.62 or weighted_support < 0.50:
+    if best_score < 0.55 or weighted_support < 0.45:
         return False
     if direct_count >= 1 and support_count >= 2:
         return True

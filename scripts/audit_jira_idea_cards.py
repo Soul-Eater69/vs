@@ -18,6 +18,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from vs_app.container import build_ticket_fetcher
 from vs_app.integrations.llm.client import complete_text
@@ -119,7 +120,9 @@ def _line_for_url(text: str, url: str) -> str:
 
 def _is_bad_neighbor_link(line: str, url: str) -> bool:
     lowered_line = line.lower()
-    lowered_url = url.lower()
+    cleaned_line = URL_RE.sub("", lowered_line)
+    parsed = urlparse(url)
+    filename = unquote(parsed.path.rsplit("/", 1)[-1]).lower()
     bad_line_markers = (
         "gate 0",
         "estimate",
@@ -130,8 +133,8 @@ def _is_bad_neighbor_link(line: str, url: str) -> bool:
         "cdd",
     )
     bad_file_markers = (".xls", ".xlsx", ".xlsm", "estimate", "workbook", "gate0", "gate-0")
-    return any(marker in lowered_line for marker in bad_line_markers) or any(
-        marker in lowered_url for marker in bad_file_markers
+    return any(marker in cleaned_line for marker in bad_line_markers) or any(
+        marker in filename for marker in bad_file_markers
     )
 
 
@@ -171,9 +174,16 @@ def _normalize_verdict(verdict: dict[str, Any], description: str) -> dict[str, A
     link = str(verdict.get("link") or "").strip()
     source_text = str(verdict.get("source_text") or "")
     if link and not _valid_idea_card_link(description, link, source_text):
-        verdict["link"] = ""
-        verdict["source_location"] = "description_text" if verdict.get("has_idea_card") else "none"
-        verdict["reason"] = "LLM-proposed link was not explicitly labeled as the idea card link."
+        # LLM sometimes returns a transformed SharePoint URL; remap to a URL we actually extracted.
+        candidate_urls = [url for url in _urls(description) if _valid_idea_card_link(description, url, source_text)]
+        if candidate_urls:
+            verdict["link"] = candidate_urls[0]
+            verdict["source_location"] = "description_link"
+            verdict["reason"] = "Mapped labeled idea-card text to extracted description URL."
+        else:
+            verdict["link"] = ""
+            verdict["source_location"] = "description_text" if verdict.get("has_idea_card") else "none"
+            verdict["reason"] = "LLM-proposed link was not explicitly labeled as the idea card link."
     elif link:
         verdict["source_location"] = "description_link"
     else:

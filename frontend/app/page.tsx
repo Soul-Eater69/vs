@@ -206,7 +206,7 @@ function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
   const base = 'w-[180px] rounded-md border px-3.5 py-3 shadow-sm transition-all duration-300';
   const v: Record<string, string> = {
     idle:   'border-stone-200 bg-stone-50 text-stone-600 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400',
-    active: 'border-teal-300 bg-gradient-to-br from-teal-50 to-cyan-50 text-teal-900 shadow-teal-100 dark:border-teal-500 dark:from-teal-950/70 dark:via-zinc-900 dark:to-cyan-950/40 dark:text-teal-200 dark:shadow-[0_0_0_1px_rgba(20,184,166,0.22),0_12px_30px_rgba(20,184,166,0.12)]',
+    active: 'border-teal-400 bg-teal-50 text-teal-900 shadow-sm dark:border-teal-500 dark:bg-teal-950/35 dark:text-teal-200 dark:shadow-none',
     done:   'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-300',
     error:  'border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-500 dark:bg-rose-950/40 dark:text-rose-300',
   };

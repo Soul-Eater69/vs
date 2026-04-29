@@ -5,9 +5,8 @@ import logging
 import re
 from typing import Iterable, List
 
-from .prompt_builder import (
+from .prompt_context import (
     build_direct_candidate_prompt,
-    build_final_consolidation_prompt,
     build_historical_gap_prompt,
     build_system_prompt,
 )
@@ -65,35 +64,10 @@ def generate_value_streams(
         llm_candidates=llm_candidates,
     )
 
-    proposal_selected = _merge_selected(llm_selected, final_selected)
-    final_candidate_options = _final_consolidation_candidates(
-        auto_selected=auto_selected,
-        llm_candidates=llm_candidates,
-        proposal_selected=proposal_selected,
-    )
-    consolidation_parsed = _run_final_consolidation_pass(
-        generation_service_cls=GenerationService,
-        output_schema=SelectionResult,
-        query_for_prompt=query_for_prompt,
-        candidate_options=final_candidate_options,
-        direct_selected=list(direct_parsed.get("selected_value_streams") or []),
-        historical_selected=list(historical_parsed.get("selected_value_streams") or []),
-        auto_selected=auto_selected,
-        rescued_confirmed=rescued_confirmed_merged,
-        rescued_historical=rescued_gap_fill,
-    )
-    consolidated_selected = list(consolidation_parsed.get("selected_value_streams") or [])
-    if consolidated_selected:
-        final_selected = consolidated_selected
-    elif final_candidate_options:
-        consolidation_parsed["fallback_used"] = True
-
     parsed = {
-        "selected_value_streams": final_selected,
-        "advisory_selected_value_streams": filtered_llm_selected,
+        "selected_value_streams": filtered_llm_selected,
         "direct_pass": direct_parsed,
         "historical_gap_pass": historical_parsed,
-        "final_consolidation_pass": consolidation_parsed,
     }
     parsed["rescued_confirmed_merged"] = rescued_confirmed_merged
     parsed["rescued_historical_gap_fill"] = rescued_gap_fill
@@ -191,47 +165,6 @@ def _run_selection_pass(
     return sanitize_selected(parsed, candidates)
 
 
-def _run_final_consolidation_pass(
-    *,
-    generation_service_cls,
-    output_schema,
-    query_for_prompt: str,
-    candidate_options: List[dict],
-    direct_selected: List[dict],
-    historical_selected: List[dict],
-    auto_selected: List[dict],
-    rescued_confirmed: List[dict],
-    rescued_historical: List[dict],
-) -> dict:
-    from ..ranking.reranker import sanitize_selected
-
-    if not candidate_options:
-        return {"selected_value_streams": [], "rejected_candidates": []}
-
-    prompt = build_final_consolidation_prompt(
-        query_for_prompt=query_for_prompt,
-        candidate_options=candidate_options,
-        direct_selected=direct_selected,
-        historical_selected=historical_selected,
-        auto_selected=auto_selected,
-        rescued_confirmed=rescued_confirmed,
-        rescued_historical=rescued_historical,
-    )
-    result = generation_service_cls().generate_structured(
-        query=prompt,
-        output_schema=output_schema,
-        system_prompt=build_system_prompt(min_select=0, max_select=16),
-    )
-    parsed = result.model_dump() if hasattr(result, "model_dump") else {"selected_value_streams": []}
-    sanitized = sanitize_selected(parsed, candidate_options)
-    candidates_by_key = _candidate_lookup(candidate_options)
-    sanitized["selected_value_streams"] = [
-        _rewrite_score_reason(row, _candidate_for_selection(row, candidates_by_key))
-        for row in sanitized.get("selected_value_streams", [])
-    ]
-    return sanitized
-
-
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:
     direct_candidates: List[dict] = []
     historical_gap_candidates: List[dict] = []
@@ -243,20 +176,6 @@ def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[
         else:
             direct_candidates.append(row)
     return direct_candidates, historical_gap_candidates
-
-
-def _final_consolidation_candidates(
-    *,
-    auto_selected: List[dict],
-    llm_candidates: List[dict],
-    proposal_selected: List[dict],
-) -> List[dict]:
-    candidates_by_key = _candidate_lookup(llm_candidates)
-    rows: List[dict] = []
-    for selection in _merge_selected(auto_selected, proposal_selected):
-        candidate = _candidate_for_selection(selection, candidates_by_key)
-        rows.append(candidate or selection)
-    return _dedupe_candidate_rows(rows)
 
 
 def _finalize_selected(
@@ -644,18 +563,3 @@ def _dedupe_selected(rows: Iterable[dict]) -> List[dict]:
         out.append(row)
     return out
 
-
-def _dedupe_candidate_rows(rows: Iterable[dict]) -> List[dict]:
-    out: List[dict] = []
-    seen: set[str] = set()
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        entity_id = str(row.get("entity_id") or "").strip()
-        entity_name = str(row.get("entity_name") or "").strip()
-        key = _norm_key(entity_id) or _norm_key(entity_name)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        out.append(row)
-    return out

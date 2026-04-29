@@ -135,6 +135,23 @@ def build_historical_selection_prompt(
     )
 
 
+def build_historical_gap_selection_prompt(
+    *,
+    query_for_prompt: str,
+    precedent_context: str,
+    faiss_hit_context: str,
+    candidate_blocks: str,
+) -> str:
+    payload = _load_required_prompt_yaml("historical_gap_selection", ["user"])
+    return render_prompt(
+        str(payload["user"]),
+        query_for_prompt=query_for_prompt,
+        precedent_context=precedent_context,
+        faiss_hit_context=faiss_hit_context,
+        candidate_blocks=candidate_blocks,
+    )
+
+
 def build_value_stream_classification_prompt(
     *,
     ticket_id: str,
@@ -192,6 +209,7 @@ __all__ = [
     "SelectedValueStream",
     "build_historical_enrichment_prompt",
     "build_historical_enrichment_system_prompt",
+    "build_historical_gap_selection_prompt",
     "build_historical_selection_prompt",
     "build_historical_selection_system_prompt",
     "build_jira_value_stream_verifier_prompt",

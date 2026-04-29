@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from vs_app.modules.rag.augmentation.finalizer import _split_llm_candidates
-from vs_app.modules.rag.augmentation.prompt_builder import (
-    build_final_consolidation_prompt,
-    build_historical_gap_prompt,
-)
+from vs_app.modules.rag.augmentation.prompt_context import build_historical_gap_prompt
 
 
 def test_split_llm_candidates_separates_historical_gap_lane() -> None:
@@ -100,51 +97,3 @@ def test_historical_gap_prompt_includes_top_faiss_ticket_context() -> None:
     assert "Implied value streams: Establish Provider Network, Ensure Payment Integrity" in prompt
     assert "Ticket summary: This initiative proposes a roadmap" in prompt
 
-
-def test_final_consolidation_prompt_keeps_passes_advisory_not_union() -> None:
-    prompt = build_final_consolidation_prompt(
-        query_for_prompt="Launch a tiered benefit product with price transparency and provider steering.",
-        candidate_options=[
-            {
-                "entity_id": "vs-cpq",
-                "entity_name": "Configure, Price, and Quote",
-                "candidate_lane": "confirmed_direct",
-                "from_semantic": True,
-                "description": "Determining products and prices.",
-            },
-            {
-                "entity_id": "vs-member",
-                "entity_name": "Manage Member Care",
-                "candidate_lane": "historical_recall",
-                "from_historical": True,
-                "support_count": 4,
-                "direct_count": 1,
-                "implied_count": 3,
-                "description": "Helping members navigate care.",
-                "historical_reasons": ["[IDMT-1 / implied] member navigation recurred in tiering work"],
-            },
-        ],
-        direct_selected=[
-            {
-                "entity_id": "vs-cpq",
-                "entity_name": "Configure, Price, and Quote",
-                "confidence": 0.9,
-                "reason": "The product needs pricing and quoting.",
-            }
-        ],
-        historical_selected=[
-            {
-                "entity_id": "vs-member",
-                "entity_name": "Manage Member Care",
-                "confidence": 0.85,
-                "reason": "Similar tiering tickets required member navigation.",
-            }
-        ],
-    )
-
-    assert "final value-stream adjudicator" in prompt
-    assert "Do not mechanically union" in prompt
-    assert "DIRECT LLM PROPOSALS" in prompt
-    assert "HISTORIC LLM PROPOSALS" in prompt
-    assert "ALLOWED VALUE-STREAM OPTIONS" in prompt
-    assert "member navigation recurred" in prompt

@@ -238,7 +238,7 @@ const STEP_DEFS = [
   { id: 'merge',        stage: 'merge'      as PipelineStage, x: 640, y: 70,  icon: 'grid'     as Ico, title: 'Merge',        subtitle: 'Rank candidates' },
   { id: 'directLlm',    stage: 'llm_select' as PipelineStage, x: 850, y: 18,  icon: 'cpu'      as Ico, title: 'Direct LLM',   subtitle: 'Direct fit' },
   { id: 'historicLlm',  stage: 'llm_select' as PipelineStage, x: 850, y: 122, icon: 'book'     as Ico, title: 'Historic LLM', subtitle: 'Pattern fit' },
-  { id: 'finalize',     stage: 'finalize'   as PipelineStage, x: 1075,y: 70,  icon: 'award'    as Ico, title: 'Finalize',     subtitle: 'Union + rescue' },
+  { id: 'finalize',     stage: 'finalize'   as PipelineStage, x: 1075,y: 70,  icon: 'award'    as Ico, title: 'Finalize',     subtitle: 'Filter + rescue' },
 ];
 
 const FLOW_EDGES_BASE: Edge[] = [

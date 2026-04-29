@@ -31,3 +31,782 @@ Creating turbopack project { dir: 'D:\\projects\\vs\\frontend', testMode: true }
 [browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
 [browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
 ✓ Compiled in 303ms
+[browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head headCacheNode={{rsc:{...}, ...}}>
+                    <__next_viewport_boundary__>
+                    <MetadataWrapper>
+                      <div
+                        hidden={true}
+-                       bis_skin_checked="1"
+                      >
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html lang="en" className="h-full ant...">
+                          <body
+                            className="min-h-full flex flex-col"
+-                           bis_register="W3sibWFzdGVyIjp0cnVlLCJleHRlbnNpb25JZCI6ImVwcGlvY2VtaG1ubGJoanBsY2drb2ZjaWll..."
+-                           __processed_d20aa915-cc15-449f-9ffb-3e4838d67c63__="true"
+                          >
+                            ...
+                              <SegmentViewNode type="page" pagePath="page.tsx">
+                                <SegmentTrieNode>
+                                <ClientPageRoot Component={function Home} serverProvidedParams={{...}}>
+                                  <Home params={Promise} searchParams={Promise}>
+                                    <div
+                                      className="dark min-h-screen bg-surface-muted text-zinc-900 dark:text-zinc-100"
+-                                     bis_skin_checked="1"
+                                    >
+                                      <div
+                                        className="mx-auto max-w-[1500px] px-6 py-5"
+-                                       bis_skin_checked="1"
+                                      >
+                                        <div
+                                          className="grid grid-cols-1 gap-4 xl:grid-cols-[340px_minmax(0,1fr)]"
+-                                         bis_skin_checked="1"
+                                        >
+                                          <aside className="space-y-4 ...">
+                                            <Section title="Input" icon="file">
+                                              <section className="overflow-h...">
+                                                <header className="flex items...">
+                                                  <div
+                                                    className="flex items-center gap-2.5"
+-                                                   bis_skin_checked="1"
+                                                  >
+                                                    <span>
+                                                    <div
+                                                      className="leading-tight"
+-                                                     bis_skin_checked="1"
+                                                    >
+                                                      <div
+                                                        className="text-[13px] font-semibold text-zinc-900 dark:text-z..."
+-                                                       bis_skin_checked="1"
+                                                      >
++                                                       Input
+                                                <div
+                                                  className="p-4"
+-                                                 bis_skin_checked="1"
+                                                >
+                                                  <div
+                                                    className="space-y-3"
+-                                                   bis_skin_checked="1"
+                                                  >
+                                                    <select>
+                                                    <input>
+                                                    <div
+                                                      role="button"
+                                                      tabIndex={0}
+                                                      onClick={function onClick}
+                                                      onKeyDown={function onKeyDown}
+                                                      onDragEnter={function onDragEnter}
+                                                      onDragOver={function onDragOver}
+                                                      onDragLeave={function onDragLeave}
+                                                      onDrop={function Home.useCallback[handleDrop]}
+                                                      className="cursor-pointer rounded-md border border-dashed p-4 te..."
+-                                                     bis_skin_checked="1"
+                                                    >
+                                                      <div
+                                                        className="mx-auto mb-2 flex h-10 w-10 items-center justify-ce..."
+-                                                       bis_skin_checked="1"
+                                                      >
+                                                      <div
+                                                        className="text-sm font-semibold"
+-                                                       bis_skin_checked="1"
+                                                      >
++                                                       Drop idea card here
+                                                      <div
+                                                        className="mt-1 text-xs text-zinc-500 dark:text-zinc-400"
+-                                                       bis_skin_checked="1"
+                                                      >
++                                                       PPTX, PDF, DOCX, TXT, or Markdown
+                                            <Section title="Config" icon="sliders">
+                                              <section className="overflow-h...">
+                                                <header className="flex items...">
+                                                  <div
+                                                    className="flex items-center gap-2.5"
+-                                                   bis_skin_checked="1"
+                                                  >
+                                                    <span>
+                                                    <div
+                                                      className="leading-tight"
+-                                                     bis_skin_checked="1"
+                                                    >
+                                                      <div
+                                                        className="text-[13px] font-semibold text-zinc-900 dark:text-z..."
+-                                                       bis_skin_checked="1"
+                                                      >
++                                                       Config
+                                                <div
+                                                  className="p-4"
+-                                                 bis_skin_checked="1"
+                                                >
+                                                  <div
+                                                    className="space-y-4"
+-                                                   bis_skin_checked="1"
+                                                  >
+                                                    <div
+-                                                     bis_skin_checked="1"
+                                                    >
+                                                      <div
+                                                        className="flex items-center justify-between mb-1"
+-                                                       bis_skin_checked="1"
+                                                      >
+                                                      ...
+                                                    ...
+                                          <main className="min-w-0 sp...">
+                                            <Section title="Pipeline" icon="layers" noPad={true} badge={<Pill>}>
+                                              <section className="overflow-h...">
+                                                <header className="flex items...">
+                                                  <div
+                                                    className="flex items-center gap-2.5"
+-                                                   bis_skin_checked="1"
+                                                  >
+                                                    <span>
+                                                    <div
+                                                      className="leading-tight"
+-                                                     bis_skin_checked="1"
+                                                    >
+                                                      <div
+                                                        className="text-[13px] font-semibold text-zinc-900 dark:text-z..."
+-                                                       bis_skin_checked="1"
+                                                      >
++                                                       Pipeline
+                                                  ...
+                                                <div
+                                                  className=""
+-                                                 bis_skin_checked="1"
+                                                >
+                                                  <PipelineGraph step="idle" stepLabel="" stepOnError="idle">
+                                                    <div
+                                                      className="h-[240px] w-full"
+-                                                     bis_skin_checked="1"
+                                                    >
+                                                      <ReactFlow nodes={[...]} edges={[...]} nodeTypes={{...}} ...>
+                                                        <div
+                                                          data-testid="rf__wrapper"
+                                                          onScroll={function ReactFlow.useCallback[wrapperOnScroll]}
+                                                          style={{width:"100%",height:"100%",overflow:"hidden",position:"relative",zIndex:0}}
+                                                          ref={null}
+                                                          className="react-flow light"
+                                                          id={undefined}
+                                                          role="application"
+-                                                         bis_skin_checked="1"
+                                                        >
+                                                          ...
+                                                            <BatchProvider>
+                                                              <StoreUpdater>
+                                                              <GraphView onInit={undefined} onNodeClick={undefined} ...>
+                                                                <FlowRenderer onPaneClick={undefined} ...>
+                                                                  <ZoomPane onPaneContextMenu={undefined} ...>
+                                                                    <div
+                                                                      className="react-flow__renderer"
+                                                                      ref={{current:null}}
+                                                                      style={{position:"absolute",width:"100%",height:"100%",top:0,left:0}}
+-                                                                     bis_skin_checked="1"
+                                                                    >
+                                                                      <Pane onSelectionStart={undefined} ...>
+                                                                        <div
+                                                                          className="react-flow__pane"
+                                                                          onClick={function}
+                                                                          onContextMenu={function}
+                                                                          onWheel={function}
+                                                                          onPointerEnter={undefined}
+                                                                          onPointerMove={undefined}
+                                                                          onPointerUp={undefined}
+                                                                          onPointerDownCapture={undefined}
+                                                                          onClickCapture={undefined}
+                                                                          onPointerLeave={undefined}
+                                                                          ref={{current:null}}
+                                                                          style={{position:"absolute",width:"100%",height:"100%",top:0, ...}}
+-                                                                         bis_skin_checked="1"
+                                                                        >
+                                                                          <Viewport>
+                                                                            <div
+                                                                              className="react-flow__viewport xyflow__..."
+                                                                              style={{transform:"translate(..."}}
+-                                                                             bis_skin_checked="1"
+                                                                            >
+                                                                              <EdgeRenderer edgeTypes={undefined} ...>
+                                                                                <div
+                                                                                  className="react-flow__edges"
+-                                                                                 bis_skin_checked="1"
+                                                                                >
+                                                                              <ConnectionLineWrapper>
+                                                                              <div
+                                                                                className="react-flow__edgelabel-renderer"
+-                                                                               bis_skin_checked="1"
+                                                                              >
+                                                                              <NodeRenderer nodeTypes={{...}} ...>
+                                                                                <div
+                                                                                  className="react-flow__nodes"
+                                                                                  style={{position:"absolute",width:"100%", ...}}
+-                                                                                 bis_skin_checked="1"
+                                                                                >
+                                                                                  <NodeWrapper id="extract" ...>
+                                                                                    <div
+                                                                                      className="react-flow__node reac..."
+                                                                                      ref={{current:null}}
+                                                                                      style={{zIndex:0,transform:"translate...", ...}}
+                                                                                      data-id="extract"
+                                                                                      data-testid="rf__node-extract"
+                                                                                      onMouseEnter={undefined}
+                                                                                      onMouseMove={undefined}
+                                                                                      onMouseLeave={undefined}
+                                                                                      onContextMenu={undefined}
+                                                                                      onClick={function onSelectNodeHandler}
+                                                                                      onDoubleClick={undefined}
+                                                                                      onKeyDown={function onKeyDown}
+                                                                                      tabIndex={0}
+                                                                                      onFocus={function onFocus}
+                                                                                      role="group"
+                                                                                      aria-roledescription="node"
+                                                                                      aria-describedby="react-flow__no..."
+                                                                                      aria-label={undefined}
+-                                                                                     bis_skin_checked="1"
+                                                                                    >
+                                                                                      <StepNode id="extract" ...>
+                                                                                        <div
+                                                                                          className="w-[180px] rounded..."
+-                                                                                         bis_skin_checked="1"
+                                                                                        >
+                                                                                          <HandleComponent type="target" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="extract"
+                                                                                              data-handlepos="left"
+                                                                                              data-id="1-extract-null-..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                          <div
+                                                                                            className="flex items-cent..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
+                                                                                          <div
+                                                                                            className="text-[10px] lea..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
++                                                                                           Read idea card
+                                                                                          <HandleComponent type="source" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="extract"
+                                                                                              data-handlepos="right"
+                                                                                              data-id="1-extract-null-..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                  <NodeWrapper id="condense" ...>
+                                                                                    <div
+                                                                                      className="react-flow__node reac..."
+                                                                                      ref={{current:null}}
+                                                                                      style={{zIndex:0,transform:"translate...", ...}}
+                                                                                      data-id="condense"
+                                                                                      data-testid="rf__node-condense"
+                                                                                      onMouseEnter={undefined}
+                                                                                      onMouseMove={undefined}
+                                                                                      onMouseLeave={undefined}
+                                                                                      onContextMenu={undefined}
+                                                                                      onClick={function onSelectNodeHandler}
+                                                                                      onDoubleClick={undefined}
+                                                                                      onKeyDown={function onKeyDown}
+                                                                                      tabIndex={0}
+                                                                                      onFocus={function onFocus}
+                                                                                      role="group"
+                                                                                      aria-roledescription="node"
+                                                                                      aria-describedby="react-flow__no..."
+                                                                                      aria-label={undefined}
+-                                                                                     bis_skin_checked="1"
+                                                                                    >
+                                                                                      <StepNode id="condense" ...>
+                                                                                        <div
+                                                                                          className="w-[180px] rounded..."
+-                                                                                         bis_skin_checked="1"
+                                                                                        >
+                                                                                          <HandleComponent type="target" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="condense"
+                                                                                              data-handlepos="left"
+                                                                                              data-id="1-condense-null..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                          <div
+                                                                                            className="flex items-cent..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
+                                                                                          <div
+                                                                                            className="text-[10px] lea..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
++                                                                                           LLM summarize
+                                                                                          <HandleComponent type="source" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="condense"
+                                                                                              data-handlepos="right"
+                                                                                              data-id="1-condense-null..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                  <NodeWrapper id="semantic" ...>
+                                                                                    <div
+                                                                                      className="react-flow__node reac..."
+                                                                                      ref={{current:null}}
+                                                                                      style={{zIndex:0,transform:"translate...", ...}}
+                                                                                      data-id="semantic"
+                                                                                      data-testid="rf__node-semantic"
+                                                                                      onMouseEnter={undefined}
+                                                                                      onMouseMove={undefined}
+                                                                                      onMouseLeave={undefined}
+                                                                                      onContextMenu={undefined}
+                                                                                      onClick={function onSelectNodeHandler}
+                                                                                      onDoubleClick={undefined}
+                                                                                      onKeyDown={function onKeyDown}
+                                                                                      tabIndex={0}
+                                                                                      onFocus={function onFocus}
+                                                                                      role="group"
+                                                                                      aria-roledescription="node"
+                                                                                      aria-describedby="react-flow__no..."
+                                                                                      aria-label={undefined}
+-                                                                                     bis_skin_checked="1"
+                                                                                    >
+                                                                                      <StepNode id="semantic" ...>
+                                                                                        <div
+                                                                                          className="w-[180px] rounded..."
+-                                                                                         bis_skin_checked="1"
+                                                                                        >
+                                                                                          <HandleComponent type="target" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="semantic"
+                                                                                              data-handlepos="left"
+                                                                                              data-id="1-semantic-null..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                          <div
+                                                                                            className="flex items-cent..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
+                                                                                          <div
+                                                                                            className="text-[10px] lea..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
++                                                                                           Azure VS index
+                                                                                          <HandleComponent type="source" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="semantic"
+                                                                                              data-handlepos="right"
+                                                                                              data-id="1-semantic-null..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                  <NodeWrapper id="historical" ...>
+                                                                                    <div
+                                                                                      className="react-flow__node reac..."
+                                                                                      ref={{current:null}}
+                                                                                      style={{zIndex:0,transform:"translate...", ...}}
+                                                                                      data-id="historical"
+                                                                                      data-testid="rf__node-historical"
+                                                                                      onMouseEnter={undefined}
+                                                                                      onMouseMove={undefined}
+                                                                                      onMouseLeave={undefined}
+                                                                                      onContextMenu={undefined}
+                                                                                      onClick={function onSelectNodeHandler}
+                                                                                      onDoubleClick={undefined}
+                                                                                      onKeyDown={function onKeyDown}
+                                                                                      tabIndex={0}
+                                                                                      onFocus={function onFocus}
+                                                                                      role="group"
+                                                                                      aria-roledescription="node"
+                                                                                      aria-describedby="react-flow__no..."
+                                                                                      aria-label={undefined}
+-                                                                                     bis_skin_checked="1"
+                                                                                    >
+                                                                                      <StepNode id="historical" ...>
+                                                                                        <div
+                                                                                          className="w-[180px] rounded..."
+-                                                                                         bis_skin_checked="1"
+                                                                                        >
+                                                                                          <HandleComponent type="target" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="historical"
+                                                                                              data-handlepos="left"
+                                                                                              data-id="1-historical-nu..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                          <div
+                                                                                            className="flex items-cent..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
+                                                                                          <div
+                                                                                            className="text-[10px] lea..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
++                                                                                           FAISS lookup
+                                                                                          <HandleComponent type="source" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="historical"
+                                                                                              data-handlepos="right"
+                                                                                              data-id="1-historical-nu..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                  <NodeWrapper id="merge" ...>
+                                                                                    <div
+                                                                                      className="react-flow__node reac..."
+                                                                                      ref={{current:null}}
+                                                                                      style={{zIndex:0,transform:"translate...", ...}}
+                                                                                      data-id="merge"
+                                                                                      data-testid="rf__node-merge"
+                                                                                      onMouseEnter={undefined}
+                                                                                      onMouseMove={undefined}
+                                                                                      onMouseLeave={undefined}
+                                                                                      onContextMenu={undefined}
+                                                                                      onClick={function onSelectNodeHandler}
+                                                                                      onDoubleClick={undefined}
+                                                                                      onKeyDown={function onKeyDown}
+                                                                                      tabIndex={0}
+                                                                                      onFocus={function onFocus}
+                                                                                      role="group"
+                                                                                      aria-roledescription="node"
+                                                                                      aria-describedby="react-flow__no..."
+                                                                                      aria-label={undefined}
+-                                                                                     bis_skin_checked="1"
+                                                                                    >
+                                                                                      <StepNode id="merge" ...>
+                                                                                        <div
+                                                                                          className="w-[180px] rounded..."
+-                                                                                         bis_skin_checked="1"
+                                                                                        >
+                                                                                          <HandleComponent type="target" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="merge"
+                                                                                              data-handlepos="left"
+                                                                                              data-id="1-merge-null-ta..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                          <div
+                                                                                            className="flex items-cent..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
+                                                                                          <div
+                                                                                            className="text-[10px] lea..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
++                                                                                           Rank candidates
+                                                                                          <HandleComponent type="source" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="merge"
+                                                                                              data-handlepos="right"
+                                                                                              data-id="1-merge-null-so..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                  <NodeWrapper id="directLlm" ...>
+                                                                                    <div
+                                                                                      className="react-flow__node reac..."
+                                                                                      ref={{current:null}}
+                                                                                      style={{zIndex:0,transform:"translate...", ...}}
+                                                                                      data-id="directLlm"
+                                                                                      data-testid="rf__node-directLlm"
+                                                                                      onMouseEnter={undefined}
+                                                                                      onMouseMove={undefined}
+                                                                                      onMouseLeave={undefined}
+                                                                                      onContextMenu={undefined}
+                                                                                      onClick={function onSelectNodeHandler}
+                                                                                      onDoubleClick={undefined}
+                                                                                      onKeyDown={function onKeyDown}
+                                                                                      tabIndex={0}
+                                                                                      onFocus={function onFocus}
+                                                                                      role="group"
+                                                                                      aria-roledescription="node"
+                                                                                      aria-describedby="react-flow__no..."
+                                                                                      aria-label={undefined}
+-                                                                                     bis_skin_checked="1"
+                                                                                    >
+                                                                                      <StepNode id="directLlm" ...>
+                                                                                        <div
+                                                                                          className="w-[180px] rounded..."
+-                                                                                         bis_skin_checked="1"
+                                                                                        >
+                                                                                          <HandleComponent type="target" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="directLlm"
+                                                                                              data-handlepos="left"
+                                                                                              data-id="1-directLlm-nul..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                          <div
+                                                                                            className="flex items-cent..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
+                                                                                          <div
+                                                                                            className="text-[10px] lea..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
++                                                                                           Direct fit
+                                                                                          <HandleComponent type="source" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="directLlm"
+                                                                                              data-handlepos="right"
+                                                                                              data-id="1-directLlm-nul..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                  <NodeWrapper id="historicLlm" ...>
+                                                                                    <div
+                                                                                      className="react-flow__node reac..."
+                                                                                      ref={{current:null}}
+                                                                                      style={{zIndex:0,transform:"translate...", ...}}
+                                                                                      data-id="historicLlm"
+                                                                                      data-testid="rf__node-historicLlm"
+                                                                                      onMouseEnter={undefined}
+                                                                                      onMouseMove={undefined}
+                                                                                      onMouseLeave={undefined}
+                                                                                      onContextMenu={undefined}
+                                                                                      onClick={function onSelectNodeHandler}
+                                                                                      onDoubleClick={undefined}
+                                                                                      onKeyDown={function onKeyDown}
+                                                                                      tabIndex={0}
+                                                                                      onFocus={function onFocus}
+                                                                                      role="group"
+                                                                                      aria-roledescription="node"
+                                                                                      aria-describedby="react-flow__no..."
+                                                                                      aria-label={undefined}
+-                                                                                     bis_skin_checked="1"
+                                                                                    >
+                                                                                      <StepNode id="historicLlm" ...>
+                                                                                        <div
+                                                                                          className="w-[180px] rounded..."
+-                                                                                         bis_skin_checked="1"
+                                                                                        >
+                                                                                          <HandleComponent type="target" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="historicLlm"
+                                                                                              data-handlepos="left"
+                                                                                              data-id="1-historicLlm-n..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                          <div
+                                                                                            className="flex items-cent..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
+                                                                                          <div
+                                                                                            className="text-[10px] lea..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
++                                                                                           Pattern fit
+                                                                                          <HandleComponent type="source" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="historicLlm"
+                                                                                              data-handlepos="right"
+                                                                                              data-id="1-historicLlm-n..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                  <NodeWrapper id="finalize" ...>
+                                                                                    <div
+                                                                                      className="react-flow__node reac..."
+                                                                                      ref={{current:null}}
+                                                                                      style={{zIndex:0,transform:"translate...", ...}}
+                                                                                      data-id="finalize"
+                                                                                      data-testid="rf__node-finalize"
+                                                                                      onMouseEnter={undefined}
+                                                                                      onMouseMove={undefined}
+                                                                                      onMouseLeave={undefined}
+                                                                                      onContextMenu={undefined}
+                                                                                      onClick={function onSelectNodeHandler}
+                                                                                      onDoubleClick={undefined}
+                                                                                      onKeyDown={function onKeyDown}
+                                                                                      tabIndex={0}
+                                                                                      onFocus={function onFocus}
+                                                                                      role="group"
+                                                                                      aria-roledescription="node"
+                                                                                      aria-describedby="react-flow__no..."
+                                                                                      aria-label={undefined}
+-                                                                                     bis_skin_checked="1"
+                                                                                    >
+                                                                                      <StepNode id="finalize" ...>
+                                                                                        <div
+                                                                                          className="w-[180px] rounded..."
+-                                                                                         bis_skin_checked="1"
+                                                                                        >
+                                                                                          <HandleComponent type="target" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="finalize"
+                                                                                              data-handlepos="left"
+                                                                                              data-id="1-finalize-null..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                                          <div
+                                                                                            className="flex items-cent..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
+                                                                                          <div
+                                                                                            className="text-[10px] lea..."
+-                                                                                           bis_skin_checked="1"
+                                                                                          >
++                                                                                           Union + rescue
+                                                                                          <HandleComponent type="source" ...>
+                                                                                            <div
+                                                                                              data-handleid={null}
+                                                                                              data-nodeid="finalize"
+                                                                                              data-handlepos="right"
+                                                                                              data-id="1-finalize-null..."
+                                                                                              className="react-flow__h..."
+                                                                                              onMouseDown={function onPointerDown}
+                                                                                              onTouchStart={function onPointerDown}
+                                                                                              onClick={function onClick}
+                                                                                              ref={null}
+-                                                                                             bis_skin_checked="1"
+                                                                                            >
+                                                                              <div
+                                                                                className="react-flow__viewport-portal"
+-                                                                               bis_skin_checked="1"
+                                                                              >
+                                                                          ...
+                                                              <SelectionListener>
+                                                              <Background>
+                                                              <Attribution>
+                                                              <A11yDescriptions rfId="1" disableKeyboardA11y={false}>
+                                                                <div
+                                                                  id="react-flow__node-desc-1"
+                                                                  style={{display:"none"}}
+-                                                                 bis_skin_checked="1"
+                                                                >
++                                                                 Press enter or space to select a node. You can then u...
+                                                                <div
+                                                                  id="react-flow__edge-desc-1"
+                                                                  style={{display:"none"}}
+-                                                                 bis_skin_checked="1"
+                                                                >
++                                                                 Press enter or space to select an edge. You can then ...
+                                                                <AriaLiveMessage rfId="1">
+                                                                  <div
+                                                                    id="react-flow__aria-live-1"
+                                                                    aria-live="assertive"
+                                                                    aria-atomic="true"
+                                                                    style={{position:"absolute",width:1,height:1,margin:-1,border:0,padding:0, ...}}
+-                                                                   bis_skin_checked="1"
+                                                                  >
++                                                                   
+                                            <div
+                                              className="flex flex-col items-center justify-center rounded-md border b..."
+-                                             bis_skin_checked="1"
+                                            >
+                                              <div
+                                                className="mb-4 flex h-12 w-12 items-center justify-center rounded-md ..."
+-                                               bis_skin_checked="1"
+                                              >
+                                              ...
+                  ...
+ 
+[browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
+[browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
+[browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
+[browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
+[browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
+[browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002

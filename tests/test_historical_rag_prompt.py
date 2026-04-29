@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vs_app.modules.rag.augmentation.prompt_builder import build_system_prompt
+from vs_app.modules.rag.augmentation.prompt_context import build_system_prompt
 
 
 def test_historical_prompt_keeps_distinct_confirmed_workflows() -> None:

@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+import re
+from typing import Iterable, List
+
+from vs_app.modules.prompts.loader import (
+    build_historical_gap_selection_prompt,
+    build_historical_selection_prompt,
+    build_historical_selection_system_prompt,
+)
+
+
+def build_system_prompt(min_select: int = 4, max_select: int = 12) -> str:
+    return build_historical_selection_system_prompt(
+        min_select=min_select,
+        max_select=max_select,
+    )
+
+
+def build_direct_candidate_prompt(query_for_prompt: str, candidates: List[dict]) -> str:
+    return build_historical_selection_prompt(
+        query_for_prompt=query_for_prompt,
+        candidate_blocks=format_candidate_blocks(candidates),
+    )
+
+
+def build_historical_gap_prompt(
+    query_for_prompt: str,
+    candidates: List[dict],
+    precedent_candidates: List[dict] | None = None,
+    historical_ticket_hits: List[dict] | None = None,
+) -> str:
+    return build_historical_gap_selection_prompt(
+        query_for_prompt=query_for_prompt,
+        precedent_context=format_historical_precedents(precedent_candidates or candidates),
+        faiss_hit_context=format_historical_ticket_hits(historical_ticket_hits or []),
+        candidate_blocks=format_candidate_blocks(candidates),
+    )
+
+
+def format_candidate_blocks(candidates: List[dict]) -> str:
+    blocks = []
+    for idx, row in enumerate(order_candidates(candidates), start=1):
+        lines = [
+            f"{idx}. {row.get('entity_name', '')}",
+            f"Entity ID: {row.get('entity_id', '')}",
+            f"Evidence bucket: {str(row.get('bucket') or '').strip() or 'unknown'}",
+        ]
+
+        lane = str(row.get("candidate_lane") or "").strip()
+        if lane:
+            lines.append(f"Candidate lane: {lane}")
+
+        description = str(row.get("description") or "").strip()
+        if description:
+            lines.append(f"Description: {description[:320]}")
+
+        if row.get("from_semantic"):
+            lines.append(f"Semantic score: {float(row.get('semantic_score', 0.0) or 0.0):.4f}")
+
+        if row.get("from_historical"):
+            lines.extend(_historical_support_lines(row))
+
+        analogs = _ordered_analog_reasons(row.get("historical_reasons") or [])
+        if analogs:
+            lines.append("Analog evidence:")
+            lines.extend(f"  - {reason}" for reason in analogs[:3])
+
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def format_historical_precedents(candidates: List[dict], *, limit: int = 8) -> str:
+    precedents: dict[str, dict] = {}
+    for row in candidates:
+        name = str(row.get("entity_name") or "").strip()
+        if not name:
+            continue
+
+        parsed_reasons = [
+            parsed
+            for reason in _text_list(row.get("historical_reasons") or [])
+            if (parsed := parse_analog_reason(reason))
+        ]
+        if parsed_reasons:
+            for ticket_id, inference_type, snippet in parsed_reasons:
+                add_precedent(precedents, ticket_id, name, inference_type, snippet)
+            continue
+
+        inference_type = "direct" if int(row.get("direct_count", 0) or 0) else "implied"
+        for ticket_id in _text_list(row.get("supporting_ticket_ids") or []):
+            add_precedent(precedents, ticket_id, name, inference_type, "")
+
+    if not precedents:
+        return "No grouped precedent context was available; rely on candidate-level analog evidence."
+
+    rows = sorted(
+        precedents.values(),
+        key=lambda item: (
+            len(item["candidates"]),
+            len(item["direct_candidates"]),
+            len(item["snippets"]),
+        ),
+        reverse=True,
+    )
+    return "\n\n".join(format_precedent_block(idx, item) for idx, item in enumerate(rows[:limit], start=1))
+
+
+def format_historical_ticket_hits(ticket_hits: List[dict], *, limit: int = 10) -> str:
+    if not ticket_hits:
+        return "No top FAISS ticket-hit context was available; rely on grouped precedents and candidate evidence."
+
+    blocks = []
+    for idx, hit in enumerate(ticket_hits[:limit], start=1):
+        ticket_id = str(hit.get("ticket_id") or "").strip() or f"hit-{idx}"
+        title = str(hit.get("title") or "").strip()
+        direct_names = _text_list(hit.get("direct_vs_names") or [])
+        implied_names = _text_list(hit.get("implied_vs_names") or [])
+        fallback_names = _text_list(hit.get("value_stream_names") or hit.get("value_stream_labels") or [])
+        if not direct_names and not implied_names and fallback_names:
+            implied_names = fallback_names
+
+        lines = [
+            f"{idx}. {ticket_id}{f' - {title}' if title and title != ticket_id else ''}",
+            f"   Similarity: {float(hit.get('best_score', 0.0) or 0.0):.4f}",
+        ]
+        label_source = str(hit.get("label_source") or "").strip()
+        if label_source:
+            lines.append(f"   Label source: {label_source}")
+        lines.append(f"   Direct value streams: {', '.join(direct_names[:10]) if direct_names else 'none listed'}")
+        lines.append(f"   Implied value streams: {', '.join(implied_names[:10]) if implied_names else 'none listed'}")
+
+        direct_functions = _text_list(hit.get("direct_functions_canonical") or [])
+        implied_functions = _text_list(hit.get("implied_functions_canonical") or [])
+        if direct_functions:
+            lines.append(f"   Direct functions: {', '.join(direct_functions[:8])}")
+        if implied_functions:
+            lines.append(f"   Implied functions: {', '.join(implied_functions[:8])}")
+
+        summary = " ".join(str(hit.get("summary_preview") or "").split())
+        if summary:
+            lines.append(f"   Ticket summary: {summary[:420]}")
+        blocks.append("\n".join(lines))
+
+    return "\n\n".join(blocks)
+
+
+def format_precedent_block(idx: int, item: dict) -> str:
+    direct = sorted(item["direct_candidates"])
+    implied = sorted(item["implied_candidates"])
+    candidate_parts = []
+    if direct:
+        candidate_parts.append("direct: " + ", ".join(direct[:8]))
+    if implied:
+        candidate_parts.append("implied: " + ", ".join(implied[:8]))
+
+    lines = [
+        f"{idx}. {item['ticket_id']}",
+        f"   Pattern-supported value streams: {'; '.join(candidate_parts) if candidate_parts else 'none listed'}",
+    ]
+    lines.extend(f"   Analog summary: {snippet[:260]}" for snippet in item["snippets"][:2])
+    return "\n".join(lines)
+
+
+def add_precedent(
+    precedents: dict[str, dict],
+    ticket_id: str,
+    candidate_name: str,
+    inference_type: str,
+    snippet: str,
+) -> None:
+    ticket_key = ticket_id.strip()
+    if not ticket_key:
+        return
+
+    entry = precedents.setdefault(
+        ticket_key,
+        {
+            "ticket_id": ticket_key,
+            "candidates": set(),
+            "direct_candidates": set(),
+            "implied_candidates": set(),
+            "snippets": [],
+        },
+    )
+    entry["candidates"].add(candidate_name)
+    target = "direct_candidates" if inference_type == "direct" else "implied_candidates"
+    entry[target].add(candidate_name)
+
+    clean_snippet = " ".join((snippet or "").split())
+    if clean_snippet and clean_snippet not in entry["snippets"]:
+        entry["snippets"].append(clean_snippet)
+
+
+def parse_analog_reason(reason: str) -> tuple[str, str, str] | None:
+    match = re.match(r"^\[([^/\]]+)\s*/\s*(direct|implied)\]\s*(.*)$", reason, re.IGNORECASE)
+    if not match:
+        return None
+    return (
+        match.group(1).strip(),
+        match.group(2).strip().lower(),
+        match.group(3).strip(),
+    )
+
+
+def order_candidates(candidates: List[dict]) -> List[dict]:
+    lane_priority = {
+        "confirmed_direct": 0,
+        "historical_recall": 1,
+        "semantic_direct": 2,
+    }
+    return sorted(
+        list(candidates),
+        key=lambda row: (
+            lane_priority.get(str(row.get("candidate_lane") or ""), 9),
+            -float(row.get("ranking_score", 0.0) or 0.0),
+        ),
+    )
+
+
+def _historical_support_lines(row: dict, *, prefix: str = "Historical support") -> List[str]:
+    direct_count = int(row.get("direct_count", 0) or 0)
+    implied_count = int(row.get("implied_count", 0) or 0)
+    return [
+        (
+            f"{prefix}: {int(row.get('support_count', 0) or 0)} ticket signals "
+            f"({direct_count} direct, {implied_count} implied), "
+            f"best similarity {float(row.get('best_support_score', 0.0) or 0.0):.4f}, "
+            f"average similarity {float(row.get('avg_support_score', 0.0) or 0.0):.4f}"
+        )
+    ]
+
+
+def _ordered_analog_reasons(values: Iterable[object]) -> List[str]:
+    reasons = _text_list(values)
+    direct_reasons = [reason for reason in reasons if "/ direct]" in reason]
+    implied_reasons = [reason for reason in reasons if "/ implied]" in reason]
+    other_reasons = [
+        reason
+        for reason in reasons
+        if reason not in direct_reasons and reason not in implied_reasons
+    ]
+    return direct_reasons + implied_reasons + other_reasons
+
+
+def _text_list(values: Iterable[object]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+

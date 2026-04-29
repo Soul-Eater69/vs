@@ -1,0 +1,52 @@
+user: |
+  IDEA CARD:
+
+  {query_for_prompt}
+
+  TASK:
+  You are doing a separate historical pattern adjudication pass.
+  Semantic retrieval already handled direct wording matches. Your job is to decide whether
+  historical-supported candidates represent value streams implied or confirmed by repeatable
+  patterns in similar past tickets.
+
+  Historical candidates are not expected to have strong literal wording overlap with the idea card.
+  Judge whether the analog evidence shows the same downstream operational work, business lifecycle,
+  or recurring capability pattern.
+
+  The precedent section groups evidence by prior similar ticket. Treat that bundle view as important:
+  if one close prior ticket supported several value streams together, that can reveal a reusable
+  business pattern that individual candidate snippets may hide.
+
+  CALIBRATION EXAMPLES:
+  Positive pattern-induced selection:
+  - If the current idea describes network steering, tiering, payment, invoice, utilization, or member
+    operations only indirectly, and multiple similar historical tickets carried a downstream value
+    stream with coherent analog summaries, include that value stream as an implied gap-fill.
+  - Example decision: include "Manage Invoice and Payment Receipt" when several similar tickets show
+    recurring billing/payment receipt work even if the current card does not literally say "invoice".
+
+  Negative generic false positive:
+  - Do not include "Align and Execute IT Strategy" merely because the card mentions a roadmap,
+    strategy, modernization, or phased plan. Include it only when the work is actually IT strategy
+    execution rather than business capability delivery.
+  - Do not include generic enterprise/process streams when the analog summaries are from a different
+    operational domain.
+
+  SELECTION RULES:
+  - Evaluate every historical candidate independently.
+  - Include when repeated analog evidence shows a defensible implied value stream.
+  - Multiple coherent implied analogs can be enough; direct Jira-linked analogs are stronger.
+  - Exclude one-off, generic, or domain-mismatched analogs even when scores are high.
+  - Prefer concise reasons that cite the analog pattern, not generic score language.
+
+  SIMILAR HISTORICAL PRECEDENTS:
+
+  {precedent_context}
+
+  TOP RETRIEVED HISTORICAL TICKETS:
+
+  {faiss_hit_context}
+
+  HISTORICAL-SUPPORTED CANDIDATES:
+
+  {candidate_blocks}

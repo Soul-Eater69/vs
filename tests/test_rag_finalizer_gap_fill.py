@@ -104,6 +104,46 @@ def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:
     assert dropped[0]["drop_reason"] == "weak_historical_gap_fill_evidence"
 
 
+def test_finalize_selected_keeps_high_confidence_historical_llm_selection() -> None:
+    candidate = _historical_candidate("Manage Member Care", best=0.64, avg=0.57, support=2)
+    candidate["weighted_support_count"] = 0.7
+
+    selected = _selected("Manage Member Care")
+    selected["confidence"] = 0.92
+
+    final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[selected],
+        llm_candidates=[candidate],
+    )
+
+    assert dropped == []
+    assert rescued_confirmed == []
+    assert rescued == []
+    assert [row["entity_name"] for row in filtered_llm] == ["Manage Member Care"]
+    assert [row["entity_name"] for row in final_selected] == ["Manage Member Care"]
+
+
+def test_finalize_selected_still_drops_lower_confidence_weak_historical_selection() -> None:
+    candidate = _historical_candidate("Receive Care", best=0.64, avg=0.57, support=2)
+    candidate["weighted_support_count"] = 0.7
+
+    selected = _selected("Receive Care")
+    selected["confidence"] = 0.86
+
+    final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[selected],
+        llm_candidates=[candidate],
+    )
+
+    assert final_selected == []
+    assert filtered_llm == []
+    assert rescued_confirmed == []
+    assert rescued == []
+    assert dropped[0]["entity_name"] == "Receive Care"
+
+
 def test_finalize_selected_rescues_strong_historical_gap_fill_miss() -> None:
     strong_candidate = _historical_candidate(
         "Ensure Payment Integrity",

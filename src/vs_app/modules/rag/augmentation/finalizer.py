@@ -190,7 +190,11 @@ def _finalize_selected(
 
     for row in llm_selected:
         candidate = _candidate_for_selection(row, candidates_by_key)
-        if _is_historical_gap_fill_candidate(candidate) and not _passes_gap_fill_evidence(candidate):
+        if (
+            _is_historical_gap_fill_candidate(candidate)
+            and not _passes_gap_fill_evidence(candidate)
+            and not _passes_high_confidence_historical_selection(row, candidate)
+        ):
             dropped_gap_fill.append(_with_gap_fill_reason(row, candidate, "weak_historical_gap_fill_evidence"))
             continue
         filtered_llm_selected.append(_rewrite_score_reason(row, candidate))
@@ -381,6 +385,27 @@ def _passes_gap_fill_evidence(row: dict | None) -> bool:
         and weighted_support >= 0.75
         and (direct_count >= 1 or implied_count >= 3)
     )
+
+
+def _passes_high_confidence_historical_selection(selection: dict, candidate: dict | None) -> bool:
+    if not candidate:
+        return False
+    confidence = float(selection.get("confidence", 0.0) or 0.0)
+    if confidence < 0.90:
+        return False
+
+    support_count = int(candidate.get("support_count", 0) or 0)
+    direct_count = int(candidate.get("direct_count", 0) or 0)
+    implied_count = int(candidate.get("implied_count", 0) or 0)
+    best_score = float(candidate.get("best_support_score", 0.0) or 0.0)
+    avg_score = float(candidate.get("avg_support_score", 0.0) or 0.0)
+    weighted_support = float(candidate.get("weighted_support_count", 0.0) or 0.0)
+
+    if best_score < 0.62 or weighted_support < 0.50:
+        return False
+    if direct_count >= 1 and support_count >= 2:
+        return True
+    return implied_count >= 4 and avg_score >= 0.58
 
 
 def _gap_fill_priority(row: dict) -> tuple[float, float, float, int, int]:

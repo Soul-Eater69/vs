@@ -127,8 +127,10 @@ def test_finalize_selected_keeps_confident_historical_llm_selection() -> None:
 
 
 def test_finalize_selected_keeps_seventy_confidence_historical_llm_selection() -> None:
-    candidate = _historical_candidate("Ensure Payment Integrity", best=0.696, avg=0.58, support=3)
-    candidate["weighted_support_count"] = 0.7
+    candidate = _historical_candidate("Ensure Payment Integrity", best=0.50, avg=0.40, support=1)
+    candidate["direct_count"] = 0
+    candidate["implied_count"] = 1
+    candidate["weighted_support_count"] = 0.1
 
     selected = _selected("Ensure Payment Integrity")
     selected["confidence"] = 0.70

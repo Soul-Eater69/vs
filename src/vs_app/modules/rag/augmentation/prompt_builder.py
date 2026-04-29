@@ -94,6 +94,66 @@ HISTORICAL-SUPPORTED CANDIDATES:
 {candidate_blocks}"""
 
 
+def build_final_consolidation_prompt(
+    *,
+    query_for_prompt: str,
+    candidate_options: List[dict],
+    direct_selected: List[dict],
+    historical_selected: List[dict],
+    auto_selected: List[dict] | None = None,
+    rescued_confirmed: List[dict] | None = None,
+    rescued_historical: List[dict] | None = None,
+) -> str:
+    candidates_by_key = _candidate_lookup(candidate_options)
+    auto_blocks = _selection_blocks(auto_selected or [], candidates_by_key)
+    direct_blocks = _selection_blocks(direct_selected, candidates_by_key)
+    historical_blocks = _selection_blocks(historical_selected, candidates_by_key)
+    confirmed_blocks = _selection_blocks(rescued_confirmed or [], candidates_by_key)
+    rescued_blocks = _selection_blocks(rescued_historical or [], candidates_by_key)
+    option_blocks = _candidate_blocks(_order_candidates_for_llm(candidate_options))
+
+    return f"""IDEA CARD:
+
+{query_for_prompt}
+
+TASK:
+You are the final value-stream adjudicator. Two advisory passes have already reviewed this
+idea card:
+- Direct LLM: direct semantic/material fit.
+- Historic LLM: pattern-induced gap fill from similar past tickets.
+
+Do not mechanically union the two passes. Produce one final selected list.
+
+DECISION POLICY:
+- Keep a Direct LLM pick when the idea card materially requires that business workflow.
+- Keep a Historic LLM pick when historical analogs reveal a distinct downstream workflow that
+  is likely part of this initiative, even if the wording is not explicit.
+- Reject a Historic LLM pick when the rationale is generic, would apply to almost any healthcare
+  initiative, or is only an adjacent downstream possibility.
+- If Direct and Historic disagree, decide from the business facts in the idea card plus the
+  analog evidence, not from retrieval score, rank, lane, or support count.
+- Avoid duplicate/overlapping streams unless they represent different operational work.
+- Prefer a precise final set over padding the list. Reasons must explain business fit only.
+
+AUTO / RESCUE PROPOSALS:
+{auto_blocks or "None."}
+
+DIRECT LLM PROPOSALS:
+{direct_blocks or "None."}
+
+HISTORIC LLM PROPOSALS:
+{historical_blocks or "None."}
+
+CONFIRMED DIRECT RESCUE PROPOSALS:
+{confirmed_blocks or "None."}
+
+HISTORICAL GAP-FILL RESCUE PROPOSALS:
+{rescued_blocks or "None."}
+
+ALLOWED VALUE-STREAM OPTIONS AND EVIDENCE:
+{option_blocks}"""
+
+
 def _candidate_blocks(ordered_candidates: List[dict]) -> str:
     blocks = []
     for idx, row in enumerate(ordered_candidates, start=1):
@@ -150,6 +210,49 @@ def _candidate_blocks(ordered_candidates: List[dict]) -> str:
 
         blocks.append("\n".join(lines))
 
+    return "\n\n".join(blocks)
+
+
+def _selection_blocks(selected_rows: List[dict], candidates_by_key: dict[str, dict]) -> str:
+    blocks = []
+    for idx, row in enumerate(selected_rows, start=1):
+        candidate = _candidate_for_selection(row, candidates_by_key)
+        name = str(row.get("entity_name") or candidate.get("entity_name") or "").strip()
+        if not name:
+            continue
+        confidence = row.get("confidence")
+        confidence_text = ""
+        if confidence is not None:
+            try:
+                confidence_text = f"Confidence: {float(confidence):.2f}"
+            except (TypeError, ValueError):
+                confidence_text = f"Confidence: {confidence}"
+
+        lines = [
+            f"{idx}. {name}",
+            f"Entity ID: {row.get('entity_id') or candidate.get('entity_id') or ''}",
+        ]
+        if confidence_text:
+            lines.append(confidence_text)
+        reason = str(row.get("reason") or "").strip()
+        if reason:
+            lines.append(f"Pass rationale: {reason[:500]}")
+        description = str(candidate.get("description") or "").strip()
+        if description:
+            lines.append(f"Value-stream definition: {description[:320]}")
+        if candidate.get("from_historical"):
+            lines.append(
+                "Historical evidence: "
+                f"{int(candidate.get('support_count', 0) or 0)} ticket signals "
+                f"({int(candidate.get('direct_count', 0) or 0)} direct, "
+                f"{int(candidate.get('implied_count', 0) or 0)} implied)."
+            )
+        reasons = [str(text).strip() for text in (candidate.get("historical_reasons") or []) if str(text).strip()]
+        if reasons:
+            lines.append("Analog examples:")
+            for reason_text in reasons[:2]:
+                lines.append(f"  - {reason_text[:300]}")
+        blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
 
@@ -342,6 +445,28 @@ def _overlap_candidates(row: dict, candidates: List[dict]) -> List[str]:
         if len(shared) >= 2:
             overlaps.append(other_name)
     return overlaps
+
+
+def _candidate_lookup(candidates: List[dict]) -> dict[str, dict]:
+    lookup: dict[str, dict] = {}
+    for row in candidates:
+        name_key = _norm_key(str(row.get("entity_name") or ""))
+        id_key = _norm_key(str(row.get("entity_id") or ""))
+        if name_key:
+            lookup[f"name:{name_key}"] = row
+        if id_key:
+            lookup[f"id:{id_key}"] = row
+    return lookup
+
+
+def _candidate_for_selection(row: dict, lookup: dict[str, dict]) -> dict:
+    entity_id = _norm_key(str(row.get("entity_id") or ""))
+    entity_name = _norm_key(str(row.get("entity_name") or ""))
+    return lookup.get(f"id:{entity_id}") or lookup.get(f"name:{entity_name}") or {}
+
+
+def _norm_key(value: str) -> str:
+    return " ".join((value or "").strip().lower().split())
 
 
 def _name_tokens(name: str) -> set[str]:

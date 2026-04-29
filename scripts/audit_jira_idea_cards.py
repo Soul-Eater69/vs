@@ -35,11 +35,20 @@ An idea card may be named "idea card", or it may be a linked/attached deck, prop
 business case, executive summary, initiative document, PPT/PDF/DOCX, or SharePoint link
 that likely contains the idea-card content.
 
+Important link rules:
+- If the description says the idea card is in the attachment section, attached, or "see attachment",
+  then has_idea_card=true, source_location="attachment_section", and link="".
+- Do NOT use a nearby Gate 0 estimate, estimate workbook, SEW, architecture, bill of materials,
+  CDD, Excel, xls, xlsx, or xlsm link as the idea-card link.
+- Only return a link when the URL itself is explicitly on the idea-card/intake-form line or clearly
+  labeled as the idea card link.
+
 Return ONLY JSON:
 {
   "has_idea_card": true|false,
   "confidence": 0.0-1.0,
   "link": "best idea-card URL or empty string",
+  "source_location": "description_link|attachment_section|description_text|none",
   "source_text": "short phrase from the description that supports this",
   "reason": "one short reason"
 }
@@ -86,7 +95,96 @@ def _looks_like_sharepoint(url: str) -> bool:
     return "sharepoint.com" in host or "sharepoint-df.com" in host or "my.sharepoint" in host
 
 
+def _idea_card_attachment_statement(text: str) -> str:
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "idea card" not in lowered and "intake form" not in lowered:
+            continue
+        if any(marker in lowered for marker in ("see attachment", "attachment section", "attached")):
+            return line.strip()
+    return ""
+
+
+def _line_for_url(text: str, url: str) -> str:
+    if not url:
+        return ""
+    for line in text.splitlines():
+        if url in line:
+            return line.strip()
+    return ""
+
+
+def _is_bad_neighbor_link(line: str, url: str) -> bool:
+    lowered_line = line.lower()
+    lowered_url = url.lower()
+    bad_line_markers = (
+        "gate 0",
+        "estimate",
+        "workbook",
+        "sew",
+        "architecture",
+        "bill of materials",
+        "cdd",
+    )
+    bad_file_markers = (".xls", ".xlsx", ".xlsm", "estimate", "workbook", "gate0", "gate-0")
+    return any(marker in lowered_line for marker in bad_line_markers) or any(
+        marker in lowered_url for marker in bad_file_markers
+    )
+
+
+def _valid_idea_card_link(text: str, url: str) -> bool:
+    if not url:
+        return False
+    line = _line_for_url(text, url)
+    lowered_line = line.lower()
+    if _is_bad_neighbor_link(line, url):
+        return False
+    return (
+        "idea card" in lowered_line
+        or "intake form" in lowered_line
+        or "business case" in lowered_line
+        or "executive summary" in lowered_line
+    )
+
+
+def _normalize_verdict(verdict: dict[str, Any], description: str) -> dict[str, Any]:
+    verdict = dict(verdict)
+    attachment_statement = _idea_card_attachment_statement(description)
+    if attachment_statement:
+        verdict["has_idea_card"] = True
+        verdict["link"] = ""
+        verdict["source_location"] = "attachment_section"
+        verdict["source_text"] = attachment_statement
+        verdict["reason"] = "Description says the idea card is in the attachment section; no direct description link."
+        verdict["confidence"] = max(float(verdict.get("confidence") or 0), 0.9)
+        return verdict
+
+    link = str(verdict.get("link") or "").strip()
+    if link and not _valid_idea_card_link(description, link):
+        verdict["link"] = ""
+        verdict["source_location"] = "description_text" if verdict.get("has_idea_card") else "none"
+        verdict["reason"] = "LLM-proposed link was not explicitly labeled as the idea card link."
+    elif link:
+        verdict["source_location"] = "description_link"
+    else:
+        verdict["source_location"] = verdict.get("source_location") or (
+            "description_text" if verdict.get("has_idea_card") else "none"
+        )
+    return verdict
+
+
 def _heuristic(text: str, urls: list[str]) -> dict[str, Any]:
+    attachment_statement = _idea_card_attachment_statement(text)
+    if attachment_statement:
+        return {
+            "has_idea_card": True,
+            "confidence": 0.9,
+            "link": "",
+            "source_location": "attachment_section",
+            "source_text": attachment_statement,
+            "reason": "Description says the idea card is in the attachment section.",
+        }
+
     lowered = text.lower()
     has_phrase = any(
         phrase in lowered
@@ -103,12 +201,13 @@ def _heuristic(text: str, urls: list[str]) -> dict[str, Any]:
     likely_urls = [
         url
         for url in urls
-        if any(token in url.lower() for token in ("idea", "card", "ppt", "pdf", "doc", "sharepoint"))
+        if _valid_idea_card_link(text, url)
     ]
     return {
         "has_idea_card": bool(has_phrase or likely_urls),
         "confidence": 0.65 if has_phrase or likely_urls else 0.25,
         "link": likely_urls[0] if likely_urls else "",
+        "source_location": "description_link" if likely_urls else ("description_text" if has_phrase else "none"),
         "source_text": "",
         "reason": "Heuristic match only; LLM disabled.",
     }
@@ -137,10 +236,11 @@ Description:
             "has_idea_card": False,
             "confidence": 0.0,
             "link": "",
+            "source_location": "none",
             "source_text": "",
             "reason": f"Could not parse LLM response: {raw[:200]}",
         }
-    return parsed
+    return _normalize_verdict(parsed, description)
 
 
 async def _ids_from_jql(ticket_client: Any, jql: str, limit: int | None, page_size: int) -> list[str]:
@@ -200,6 +300,7 @@ async def run(args: argparse.Namespace) -> None:
                     "has_idea_card": bool(verdict.get("has_idea_card")),
                     "confidence": verdict.get("confidence", 0),
                     "idea_card_link": verdict.get("link", "") or "",
+                    "source_location": verdict.get("source_location", "") or "",
                     "is_sharepoint_link": _looks_like_sharepoint(str(verdict.get("link", ""))),
                     "all_description_links": " | ".join(found_urls),
                     "source_text": verdict.get("source_text", "") or "",

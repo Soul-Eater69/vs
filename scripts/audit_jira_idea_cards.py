@@ -41,7 +41,8 @@ that likely contains the idea-card content.
 
 Important link rules:
 - If the description says the idea card is in the attachment section, attached, or "see attachment",
-  then has_idea_card=true, source_location="attachment_section", and link="".
+  then has_idea_card=true. If there is also an explicit idea-card URL in description, keep that URL
+  with source_location="description_link"; otherwise source_location="attachment_section" and link="".
 - Do NOT use a nearby Gate 0 estimate, estimate workbook, SEW, architecture, bill of materials,
   CDD, Excel, xls, xlsx, or xlsm link as the idea-card link.
 - Only return a link when the URL itself is explicitly on the idea-card/intake-form line or clearly
@@ -159,52 +160,83 @@ def _valid_idea_card_link(text: str, url: str, source_text: str = "") -> bool:
     return bool(source_text and url in text and _has_idea_card_label(source_text))
 
 
+def _extension_rank(url: str) -> int:
+    path = unquote(urlparse(url).path).lower()
+    preferred = (".pptx", ".ppt", ".pdf", ".docx", ".doc", ".pptm")
+    for idx, ext in enumerate(preferred):
+        if path.endswith(ext):
+            return idx
+    return len(preferred)
+
+
+def _candidate_idea_card_urls(text: str, source_text: str = "") -> list[str]:
+    urls = _urls(text)
+    strict = [url for url in urls if _valid_idea_card_link(text, url, source_text)]
+    if strict:
+        return strict
+
+    # Jira rendering can separate label text and raw URL across lines; keep a relaxed fallback.
+    if not _has_idea_card_label(text) and not _has_idea_card_label(source_text):
+        return []
+
+    relaxed = [url for url in urls if not _is_bad_neighbor_link(source_text, url)]
+    return sorted(relaxed, key=_extension_rank)
+
+
 def _normalize_verdict(verdict: dict[str, Any], description: str) -> dict[str, Any]:
     verdict = dict(verdict)
-    attachment_statement = _idea_card_attachment_statement(description)
-    if attachment_statement:
-        verdict["has_idea_card"] = True
-        verdict["link"] = ""
-        verdict["source_location"] = "attachment_section"
-        verdict["source_text"] = attachment_statement
-        verdict["reason"] = "Description says the idea card is in the attachment section; no direct description link."
-        verdict["confidence"] = max(float(verdict.get("confidence") or 0), 0.9)
-        return verdict
 
     link = str(verdict.get("link") or "").strip()
     source_text = str(verdict.get("source_text") or "")
-    if link and not _valid_idea_card_link(description, link, source_text):
+    attachment_statement = _idea_card_attachment_statement(description)
+
+    normalized_link = ""
+    normalized_reason = ""
+    if link and _valid_idea_card_link(description, link, source_text):
+        normalized_link = link
+    else:
         # LLM sometimes returns a transformed SharePoint URL; remap to a URL we actually extracted.
-        candidate_urls = [url for url in _urls(description) if _valid_idea_card_link(description, url, source_text)]
+        candidate_urls = _candidate_idea_card_urls(description, source_text)
         if candidate_urls:
-            verdict["link"] = candidate_urls[0]
+            normalized_link = candidate_urls[0]
+            normalized_reason = "Mapped labeled idea-card text to extracted description URL."
+
+    if attachment_statement:
+        verdict["has_idea_card"] = True
+        verdict["confidence"] = max(float(verdict.get("confidence") or 0), 0.9)
+        if normalized_link:
+            verdict["link"] = normalized_link
             verdict["source_location"] = "description_link"
-            verdict["reason"] = "Mapped labeled idea-card text to extracted description URL."
+            verdict["source_text"] = source_text or attachment_statement
+            verdict["reason"] = (
+                "Description references attachments and also includes an explicit idea-card link."
+                if not normalized_reason
+                else normalized_reason
+            )
         else:
             verdict["link"] = ""
-            verdict["source_location"] = "description_text" if verdict.get("has_idea_card") else "none"
-            verdict["reason"] = "LLM-proposed link was not explicitly labeled as the idea card link."
-    elif link:
+            verdict["source_location"] = "attachment_section"
+            verdict["source_text"] = attachment_statement
+            verdict["reason"] = "Description says the idea card is in the attachment section; no direct description link."
+        return verdict
+
+    if normalized_link:
+        verdict["link"] = normalized_link
         verdict["source_location"] = "description_link"
+        if normalized_reason:
+            verdict["reason"] = normalized_reason
     else:
+        verdict["link"] = ""
         verdict["source_location"] = verdict.get("source_location") or (
             "description_text" if verdict.get("has_idea_card") else "none"
         )
+        if verdict.get("has_idea_card"):
+            verdict["reason"] = verdict.get("reason") or "Idea card is mentioned, but no explicit idea-card URL was validated."
     return verdict
 
 
 def _heuristic(text: str, urls: list[str]) -> dict[str, Any]:
     attachment_statement = _idea_card_attachment_statement(text)
-    if attachment_statement:
-        return {
-            "has_idea_card": True,
-            "confidence": 0.9,
-            "link": "",
-            "source_location": "attachment_section",
-            "source_text": attachment_statement,
-            "reason": "Description says the idea card is in the attachment section.",
-        }
-
     lowered = text.lower()
     has_phrase = any(
         phrase in lowered
@@ -218,11 +250,26 @@ def _heuristic(text: str, urls: list[str]) -> dict[str, Any]:
             "powerpoint",
         )
     )
-    likely_urls = [
-        url
-        for url in urls
-        if _valid_idea_card_link(text, url)
-    ]
+    likely_urls = _candidate_idea_card_urls(text)
+    if attachment_statement:
+        if likely_urls:
+            return {
+                "has_idea_card": True,
+                "confidence": 0.9,
+                "link": likely_urls[0],
+                "source_location": "description_link",
+                "source_text": attachment_statement,
+                "reason": "Description references attachments and includes an explicit idea-card link.",
+            }
+        return {
+            "has_idea_card": True,
+            "confidence": 0.9,
+            "link": "",
+            "source_location": "attachment_section",
+            "source_text": attachment_statement,
+            "reason": "Description says the idea card is in the attachment section.",
+        }
+
     return {
         "has_idea_card": bool(has_phrase or likely_urls),
         "confidence": 0.65 if has_phrase or likely_urls else 0.25,

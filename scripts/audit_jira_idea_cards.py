@@ -4,6 +4,7 @@ Examples:
   py -3 scripts/audit_jira_idea_cards.py --jql "project = IDMT ORDER BY updated DESC" --limit 200
   py -3 scripts/audit_jira_idea_cards.py --tickets IDMT-15181 IDMT-18437
   py -3 scripts/audit_jira_idea_cards.py --input-ticket-ids data/tickets.json --no-llm
+  py -3 scripts/audit_jira_idea_cards.py --jql "project = IDMT" --concurrency 10
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import asyncio
 import csv
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
 DEFAULT_MODEL = "gpt-5-mini-idp"
+DEFAULT_CONCURRENCY = int(os.environ.get("AUDIT_MAX_CONCURRENT", "5"))
 
 SYSTEM_PROMPT = """You identify whether a Jira ticket description contains or points to an idea card.
 
@@ -267,6 +270,40 @@ async def _fetch_description(ticket_client: Any, ticket_id: str) -> tuple[str, s
     return str(fields.get("summary") or ""), _description_to_text(fields.get("description"))
 
 
+async def _audit_one_ticket(
+    ticket_client: Any,
+    llm_client: Any,
+    sem: asyncio.Semaphore,
+    ticket_id: str,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    async with sem:
+        try:
+            summary, description = await _fetch_description(ticket_client, ticket_id)
+            found_urls = _urls(description)
+            verdict = (
+                _heuristic(description, found_urls)
+                if llm_client is None
+                else await asyncio.to_thread(_ask_llm, llm_client, ticket_id, summary, description, found_urls)
+            )
+            row = {
+                "ticket_id": ticket_id,
+                "summary": summary,
+                "has_idea_card": bool(verdict.get("has_idea_card")),
+                "confidence": verdict.get("confidence", 0),
+                "idea_card_link": verdict.get("link", "") or "",
+                "source_location": verdict.get("source_location", "") or "",
+                "is_sharepoint_link": _looks_like_sharepoint(str(verdict.get("link", ""))),
+                "all_description_links": " | ".join(found_urls),
+                "source_text": verdict.get("source_text", "") or "",
+                "reason": verdict.get("reason", "") or "",
+            }
+            logger.info("[%s] idea_card=%s link=%s", ticket_id, row["has_idea_card"], row["idea_card_link"])
+            return ticket_id, row, None
+        except Exception as exc:
+            logger.warning("[%s] failed: %s", ticket_id, exc)
+            return ticket_id, None, str(exc)
+
+
 async def run(args: argparse.Namespace) -> None:
     llm_client = try_build_llm(enable=not args.no_llm, model=args.llm_model)
     rows: list[dict[str, Any]] = []
@@ -285,32 +322,18 @@ async def run(args: argparse.Namespace) -> None:
         if not ticket_ids:
             raise SystemExit("Pass --jql, --tickets, or --input-ticket-ids.")
 
-        for ticket_id in ticket_ids:
-            try:
-                summary, description = await _fetch_description(ticket_client, ticket_id)
-                found_urls = _urls(description)
-                verdict = (
-                    _heuristic(description, found_urls)
-                    if llm_client is None
-                    else await asyncio.to_thread(_ask_llm, llm_client, ticket_id, summary, description, found_urls)
-                )
-                row = {
-                    "ticket_id": ticket_id,
-                    "summary": summary,
-                    "has_idea_card": bool(verdict.get("has_idea_card")),
-                    "confidence": verdict.get("confidence", 0),
-                    "idea_card_link": verdict.get("link", "") or "",
-                    "source_location": verdict.get("source_location", "") or "",
-                    "is_sharepoint_link": _looks_like_sharepoint(str(verdict.get("link", ""))),
-                    "all_description_links": " | ".join(found_urls),
-                    "source_text": verdict.get("source_text", "") or "",
-                    "reason": verdict.get("reason", "") or "",
-                }
+        concurrency = max(1, args.concurrency)
+        logger.info("Auditing %d tickets (concurrency=%d, llm=%s)", len(ticket_ids), concurrency, llm_client is not None)
+        sem = asyncio.Semaphore(concurrency)
+        gathered = await asyncio.gather(
+            *[_audit_one_ticket(ticket_client, llm_client, sem, ticket_id) for ticket_id in ticket_ids]
+        )
+
+        for ticket_id, row, error in gathered:
+            if error:
+                errors[ticket_id] = error
+            elif row is not None:
                 rows.append(row)
-                logger.info("[%s] idea_card=%s link=%s", ticket_id, row["has_idea_card"], row["idea_card_link"])
-            except Exception as exc:
-                errors[ticket_id] = str(exc)
-                logger.warning("[%s] failed: %s", ticket_id, exc)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -355,6 +378,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-llm", action="store_true")
     parser.add_argument("--llm-model", default=DEFAULT_MODEL)
     parser.add_argument("--verify-ssl", action="store_true")
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     return parser.parse_args()
 
 

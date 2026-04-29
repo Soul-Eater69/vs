@@ -100,6 +100,22 @@ def _looks_like_sharepoint(url: str) -> bool:
     return "sharepoint.com" in host or "sharepoint-df.com" in host or "my.sharepoint" in host
 
 
+def _has_clear_file_reference(verdict: dict[str, Any]) -> bool:
+    link = str(verdict.get("link") or "").strip()
+    if link:
+        return True
+    return str(verdict.get("source_location") or "") == "attachment_section"
+
+
+def _clear_file_location(verdict: dict[str, Any]) -> str:
+    link = str(verdict.get("link") or "").strip()
+    if link:
+        return "description_link"
+    if str(verdict.get("source_location") or "") == "attachment_section":
+        return "attachment_section"
+    return "none"
+
+
 def _idea_card_attachment_statement(text: str) -> str:
     for line in text.splitlines():
         lowered = line.lower()
@@ -360,6 +376,8 @@ async def _audit_one_ticket(
                 "all_description_links": " | ".join(found_urls),
                 "source_text": verdict.get("source_text", "") or "",
                 "reason": verdict.get("reason", "") or "",
+                "has_clear_file_reference": _has_clear_file_reference(verdict),
+                "clear_file_location": _clear_file_location(verdict),
             }
             logger.info("[%s] idea_card=%s link=%s", ticket_id, row["has_idea_card"], row["idea_card_link"])
             return ticket_id, row, None
@@ -403,6 +421,8 @@ async def run(args: argparse.Namespace) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "jira_idea_card_description_audit.csv"
     json_path = out_dir / "jira_idea_card_description_audit.json"
+    clear_csv_path = out_dir / "jira_idea_card_clear_file_only.csv"
+    clear_json_path = out_dir / "jira_idea_card_clear_file_only.json"
 
     if rows:
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
@@ -418,17 +438,47 @@ async def run(args: argparse.Namespace) -> None:
             "errors": len(errors),
             "with_idea_card": sum(1 for row in rows if row["has_idea_card"]),
             "with_sharepoint_idea_card_link": sum(1 for row in rows if row["is_sharepoint_link"]),
+            "with_clear_file_reference": sum(1 for row in rows if row["has_clear_file_reference"]),
+            "description_only_mentions": sum(
+                1
+                for row in rows
+                if row["has_idea_card"] and not row["has_clear_file_reference"]
+            ),
         },
         "tickets": rows,
         "errors": errors,
     }
     json_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    clear_rows = [row for row in rows if row["has_clear_file_reference"]]
+    if clear_rows:
+        with clear_csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(clear_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(clear_rows)
+    else:
+        clear_csv_path.write_text("", encoding="utf-8")
+
+    clear_output = {
+        "summary": {
+            "tickets_with_clear_file_reference": len(clear_rows),
+            "total_tickets_processed": len(rows),
+            "errors": len(errors),
+        },
+        "tickets": clear_rows,
+        "errors": errors,
+    }
+    clear_json_path.write_text(json.dumps(clear_output, indent=2, ensure_ascii=False), encoding="utf-8")
+
     print(f"Tickets checked: {len(rows)}")
     print(f"With idea card: {output['summary']['with_idea_card']}")
     print(f"With SharePoint idea-card link: {output['summary']['with_sharepoint_idea_card_link']}")
+    print(f"With clear file reference: {output['summary']['with_clear_file_reference']}")
+    print(f"Description-only mentions: {output['summary']['description_only_mentions']}")
     print(f"CSV: {csv_path}")
     print(f"JSON: {json_path}")
+    print(f"Clear-file CSV: {clear_csv_path}")
+    print(f"Clear-file JSON: {clear_json_path}")
 
 
 def parse_args() -> argparse.Namespace:

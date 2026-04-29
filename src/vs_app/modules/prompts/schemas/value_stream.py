@@ -56,7 +56,12 @@ class SelectedValueStream(BaseModel):
     confidence: float = Field(
         description="0.8-1.0 strong direct alignment, 0.5-0.7 partial, 0.3-0.4 weak but plausible"
     )
-    reason: str = Field(description="Brief: which criteria matched and how")
+    reason: str = Field(
+        description=(
+            "Brief business rationale: explain why the idea card maps to this value stream. "
+            "Do not mention retrieval score, rank, support count, similarity, or lane name."
+        )
+    )
 
 
 class SelectionResult(BaseModel):

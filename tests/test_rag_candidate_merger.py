@@ -237,6 +237,9 @@ def test_merge_candidate_sources_auto_selects_strong_confirmed_candidate_with_fo
     assert [selected["entity_name"] for selected in result["auto_selected_value_streams"]] == [
         "Appeal Decision"
     ]
+    reason = result["auto_selected_value_streams"][0]["reason"]
+    assert "claim appeal workflow" in reason
+    assert not _has_score_language(reason)
     assert result["llm_candidates"] == []
 
 
@@ -360,6 +363,9 @@ def test_merge_candidate_sources_still_auto_selects_extreme_historical_only_cons
     assert [selected["entity_name"] for selected in result["auto_selected_value_streams"]] == [
         "Extreme Historical Candidate"
     ]
+    reason = result["auto_selected_value_streams"][0]["reason"]
+    assert "repeated matching workflow" in reason
+    assert not _has_score_language(reason)
 
 
 def test_merge_candidate_sources_admits_repeated_implied_recovery_when_weighted_support_is_diluted() -> None:
@@ -387,3 +393,18 @@ def test_merge_candidate_sources_admits_repeated_implied_recovery_when_weighted_
     assert row["candidate_lane"] == "historical_recall"
     assert row["candidate_status"] == "sent_to_llm"
     assert row["candidate_status_reason"] == "protected_historical_lane"
+
+
+def _has_score_language(reason: str) -> bool:
+    lower = reason.lower()
+    return any(
+        marker in lower
+        for marker in (
+            "score",
+            "similarity",
+            "support count",
+            "historical tickets",
+            "weighted support",
+            "rank",
+        )
+    )

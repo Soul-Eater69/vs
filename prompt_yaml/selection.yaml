@@ -28,6 +28,10 @@ system: |
 
   Reason:
   Provide a brief concrete business reason for each selected value stream.
+  Explain what work, workflow, stakeholder impact, or downstream capability in the idea card
+  makes the value stream relevant.
+  Do not cite retrieval scores, rank positions, support counts, similarity values, or selection
+  criteria as the reason; those are only internal evidence.
 
   Retrieval scores are supporting context only. Do not require exact wording overlap.
 

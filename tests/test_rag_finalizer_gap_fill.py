@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vs_app.modules.rag.augmentation.finalizer import _finalize_selected
+from vs_app.modules.rag.augmentation.finalizer import _finalize_selected, _split_llm_candidates
 
 
 def _historical_candidate(name: str, *, best: float, avg: float, support: int = 3) -> dict:
@@ -17,6 +17,8 @@ def _historical_candidate(name: str, *, best: float, avg: float, support: int = 
         "best_support_score": best,
         "avg_support_score": avg,
         "supporting_ticket_ids": [f"IDMT-{idx}" for idx in range(1, support + 1)],
+        "description": f"{name} business workflow.",
+        "historical_reasons": ["[IDMT-1 / direct] recurring downstream workflow analog"],
     }
 
 
@@ -43,6 +45,8 @@ def _confirmed_candidate(
         "best_support_score": best,
         "avg_support_score": 0.62,
         "supporting_ticket_ids": [f"IDMT-{idx}" for idx in range(1, support + 1)],
+        "description": f"{name} business workflow.",
+        "historical_reasons": ["[IDMT-1 / direct] recurring direct workflow analog"],
     }
 
 
@@ -53,6 +57,34 @@ def _selected(name: str) -> dict:
         "confidence": 0.72,
         "reason": "LLM selected",
     }
+
+
+def test_split_llm_candidates_keeps_direct_and_historical_passes_disjoint() -> None:
+    direct, historical = _split_llm_candidates(
+        [
+            {
+                "entity_name": "Confirmed",
+                "candidate_lane": "confirmed_direct",
+                "from_semantic": True,
+                "from_historical": True,
+            },
+            {
+                "entity_name": "Historical",
+                "candidate_lane": "historical_recall",
+                "from_semantic": False,
+                "from_historical": True,
+            },
+            {
+                "entity_name": "Semantic",
+                "candidate_lane": "semantic_direct",
+                "from_semantic": True,
+                "from_historical": False,
+            },
+        ]
+    )
+
+    assert [row["entity_name"] for row in direct] == ["Confirmed", "Semantic"]
+    assert [row["entity_name"] for row in historical] == ["Historical"]
 
 
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:
@@ -92,6 +124,31 @@ def test_finalize_selected_rescues_strong_historical_gap_fill_miss() -> None:
     assert [row["entity_name"] for row in rescued] == ["Ensure Payment Integrity"]
     assert [row["entity_name"] for row in final_selected] == ["Ensure Payment Integrity"]
     assert final_selected[0]["selection_source"] == "historical_gap_fill_rescue"
+    assert "recurring downstream workflow analog" in final_selected[0]["reason"]
+    assert not _has_score_language(final_selected[0]["reason"])
+
+
+def test_finalize_selected_keeps_dense_single_ticket_direct_historical_selection() -> None:
+    candidate = _historical_candidate(
+        "Manage Member Care",
+        best=0.804,
+        avg=0.62,
+        support=9,
+    )
+    candidate["direct_count"] = 9
+    candidate["implied_count"] = 0
+    candidate["supporting_ticket_ids"] = ["IDMT-11455"]
+
+    final_selected, filtered_llm, _rescued_confirmed, rescued, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[_selected("Manage Member Care")],
+        llm_candidates=[candidate],
+    )
+
+    assert dropped == []
+    assert rescued == []
+    assert [row["entity_name"] for row in filtered_llm] == ["Manage Member Care"]
+    assert [row["entity_name"] for row in final_selected] == ["Manage Member Care"]
 
 
 def test_finalize_selected_caps_historical_gap_fill_rescues() -> None:
@@ -146,6 +203,35 @@ def test_finalize_selected_keeps_semantic_selected_outside_gap_fill_budget() -> 
     ]
 
 
+def test_finalize_selected_rewrites_score_based_llm_reason() -> None:
+    llm_selected = {
+        "entity_id": "semantic-1",
+        "entity_name": "Establish Product Offering",
+        "confidence": 0.9,
+        "reason": "Strong semantic score 1.72 with historical hits.",
+    }
+    semantic_candidate = {
+        "entity_id": "semantic-1",
+        "entity_name": "Establish Product Offering",
+        "candidate_lane": "semantic_direct",
+        "from_historical": False,
+        "from_semantic": True,
+        "description": "Creating and launching new products for the market.",
+    }
+
+    final_selected, filtered_llm, _rescued_confirmed, _rescued, _dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[llm_selected],
+        llm_candidates=[semantic_candidate],
+    )
+
+    assert filtered_llm[0]["reason"] == (
+        "Selected because the idea card aligns to creating and launching new products for the market."
+    )
+    assert final_selected[0]["reason"] == filtered_llm[0]["reason"]
+    assert not _has_score_language(final_selected[0]["reason"])
+
+
 def test_finalize_selected_rescues_repeated_confirmed_merged_miss() -> None:
     candidate = _confirmed_candidate(
         "Manage Invoice and Payment Receipt",
@@ -166,6 +252,8 @@ def test_finalize_selected_rescues_repeated_confirmed_merged_miss() -> None:
     assert [row["entity_name"] for row in rescued_confirmed] == ["Manage Invoice and Payment Receipt"]
     assert [row["entity_name"] for row in final_selected] == ["Manage Invoice and Payment Receipt"]
     assert final_selected[0]["selection_source"] == "confirmed_merged_rescue"
+    assert "recurring direct workflow analog" in final_selected[0]["reason"]
+    assert not _has_score_language(final_selected[0]["reason"])
 
 
 def test_finalize_selected_rescues_three_hit_strong_semantic_confirmed_miss() -> None:
@@ -173,6 +261,25 @@ def test_finalize_selected_rescues_three_hit_strong_semantic_confirmed_miss() ->
         "Recover Overpayment",
         semantic=1.408,
         best=0.737,
+        support=3,
+    )
+
+    final_selected, _filtered_llm, rescued_confirmed, rescued_gap_fill, _dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[],
+        llm_candidates=[candidate],
+    )
+
+    assert rescued_gap_fill == []
+    assert [row["entity_name"] for row in rescued_confirmed] == ["Recover Overpayment"]
+    assert [row["entity_name"] for row in final_selected] == ["Recover Overpayment"]
+
+
+def test_finalize_selected_rescues_borderline_best_score_confirmed_miss() -> None:
+    candidate = _confirmed_candidate(
+        "Recover Overpayment",
+        semantic=1.408,
+        best=0.696,
         support=3,
     )
 
@@ -205,3 +312,18 @@ def test_finalize_selected_does_not_rescue_two_hit_borderline_confirmed_candidat
     assert rescued_confirmed == []
     assert rescued_gap_fill == []
     assert dropped == []
+
+
+def _has_score_language(reason: str) -> bool:
+    lower = reason.lower()
+    return any(
+        marker in lower
+        for marker in (
+            "score",
+            "similarity",
+            "support count",
+            "historical hits",
+            "best support",
+            "rank",
+        )
+    )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
@@ -300,21 +301,16 @@ def _should_auto_include_merged(row: dict, *, support_count: int, min_score: flo
 
 def _to_selected_merged(row: dict) -> dict:
     semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
-    best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    support_count = int(row.get("support_count", 0) or 0)
-    direct_count = int(row.get("direct_count", 0) or 0)
-    implied_count = int(row.get("implied_count", 0) or 0)
     weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
     confidence = min(0.95, 0.55 + 0.10 * min(semantic_score, 2.0) + 0.08 * min(weighted_support, 3.0))
 
-    reason = (
-        f"Strong semantic match (score {semantic_score:.3f}) confirmed by "
-        f"{support_count} historical tickets ({direct_count} direct, {implied_count} implied; "
-        f"best similarity {best_score:.3f})."
+    reason = _business_reason_for_candidate(
+        row,
+        fallback=(
+            "Selected because the idea card directly aligns to this value stream and similar "
+            "prior tickets show the same business pattern."
+        ),
     )
-    example_reasons = [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]
-    if example_reasons:
-        reason += f" Example: {example_reasons[0]}"
 
     return {
         "entity_id": str(row.get("entity_id") or "").strip(),
@@ -357,20 +353,17 @@ def _should_send_semantic_to_llm(row: dict) -> bool:
 
 
 def _to_selected_value_stream(row: dict) -> dict:
-    support_count = int(row.get("support_count", 0) or 0)
-    direct_count = int(row.get("direct_count", 0) or 0)
-    implied_count = int(row.get("implied_count", 0) or 0)
     best_score = float(row.get("best_support_score", 0.0) or 0.0)
     weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
     confidence = min(0.92, 0.38 + 0.12 * min(weighted_support, 4.0) + 0.10 * min(best_score, 1.0))
 
-    reason = (
-        f"Recovered from {support_count} similar historical tickets "
-        f"({direct_count} direct, {implied_count} implied; weighted support {weighted_support:.2f})."
+    reason = _business_reason_for_candidate(
+        row,
+        fallback=(
+            "Selected as a historical recovery because similar prior tickets show this "
+            "business workflow recurring with the same initiative pattern."
+        ),
     )
-    example_reasons = [str(text).strip() for text in (row.get("historical_reasons") or []) if str(text).strip()]
-    if example_reasons:
-        reason += f" Example: {example_reasons[0]}"
 
     return {
         "entity_id": str(row.get("entity_id") or "").strip(),
@@ -387,6 +380,48 @@ def _weighted_support_value(row: dict, weighted_key: str, fallback_key: str) -> 
     if weighted is not None:
         return float(weighted or 0.0)
     return float(row.get(fallback_key, 0.0) or 0.0)
+
+
+def _business_reason_for_candidate(row: dict, *, fallback: str) -> str:
+    name = str(row.get("entity_name") or "").strip()
+    description = _sentence_fragment(str(row.get("description") or "").strip())
+    analog = _first_analog_summary(row)
+
+    if description and analog:
+        return (
+            f"Selected because the idea card aligns to {description}. "
+            f"Similar prior work shows the same pattern: {analog}"
+        )
+    if description:
+        return f"Selected because the idea card aligns to {description}."
+    if analog:
+        return (
+            f"Selected because similar prior work shows {name or 'this value stream'} "
+            f"recurring in the same business pattern: {analog}"
+        )
+    return fallback
+
+
+def _first_analog_summary(row: dict) -> str:
+    for reason in row.get("historical_reasons") or []:
+        clean = _clean_analog_reason(str(reason))
+        if clean:
+            return clean[:260]
+    return ""
+
+
+def _clean_analog_reason(reason: str) -> str:
+    clean = " ".join((reason or "").split())
+    clean = re.sub(r"^\[[^\]]+\]\s*", "", clean)
+    return clean.strip()
+
+
+def _sentence_fragment(text: str) -> str:
+    fragment = " ".join((text or "").split()).strip()
+    if not fragment:
+        return ""
+    fragment = fragment[:220].rstrip(" ,;:.")
+    return fragment[:1].lower() + fragment[1:]
 
 
 def _select_llm_candidates(

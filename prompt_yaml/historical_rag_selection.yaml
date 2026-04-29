@@ -45,6 +45,10 @@ system_extension: |
     consideration before favoring a merely plausible semantic-only alternative.
   - If a candidate block lists "Potential overlap/conflict", use that as a cue to choose the
     better-supported neighbor rather than selecting both by default.
+  - Selection reasons must explain the business rationale: which current-card work, downstream
+    workflow, stakeholder impact, or analog business pattern makes the value stream relevant.
+  - Do not write reasons that cite semantic score, rank, support count, similarity, lane name,
+    or selection criteria. Those are evidence inputs, not the user-facing rationale.
 
   Confidence guidance:
   - 0.85-1.0: strong direct fit, or multiple direct analogs with clearly similar summaries
@@ -79,6 +83,8 @@ user: |
   - Repeated direct analogs are stronger than repeated implied analogs.
   - Implied analogs are valid when multiple analogs agree and the functional bridge is clear.
   - Reject when no analog evidence is relevant or the connection is not materially defensible.
+  - For each selected item, explain the business rationale. Do not cite scores, ranks,
+    support counts, similarity values, lane names, or selection criteria in the reason.
 
   CANDIDATE VALUE STREAMS (evaluate every one):
 

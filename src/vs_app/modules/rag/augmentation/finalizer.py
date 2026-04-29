@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import logging
+import re
 from typing import Iterable, List
 
 from .prompt_builder import (
@@ -164,14 +165,15 @@ def _run_selection_pass(
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:
     direct_candidates: List[dict] = []
-    historical_adjudication_candidates: List[dict] = []
+    historical_gap_candidates: List[dict] = []
     for row in llm_candidates:
         lane = str(row.get("candidate_lane") or "")
-        if lane != "historical_recall":
+        is_historical_only = bool(row.get("from_historical")) and not bool(row.get("from_semantic"))
+        if lane == "historical_recall" or is_historical_only:
+            historical_gap_candidates.append(row)
+        else:
             direct_candidates.append(row)
-        if lane in {"historical_recall", "confirmed_direct"} or bool(row.get("from_historical")):
-            historical_adjudication_candidates.append(row)
-    return direct_candidates, historical_adjudication_candidates
+    return direct_candidates, historical_gap_candidates
 
 
 def _finalize_selected(
@@ -191,7 +193,7 @@ def _finalize_selected(
         if _is_historical_gap_fill_candidate(candidate) and not _passes_gap_fill_evidence(candidate):
             dropped_gap_fill.append(_with_gap_fill_reason(row, candidate, "weak_historical_gap_fill_evidence"))
             continue
-        filtered_llm_selected.append(row)
+        filtered_llm_selected.append(_rewrite_score_reason(row, candidate))
 
     selected_so_far = _merge_selected(auto_selected, filtered_llm_selected)
     rescued_confirmed_merged = _rescue_confirmed_merged(
@@ -343,7 +345,7 @@ def _passes_confirmed_merged_evidence(row: dict | None) -> bool:
     best_score = float(row.get("best_support_score", 0.0) or 0.0)
     weighted_support = float(row.get("weighted_support_count", support_count) or 0.0)
 
-    if best_score < 0.70 or weighted_support < 0.75:
+    if best_score < 0.68 or weighted_support < 0.75:
         return False
     if support_count >= 5 and semantic_score >= 1.00:
         return True
@@ -360,6 +362,16 @@ def _passes_gap_fill_evidence(row: dict | None) -> bool:
     avg_score = float(row.get("avg_support_score", 0.0) or 0.0)
     weighted_support = float(row.get("weighted_support_count", 0.0) or 0.0)
     ticket_count = len({str(tid).strip() for tid in (row.get("supporting_ticket_ids") or []) if str(tid).strip()})
+
+    if (
+        ticket_count == 1
+        and direct_count >= 4
+        and support_count >= 4
+        and best_score >= 0.75
+        and avg_score >= 0.60
+        and weighted_support >= 0.75
+    ):
+        return True
 
     return (
         support_count >= 3
@@ -393,16 +405,17 @@ def _confirmed_merged_priority(row: dict) -> tuple[int, float, float, float]:
 def _to_confirmed_merged_selected(row: dict) -> dict:
     support_count = int(row.get("support_count", 0) or 0)
     semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
-    best_score = float(row.get("best_support_score", 0.0) or 0.0)
     confidence = min(0.90, 0.52 + 0.08 * min(support_count, 4) + 0.06 * min(semantic_score, 2.0))
     return {
         "entity_id": str(row.get("entity_id") or "").strip(),
         "entity_name": str(row.get("entity_name") or "").strip(),
         "confidence": round(confidence, 4),
-        "reason": (
-            "Confirmed merged rescue: semantic retrieval and repeated historical evidence both "
-            f"support this value stream ({support_count} historical hits; semantic score "
-            f"{semantic_score:.3f}, best similarity {best_score:.3f})."
+        "reason": _business_reason_for_candidate(
+            row,
+            fallback=(
+                "Selected because the idea card directly aligns to this value stream and similar "
+                "prior work shows the same business pattern."
+            ),
         ),
         "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
@@ -412,24 +425,94 @@ def _to_confirmed_merged_selected(row: dict) -> dict:
 
 def _to_gap_fill_selected(row: dict) -> dict:
     support_count = int(row.get("support_count", 0) or 0)
-    direct_count = int(row.get("direct_count", 0) or 0)
-    implied_count = int(row.get("implied_count", 0) or 0)
     best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    avg_score = float(row.get("avg_support_score", 0.0) or 0.0)
     confidence = min(0.84, 0.44 + 0.08 * min(support_count, 4) + 0.08 * min(best_score, 1.0))
     return {
         "entity_id": str(row.get("entity_id") or "").strip(),
         "entity_name": str(row.get("entity_name") or "").strip(),
         "confidence": round(confidence, 4),
-        "reason": (
-            "Historical gap-fill rescue: repeated analog evidence supports an implied value stream "
-            f"({support_count} tickets; {direct_count} direct, {implied_count} implied; "
-            f"best similarity {best_score:.3f}, average {avg_score:.3f})."
+        "reason": _business_reason_for_candidate(
+            row,
+            fallback=(
+                "Selected as an implied value stream because similar prior tickets show this "
+                "downstream business workflow recurring with the same initiative pattern."
+            ),
         ),
         "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
         "selection_source": "historical_gap_fill_rescue",
     }
+
+
+def _business_reason_for_candidate(row: dict, *, fallback: str) -> str:
+    name = str(row.get("entity_name") or "").strip()
+    description = _sentence_fragment(str(row.get("description") or "").strip())
+    analog = _first_analog_summary(row)
+
+    if description and analog:
+        return (
+            f"Selected because the idea card aligns to {description}. "
+            f"Similar prior work shows the same pattern: {analog}"
+        )
+    if description:
+        return f"Selected because the idea card aligns to {description}."
+    if analog:
+        return f"Selected because similar prior work shows {name or 'this value stream'} recurring in the same business pattern: {analog}"
+    return fallback
+
+
+def _rewrite_score_reason(row: dict, candidate: dict) -> dict:
+    reason = str(row.get("reason") or "")
+    if not _has_score_language(reason):
+        return row
+
+    out = dict(row)
+    out["reason"] = _business_reason_for_candidate(
+        candidate,
+        fallback="Selected because the idea card has a defensible business connection to this value stream.",
+    )
+    return out
+
+
+def _has_score_language(reason: str) -> bool:
+    lower = (reason or "").lower()
+    return any(
+        marker in lower
+        for marker in (
+            "semantic score",
+            "retrieval score",
+            "score ",
+            "score:",
+            "similarity",
+            "support count",
+            "historical hits",
+            "best support",
+            "ranking",
+            "rank ",
+        )
+    )
+
+
+def _first_analog_summary(row: dict) -> str:
+    for reason in row.get("historical_reasons") or []:
+        clean = _clean_analog_reason(str(reason))
+        if clean:
+            return clean[:260]
+    return ""
+
+
+def _clean_analog_reason(reason: str) -> str:
+    clean = " ".join((reason or "").split())
+    clean = re.sub(r"^\[[^\]]+\]\s*", "", clean)
+    return clean.strip()
+
+
+def _sentence_fragment(text: str) -> str:
+    fragment = " ".join((text or "").split()).strip()
+    if not fragment:
+        return ""
+    fragment = fragment[:220].rstrip(" ,;:.")
+    return fragment[:1].lower() + fragment[1:]
 
 
 def _with_gap_fill_reason(row: dict, candidate: dict, reason: str) -> dict:

@@ -12,7 +12,7 @@ def test_split_llm_candidates_separates_historical_gap_lane() -> None:
     direct_candidates, historical_candidates = _split_llm_candidates([direct, historical, semantic])
 
     assert direct_candidates == [direct, semantic]
-    assert historical_candidates == [direct, historical]
+    assert historical_candidates == [historical]
 
 
 def test_historical_gap_prompt_explains_pattern_induced_selection() -> None:

@@ -59,7 +59,10 @@ async def predict_value_streams_stream(
     async def generate():
         from vs_app.modules.rag.query.views import condense_idea_card, clean_ppt_text
         from vs_app.modules.rag.retrieval.semantic_retriever import retrieve_semantic_candidates
-        from vs_app.modules.rag.retrieval.historical_retriever import retrieve_historical_support
+        from vs_app.modules.rag.retrieval.historical_retriever import (
+            filter_historical_result,
+            retrieve_historical_support,
+        )
         from vs_app.modules.rag.augmentation.candidate_merger import merge_candidate_sources
         from vs_app.modules.rag.augmentation.finalizer import generate_value_streams
         from vs_app.modules.rag.fingerprints import build_rag_debug_fingerprints
@@ -106,6 +109,7 @@ async def predict_value_streams_stream(
                 query_for_prompt or cleaned_query,
                 **historical_kwargs,
             )
+            historical = filter_historical_result(historical, exclude_ids)
 
             # Step 4: Merge candidates
             yield _sse("step", {"step": "merge", "label": "Merging semantic and historical candidates..."})

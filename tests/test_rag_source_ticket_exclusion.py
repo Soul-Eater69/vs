@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from vs_app.modules.rag.service import ValueStreamRagCommand, ValueStreamRagService
+from vs_app.modules.rag.retrieval.historical_retriever import filter_historical_result
 
 
 def _minimal_payload() -> dict:
@@ -76,3 +77,31 @@ def test_source_ticket_exclusion_can_be_disabled() -> None:
     )
 
     assert captured["exclude_ticket_ids"] is None
+
+
+def test_filter_historical_result_removes_source_hit_and_rebuilds_support() -> None:
+    result = {
+        "historical_ticket_hits": [
+            {
+                "ticket_id": "IDMT-19761",
+                "best_score": 0.9,
+                "summary_preview": "self match",
+                "direct_vs_names": ["Self Stream"],
+            },
+            {
+                "ticket_id": "IDMT-12167",
+                "best_score": 0.7,
+                "summary_preview": "neighbor",
+                "direct_vs_names": ["Neighbor Stream"],
+            },
+        ],
+        "historical_value_stream_support": [{"entity_name": "Self Stream"}],
+        "historical_source": "summary_faiss",
+    }
+
+    filtered = filter_historical_result(result, ["idmt-19761"])
+
+    assert [hit["ticket_id"] for hit in filtered["historical_ticket_hits"]] == ["IDMT-12167"]
+    assert [row["entity_name"] for row in filtered["historical_value_stream_support"]] == [
+        "Neighbor Stream"
+    ]

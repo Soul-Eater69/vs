@@ -810,3 +810,6 @@ https://react.dev/link/hydration-mismatch
 [browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
 [browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
 [browser] [React Flow]: It looks like you've created a new nodeTypes or edgeTypes object. If this wasn't on purpose please define the nodeTypes/edgeTypes outside of the component or memoize them. Help: https://reactflow.dev/error#002
+ GET / 200 in 661ms (next.js: 382ms, application-code: 279ms)
+ GET / 200 in 112ms (next.js: 21ms, application-code: 91ms)
+ GET / 200 in 51ms (next.js: 9ms, application-code: 42ms)

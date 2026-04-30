@@ -17,7 +17,7 @@ def select_value_streams(
     from .augmentation.finalizer import generate_value_streams
     from .fingerprints import build_rag_debug_fingerprints
     from .query.views import clean_ppt_text, condense_idea_card
-    from .retrieval.historical_retriever import retrieve_historical_support
+    from .retrieval.historical_retriever import filter_historical_result, retrieve_historical_support
     from .retrieval.semantic_retriever import retrieve_semantic_candidates
 
     top_k = min(max(12, fetch_count), 50)
@@ -42,6 +42,7 @@ def select_value_streams(
         max_ticket_hits=min(max(12, fetch_count), 24),
         exclude_ticket_ids=exclude_ticket_ids,
     )
+    historical = filter_historical_result(historical, exclude_ticket_ids)
 
     augmented = merge_candidate_sources(
         semantic_candidates,

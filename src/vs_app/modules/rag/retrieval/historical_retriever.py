@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import re
 from typing import Dict, Iterable, List, Optional
 
 from ..query.views import clean_ppt_text
@@ -20,9 +21,9 @@ def retrieve_historical_support(
     cleaned = clean_ppt_text(query)
 
     excluded = {
-        str(tid).strip().lower()
+        _normalize_ticket_id(tid)
         for tid in (exclude_ticket_ids or [])
-        if str(tid).strip()
+        if _normalize_ticket_id(tid)
     }
 
     if not faiss_index_exists(index_dir=historical_faiss_dir, kind="summaries"):
@@ -47,7 +48,7 @@ def retrieve_historical_support(
         ticket_id = str(meta.get("ticket_id") or "").strip()
         if not ticket_id:
             continue
-        if ticket_id.lower() in excluded:
+        if _normalize_ticket_id(ticket_id) in excluded:
             continue
         if len(ticket_hits) >= max_ticket_hits:
             break
@@ -67,13 +68,41 @@ def retrieve_historical_support(
             "implied_functions_canonical": meta.get("implied_functions_canonical", []),
         })
 
-    vs_support = _build_support_from_faiss_hits(ticket_hits)
+    filtered_hits = filter_ticket_hits(ticket_hits, exclude_ticket_ids)
+    vs_support = _build_support_from_faiss_hits(filtered_hits)
 
     return {
-        "historical_ticket_hits": ticket_hits,
+        "historical_ticket_hits": filtered_hits,
         "historical_value_stream_support": vs_support,
         "historical_source": "summary_faiss",
     }
+
+
+def filter_historical_result(result: dict, exclude_ticket_ids: Optional[Iterable[str]]) -> dict:
+    """Remove excluded source tickets from historical hits and derived support."""
+    filtered_hits = filter_ticket_hits(result.get("historical_ticket_hits", []), exclude_ticket_ids)
+    if len(filtered_hits) == len(result.get("historical_ticket_hits", []) or []):
+        return result
+
+    payload = dict(result)
+    payload["historical_ticket_hits"] = filtered_hits
+    payload["historical_value_stream_support"] = _build_support_from_faiss_hits(filtered_hits)
+    return payload
+
+
+def filter_ticket_hits(ticket_hits: List[dict], exclude_ticket_ids: Optional[Iterable[str]]) -> List[dict]:
+    excluded = {
+        _normalize_ticket_id(tid)
+        for tid in (exclude_ticket_ids or [])
+        if _normalize_ticket_id(tid)
+    }
+    if not excluded:
+        return list(ticket_hits or [])
+    return [
+        hit
+        for hit in (ticket_hits or [])
+        if _normalize_ticket_id(hit.get("ticket_id")) not in excluded
+    ]
 
 
 def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
@@ -241,3 +270,11 @@ def _dedupe_text_list(values: List[str]) -> List[str]:
         seen.add(key)
         out.append(clean)
     return out
+
+
+def _normalize_ticket_id(value: object) -> str:
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    match = re.search(r"\b[A-Z][A-Z0-9_]*-\d+\b", text)
+    return match.group(0) if match else text

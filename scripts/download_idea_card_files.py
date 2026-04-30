@@ -23,18 +23,18 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import argparse
 import csv
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-import requests
 from dotenv import load_dotenv
 
+from vs_app.container import build_ticket_fetcher
 from vs_app.integrations.clients.sharepoint import SharePointClient
 
 load_dotenv()
@@ -73,37 +73,16 @@ def _ext_from_url(url: str) -> str:
     return f".{m.group(1).lower()}" if m else ".bin"
 
 
-def _is_sharepoint(url: str) -> bool:
-    host = urlparse(url).netloc.lower()
-    return "sharepoint.com" in host or "sharepoint-df.com" in host or "my.sharepoint" in host
-
-
-def _download_sharepoint(url: str, sp: SharePointClient) -> tuple[bool, bytes | None, str]:
-    if not sp.access_token:
-        return False, None, "missing_sharepoint_graph_token"
-    item = sp.resolve_browser_url(url)
-    if not item:
-        return False, None, "graph_resolve_failed"
-    download_url = item.get("@microsoft.graph.downloadUrl")
-    if not download_url:
-        return False, None, "missing_graph_download_url"
-    content = sp.get_file_content_by_url(download_url)
-    if content is None:
-        return False, None, "graph_download_failed"
-    return True, content, "ok"
-
-
-def _download_generic(url: str, jira_token: str) -> tuple[bool, bytes | None, str]:
-    headers = {}
-    if jira_token:
-        headers["Authorization"] = f"Bearer {jira_token}"
+async def _download_with_jira_client(ticket_client: Any, url: str) -> tuple[bool, bytes | None, str]:
     try:
-        resp = requests.get(url, headers=headers, timeout=45, allow_redirects=True)
+        content = await ticket_client.download_attachment(url)
     except Exception as exc:
-        return False, None, f"request_exception:{type(exc).__name__}"
-    if resp.status_code != 200:
-        return False, None, f"http_{resp.status_code}"
-    return True, resp.content, "ok"
+        return False, None, f"download_exception:{type(exc).__name__}:{exc}"
+    if not content:
+        return False, None, "empty_content"
+    if not isinstance(content, (bytes, bytearray)):
+        return False, None, f"unexpected_content_type:{type(content).__name__}"
+    return True, bytes(content), "ok"
 
 
 def _candidate_links(row: dict[str, Any]) -> list[str]:
@@ -121,7 +100,7 @@ def _candidate_links(row: dict[str, Any]) -> list[str]:
     return deduped
 
 
-def run(input_path: Path, out_dir: Path) -> tuple[Path, Path]:
+async def run(input_path: Path, out_dir: Path, *, verbose: bool = True) -> tuple[Path, Path]:
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
@@ -133,88 +112,98 @@ def run(input_path: Path, out_dir: Path) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     files_dir = out_dir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
-    jira_token = os.environ.get("JIRA_TOKEN", "")
-    sp = SharePointClient()
+    sharepoint_client = SharePointClient()
 
     report_rows: list[dict[str, Any]] = []
-    for row in rows:
-        ticket_id = str(row.get("ticket_id") or "").strip().upper()
-        if not ticket_id:
-            continue
+    total = len(rows)
+    async with build_ticket_fetcher(source="jira", verify_ssl=False, sharepoint_client=sharepoint_client) as ticket_client:
+        for idx, row in enumerate(rows, start=1):
+            ticket_id = str(row.get("ticket_id") or "").strip().upper()
+            if not ticket_id:
+                continue
 
-        links = _candidate_links(row)
-        if not links:
-            report_rows.append(
-                {
-                    "ticket_id": ticket_id,
-                    "status": "failed",
-                    "saved_path": "",
-                    "selected_link": "",
-                    "reason": "no_candidate_links",
-                    "attempted_links": "",
-                }
-            )
-            continue
-
-        success = False
-        failure_reasons: list[str] = []
-        saved_path = ""
-        selected_link = ""
-        for link in links:
-            ext = _ext_from_url(link)
-            target = files_dir / f"{ticket_id}{ext}"
-            if target.exists() and target.stat().st_size > 0:
-                success = True
-                selected_link = link
-                saved_path = str(target)
+            links = _candidate_links(row)
+            if verbose:
+                print(f"[{idx}/{total}] {ticket_id}: {len(links)} candidate link(s)")
+            if not links:
                 report_rows.append(
                     {
                         "ticket_id": ticket_id,
-                        "status": "already_downloaded",
+                        "status": "failed",
+                        "saved_path": "",
+                        "selected_link": "",
+                        "reason": "no_candidate_links",
+                        "attempted_links": "",
+                    }
+                )
+                continue
+
+            success = False
+            failure_reasons: list[str] = []
+            saved_path = ""
+            selected_link = ""
+            for link in links:
+                ext = _ext_from_url(link)
+                target = files_dir / f"{ticket_id}{ext}"
+                if target.exists() and target.stat().st_size > 0:
+                    success = True
+                    selected_link = link
+                    saved_path = str(target)
+                    report_rows.append(
+                        {
+                            "ticket_id": ticket_id,
+                            "status": "already_downloaded",
+                            "saved_path": saved_path,
+                            "selected_link": selected_link,
+                            "reason": "file_exists",
+                            "attempted_links": " | ".join(links),
+                        }
+                    )
+                    if verbose:
+                        print(f"  -> already_downloaded: {target.name}")
+                    break
+
+                if verbose:
+                    print(f"  -> trying: {link[:120]}")
+                ok, content, reason = await _download_with_jira_client(ticket_client, link)
+
+                if not ok or content is None:
+                    failure_reasons.append(f"{link}=>{reason}")
+                    if verbose:
+                        print(f"     failed: {reason}")
+                    continue
+
+                target.write_bytes(content)
+                success = True
+                selected_link = link
+                saved_path = str(target)
+                if verbose:
+                    print(f"     downloaded: {target.name} ({len(content)} bytes)")
+                report_rows.append(
+                    {
+                        "ticket_id": ticket_id,
+                        "status": "downloaded",
                         "saved_path": saved_path,
                         "selected_link": selected_link,
-                        "reason": "file_exists",
+                        "reason": "ok",
                         "attempted_links": " | ".join(links),
                     }
                 )
                 break
 
-            if _is_sharepoint(link):
-                ok, content, reason = _download_sharepoint(link, sp)
-            else:
-                ok, content, reason = _download_generic(link, jira_token)
-
-            if not ok or content is None:
-                failure_reasons.append(f"{link}=>{reason}")
-                continue
-
-            target.write_bytes(content)
-            success = True
-            selected_link = link
-            saved_path = str(target)
-            report_rows.append(
-                {
-                    "ticket_id": ticket_id,
-                    "status": "downloaded",
-                    "saved_path": saved_path,
-                    "selected_link": selected_link,
-                    "reason": "ok",
-                    "attempted_links": " | ".join(links),
-                }
-            )
-            break
-
-        if not success:
-            report_rows.append(
-                {
-                    "ticket_id": ticket_id,
-                    "status": "failed",
-                    "saved_path": "",
-                    "selected_link": "",
-                    "reason": "; ".join(failure_reasons) if failure_reasons else "unknown_failure",
-                    "attempted_links": " | ".join(links),
-                }
-            )
+            if not success:
+                report_rows.append(
+                    {
+                        "ticket_id": ticket_id,
+                        "status": "failed",
+                        "saved_path": "",
+                        "selected_link": "",
+                        "reason": "; ".join(failure_reasons) if failure_reasons else "unknown_failure",
+                        "attempted_links": " | ".join(links),
+                    }
+                )
+                if verbose:
+                    print(f"  -> failed ticket: {'; '.join(failure_reasons) if failure_reasons else 'unknown_failure'}")
 
     json_out = out_dir / "download_report.json"
     csv_out = out_dir / "download_report.csv"
@@ -242,13 +231,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Download idea-card files by ticket from audit JSON.")
     parser.add_argument("--input", required=True, help="Path to audit JSON containing ticket links.")
     parser.add_argument("--out-dir", default="ticket_data/idea_card_downloads")
+    parser.add_argument("--quiet", action="store_true", help="Suppress per-ticket progress logs.")
     args = parser.parse_args()
 
-    json_out, csv_out = run(Path(args.input), Path(args.out_dir))
+    json_out, csv_out = asyncio.run(run(Path(args.input), Path(args.out_dir), verbose=not args.quiet))
     print(f"JSON report: {json_out}")
     print(f"CSV report: {csv_out}")
 
 
 if __name__ == "__main__":
     main()
-

@@ -86,10 +86,11 @@ async def _download_with_jira_client(ticket_client: Any, url: str) -> tuple[bool
 
 
 def _candidate_links(row: dict[str, Any]) -> list[str]:
-    links: list[str] = []
     primary = str(row.get("idea_card_link") or "").strip()
     if primary:
-        links.append(primary)
+        return [primary]
+
+    links: list[str] = []
     links.extend(_split_links(str(row.get("attachment_links") or "")))
     deduped: list[str] = []
     seen: set[str] = set()

@@ -5,15 +5,14 @@ Input formats supported:
 2) {"tickets": {"IDMT-1": {...record...}, ...}}
 3) [ ...rows... ]
 
-Each row may contain:
+Each row should contain:
 - ticket_id
 - idea_card_link
-- attachment_links (pipe-separated string)
 
 Behavior:
-- For each ticket, tries candidate links in priority order:
-  1) idea_card_link
-  2) attachment_links entries
+- For each ticket, tries only `idea_card_link`.
+- If primary link is missing, mark failed and move on.
+- If primary link download fails, mark failed and move on.
 - Saves first successful download as <ticket_id><ext> under output dir.
 - Writes JSON + CSV report including failure reasons.
 
@@ -60,12 +59,6 @@ def _parse_rows(data: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _split_links(raw: str) -> list[str]:
-    if not raw:
-        return []
-    return [part.strip() for part in raw.split("|") if part.strip()]
-
-
 def _ext_from_url(url: str) -> str:
     path = unquote(urlparse(url).path or "")
     name = path.rsplit("/", 1)[-1]
@@ -89,16 +82,7 @@ def _candidate_links(row: dict[str, Any]) -> list[str]:
     primary = str(row.get("idea_card_link") or "").strip()
     if primary:
         return [primary]
-
-    links: list[str] = []
-    links.extend(_split_links(str(row.get("attachment_links") or "")))
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for link in links:
-        if link not in seen:
-            seen.add(link)
-            deduped.append(link)
-    return deduped
+    return []
 
 
 async def run(input_path: Path, out_dir: Path, *, verbose: bool = True) -> tuple[Path, Path]:

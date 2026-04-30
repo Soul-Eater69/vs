@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
 TOKEN_RE = re.compile(r"[a-z0-9]+")
+FILE_IN_TEXT_RE = re.compile(r"([A-Za-z0-9 _().-]+\.(?:pptx|ppt|pdf|docx|doc|pptm|xlsx|xlsm|xls))", re.IGNORECASE)
 DEFAULT_MODEL = "gpt-5-mini-idp"
 DEFAULT_CONCURRENCY = int(os.environ.get("AUDIT_MAX_CONCURRENT", "5"))
 
@@ -99,6 +100,23 @@ def _urls(text: str) -> list[str]:
 def _looks_like_sharepoint(url: str) -> bool:
     host = url.lower()
     return "sharepoint.com" in host or "sharepoint-df.com" in host or "my.sharepoint" in host
+
+
+def _looks_like_portal_or_proxy(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower()
+    path = unquote(parsed.path or "").lower()
+    query = (parsed.query or "").lower()
+    if "urldefense.com" in host:
+        return True
+    if "servicenow" in host:
+        return True
+    if any(marker in query for marker in ("table=", "sys_id=", "id=ticket", "tab=")):
+        return True
+    if not any(path.endswith(ext) for ext in (".pptx", ".ppt", ".pdf", ".docx", ".doc", ".pptm", ".xlsx", ".xlsm", ".xls")):
+        if any(marker in path for marker in ("/sp", "/nav_to.do", "/browse/")):
+            return True
+    return False
 
 
 def _has_clear_file_reference(verdict: dict[str, Any]) -> bool:
@@ -211,6 +229,42 @@ def _token_set(text: str) -> set[str]:
     return {tok for tok in TOKEN_RE.findall(text.lower()) if len(tok) >= 4 and tok not in stop}
 
 
+def _normalize_filename(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _extract_mentioned_filename(source_text: str) -> str:
+    match = FILE_IN_TEXT_RE.search(source_text or "")
+    return match.group(1).strip() if match else ""
+
+
+def _best_attachment_by_filename(
+    attachments: list[dict[str, str]],
+    source_text: str,
+) -> tuple[str, str]:
+    mentioned = _extract_mentioned_filename(source_text)
+    if not mentioned:
+        return "", ""
+    target = _normalize_filename(mentioned)
+    for att in attachments:
+        filename = str(att.get("filename") or "")
+        url = str(att.get("url") or "")
+        if not filename or _is_bad_neighbor_link(filename, url):
+            continue
+        if _normalize_filename(filename) == target:
+            return url, filename
+    # fallback: substring containment if Jira trims or decorates filenames
+    for att in attachments:
+        filename = str(att.get("filename") or "")
+        url = str(att.get("url") or "")
+        if not filename or _is_bad_neighbor_link(filename, url):
+            continue
+        fn = _normalize_filename(filename)
+        if target in fn or fn in target:
+            return url, filename
+    return "", ""
+
+
 def _select_attachment_link(
     attachments: list[dict[str, str]],
     *,
@@ -278,27 +332,51 @@ def _normalize_verdict(verdict: dict[str, Any], description: str, attachments: l
 
     normalized_link = ""
     normalized_reason = ""
+    selection_strategy = "none"
     if link and _valid_idea_card_link(description, link, source_text):
         normalized_link = link
+        selection_strategy = "llm_direct"
     else:
         # LLM sometimes returns a transformed SharePoint URL; remap to a URL we actually extracted.
         candidate_urls = _candidate_idea_card_urls(description, source_text)
         if candidate_urls:
             normalized_link = candidate_urls[0]
             normalized_reason = "Mapped labeled idea-card text to extracted description URL."
+            selection_strategy = "description_url_map"
+
+    # If description points to an attached file name, prefer the concrete Jira attachment link.
+    by_name_url, by_name_file = _best_attachment_by_filename(attachments, source_text)
+    attachment_hint = "attached" in source_text.lower() or "attachment" in source_text.lower()
+    if by_name_url and (attachment_hint or _looks_like_portal_or_proxy(normalized_link)):
+        normalized_link = by_name_url
+        normalized_reason = f"Matched attachment filename '{by_name_file}' from source text and used Jira attachment URL."
+        selection_strategy = "attachment_filename_match"
+
+    # Never keep portal/proxy links when we have a strong attachment candidate.
+    if normalized_link and _looks_like_portal_or_proxy(normalized_link):
+        best_attachment_url, best_attachment_name = _select_attachment_link(
+            attachments,
+            source_text=source_text,
+            description=description,
+        )
+        if best_attachment_url:
+            normalized_link = best_attachment_url
+            normalized_reason = f"Replaced portal/proxy URL with attachment '{best_attachment_name}'."
+            selection_strategy = "attachment_over_proxy"
 
     if attachment_statement:
         verdict["has_idea_card"] = True
         verdict["confidence"] = max(float(verdict.get("confidence") or 0), 0.9)
         if normalized_link:
             verdict["link"] = normalized_link
-            verdict["source_location"] = "description_link"
+            verdict["source_location"] = "attachment_section" if selection_strategy.startswith("attachment_") else "description_link"
             verdict["source_text"] = source_text or attachment_statement
             verdict["reason"] = (
                 "Description references attachments and also includes an explicit idea-card link."
                 if not normalized_reason
                 else normalized_reason
             )
+            verdict["link_selection_strategy"] = selection_strategy
         else:
             attachment_link, attachment_filename = _select_attachment_link(
                 attachments,
@@ -313,13 +391,15 @@ def _normalize_verdict(verdict: dict[str, Any], description: str, attachments: l
                 if attachment_link
                 else "Description says the idea card is in the attachment section; no direct description link."
             )
+            verdict["link_selection_strategy"] = "attachment_section_pick" if attachment_link else "attachment_section_none"
         return verdict
 
     if normalized_link:
         verdict["link"] = normalized_link
-        verdict["source_location"] = "description_link"
+        verdict["source_location"] = "attachment_section" if selection_strategy.startswith("attachment_") else "description_link"
         if normalized_reason:
             verdict["reason"] = normalized_reason
+        verdict["link_selection_strategy"] = selection_strategy
     else:
         if str(verdict.get("source_location") or "") == "attachment_section":
             attachment_link, attachment_filename = _select_attachment_link(
@@ -331,6 +411,7 @@ def _normalize_verdict(verdict: dict[str, Any], description: str, attachments: l
                 verdict["link"] = attachment_link
                 verdict["source_location"] = "attachment_section"
                 verdict["reason"] = f"Selected attachment '{attachment_filename}' for attachment-section idea card mention."
+                verdict["link_selection_strategy"] = "attachment_section_pick"
                 return verdict
         verdict["link"] = ""
         verdict["source_location"] = verdict.get("source_location") or (
@@ -338,6 +419,7 @@ def _normalize_verdict(verdict: dict[str, Any], description: str, attachments: l
         )
         if verdict.get("has_idea_card"):
             verdict["reason"] = verdict.get("reason") or "Idea card is mentioned, but no explicit idea-card URL was validated."
+        verdict["link_selection_strategy"] = "none"
     return verdict
 
 
@@ -486,6 +568,7 @@ async def _audit_one_ticket(
                 "attachment_count": len(attachments),
                 "attachment_links": " | ".join(attachment_urls),
                 "attachment_filenames": " | ".join(attachment_names),
+                "link_selection_strategy": verdict.get("link_selection_strategy", "none"),
             }
             logger.info("[%s] idea_card=%s link=%s", ticket_id, row["has_idea_card"], row["idea_card_link"])
             return ticket_id, row, None

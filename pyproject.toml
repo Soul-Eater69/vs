@@ -13,7 +13,6 @@ dependencies = [
     "pydantic>=2",
     "python-dotenv",
     "httpx",
-    "neo4j",
     "requests",
     "PyYAML",
 ]
@@ -32,3 +31,16 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["vs_app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-p", "no:cacheprovider"]
+norecursedirs = [
+    ".git",
+    ".pytest_cache",
+    "deprecated",
+    "frontend",
+    "legacy",
+    "node_modules",
+    "pytest-cache-files-*",
+]

@@ -46,6 +46,12 @@ def _ground_truth_from_faiss(ticket_id: str) -> list[str]:
     return []
 
 
+def _source_ticket_exclusions(request: ValueStreamRagRequest) -> list[str] | None:
+    if not request.exclude_source_ticket_from_historical or not request.ticket_id:
+        return None
+    return [request.ticket_id]
+
+
 @router.post("/value-streams/stream")
 async def predict_value_streams_stream(
     request: ValueStreamRagRequest,
@@ -88,7 +94,7 @@ async def predict_value_streams_stream(
 
             # Step 3: Historical FAISS
             yield _sse("step", {"step": "historical", "label": "Searching historical FAISS..."})
-            exclude_ids = [request.ticket_id] if request.ticket_id else None
+            exclude_ids = _source_ticket_exclusions(request)
             historical_kwargs = {
                 "historical_faiss_dir": faiss_dir,
                 "max_ticket_hits": min(max(12, top_k), 24),
@@ -175,6 +181,7 @@ async def predict_value_streams_stream(
                 "warnings": [],
                 "evidence": historical.get("historical_value_stream_support", []),
                 "debug": debug,
+                "historical_excluded_ticket_ids": exclude_ids or [],
                 "ground_truth": _ground_truth_from_faiss(request.ticket_id) if request.ticket_id else [],
             }
             yield _sse("result", result_payload)
@@ -202,6 +209,7 @@ async def predict_value_streams(
         top_k_historical=request.top_k_historical,
         top_k_value_streams=request.top_k_value_streams,
         use_llm_finalizer=request.use_llm_finalizer,
+        exclude_source_ticket_from_historical=request.exclude_source_ticket_from_historical,
     )
     result = await container.rag.analyze(command)
     response = ValueStreamRagResponse.from_result(result)

@@ -20,14 +20,9 @@ class JiraIngestionConfig:
     max_supplementary: int = 2
     ocr_enabled: bool = True
     enable_standalone_image_ocr: bool = True
-    section_min_slides: int = 8
-    section_only_chunks: bool = True
-    section_max_tokens: int = 1200
-    section_overlap_tokens: int = 120
     max_pages: int = 60
     max_prefetch_attachments: Optional[int] = 8
     max_prefetch_attachment_size: int = 60_000_000
-    max_chunk_attachments: Optional[int] = 10
 
     embedding_model: str = "text-embedding-3-large"
     llm_model: str = "gpt-5-mini-idp"
@@ -67,7 +62,6 @@ class JiraIngestionConfig:
     enable_raw_artifact_persistence: bool = True
     enable_attachment_text_persistence: bool = True
     enable_debug_stage_persistence: bool = False
-    enable_prechunk_persistence: bool = True
     enable_attachment_inventory: bool = True
 
     enable_retrieval_views: bool = True
@@ -75,8 +69,6 @@ class JiraIngestionConfig:
     skip_llm_summary: bool = False
     skip_llm_keywords: bool = False
     skip_llm_derived: bool = False
-
-    hierarchical_index_mode: bool = False
 
     http_timeout_seconds: int = 120
     http_max_retries: int = 3

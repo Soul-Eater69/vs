@@ -78,7 +78,7 @@ async def audit_ticket(
     Metadata-only idea-card audit pipeline for one ticket.
 
     Steps:
-      1. Fetch ticket from Neo4j
+      1. Fetch ticket from Jira
       2. Extract description links + statements
       3. Probe links (optional — checks access, not content)
       4. Build attachment candidates (metadata-only, no download)

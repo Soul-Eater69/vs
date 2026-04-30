@@ -1,7 +1,6 @@
 """Ingestion service facade.
 
-Orchestrates: ticket source selection -> normalized ticket -> summary/chunk
-pipelines -> optional debug persistence. Source-agnostic; no Jira/Neo4j imports.
+Orchestrates: Jira ticket selection -> normalized ticket -> summary pipeline.
 """
 
 from __future__ import annotations
@@ -27,43 +26,33 @@ class TicketExtractionService:
 
 
 class IngestionService:
-    """Builds a ticket source, runs summary/chunk pipelines, returns results."""
+    """Builds a ticket source, runs summary ingestion, returns results."""
 
     def __init__(
         self,
         ticket_source_factory: Any,
         summary_pipeline: Any,
-        chunk_pipeline: Any,
         debug_writer: Any | None = None,
     ) -> None:
         self.ticket_source_factory = ticket_source_factory
         self.summary_pipeline = summary_pipeline
-        self.chunk_pipeline = chunk_pipeline
         self.debug_writer = debug_writer
 
     async def ingest_ticket(self, command: IngestTicketCommand) -> IngestTicketResult:
+        if command.mode != "summary":
+            raise ValueError(f"Unsupported ingestion mode: {command.mode!r}")
+
         async with self.ticket_source_factory.build(command.source) as ticket_source:
             ticket = await ticket_source.get_ticket(command.ticket_id)
 
-        summary_doc: dict | None = None
-        chunk_docs: list[dict] | None = None
-
-        if command.mode in ("summary", "both"):
-            summary = await self.summary_pipeline.run(ticket)
-            summary_doc = (
-                summary.to_index_doc() if hasattr(summary, "to_index_doc") else summary
-            )
-
-        if command.mode in ("chunks", "both"):
-            chunks = await self.chunk_pipeline.run(ticket)
-            chunk_docs = (
-                chunks.all_documents() if hasattr(chunks, "all_documents") else chunks
-            )
+        summary = await self.summary_pipeline.run(ticket)
+        summary_doc = (
+            summary.to_index_doc() if hasattr(summary, "to_index_doc") else summary
+        )
 
         return IngestTicketResult(
             ticket_id=command.ticket_id,
             summary=summary_doc,
-            chunks=chunk_docs,
             errors=[],
         )
 

@@ -103,6 +103,7 @@ def select_value_streams(
         },
         "warnings": [],
         "debug": debug,
+        "historical_excluded_ticket_ids": list(exclude_ticket_ids or []),
     }
 
 
@@ -165,4 +166,5 @@ def run_historical_rag_pipeline(
         "query_preparation": result.get("query_preparation", {}),
         "warnings": result.get("warnings", []),
         "debug": result.get("debug", {}),
+        "historical_excluded_ticket_ids": result.get("historical_excluded_ticket_ids", []),
     }

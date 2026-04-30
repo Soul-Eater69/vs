@@ -168,7 +168,7 @@ def route_attachments(
 
 
 def get_routing_candidates(routing_artifact: dict) -> list[dict]:
-    return list(routing_artifact.get("chunk_candidates", []))
+    return list(routing_artifact.get("extraction_candidates", []))
 
 
 def _layer0_filter(
@@ -468,14 +468,14 @@ def build_routing_artifact(
     att_quality: str,
     total_attachment_count: int = 0,
 ) -> dict:
-    chunk_candidates: list[dict] = []
+    extraction_candidates: list[dict] = []
     if primary:
-        chunk_candidates.append(primary)
+        extraction_candidates.append(primary)
     for att in supporting:
-        if _attachment_id(att) not in {_attachment_id(x) for x in chunk_candidates}:
-            chunk_candidates.append(att)
+        if _attachment_id(att) not in {_attachment_id(x) for x in extraction_candidates}:
+            extraction_candidates.append(att)
 
-    full_extract = [att for att in chunk_candidates if att.get("extracted")]
+    full_extract = [att for att in extraction_candidates if att.get("extracted")]
     light_extract = [
         att
         for att in all_scores
@@ -488,7 +488,7 @@ def build_routing_artifact(
         "primary_attachment": _public_attachment_summary(primary),
         "supporting_attachments": [_public_attachment_summary(att) for att in supporting],
         "excluded_attachments": [_public_attachment_summary(att) for att in excluded],
-        "chunk_candidates": chunk_candidates,
+        "extraction_candidates": extraction_candidates,
         "att_quality": att_quality,
         "quality_tier": _derive_quality_tier(att_quality, primary),
         "selection_reason": _build_selection_reason(primary, supporting),
@@ -496,11 +496,11 @@ def build_routing_artifact(
             "full_extract": [_attachment_id(att) for att in full_extract],
             "light_extract": [_attachment_id(att) for att in light_extract],
             "skip": [_attachment_id(att) for att in excluded],
-            "chunk_candidates": [_attachment_id(att) for att in chunk_candidates],
+            "extraction_candidates": [_attachment_id(att) for att in extraction_candidates],
         },
         "per_attachment_scores": [_public_attachment_summary(att) for att in all_scores],
         "attachment_count_total": total_attachment_count,
-        "attachment_count_viable": len(chunk_candidates),
+        "attachment_count_viable": len(extraction_candidates),
         "primary_attachment_id": _attachment_id(primary) if primary else None,
         "triage_score": primary.get("triage_score") if primary else None,
         "triage_reasons": list(primary.get("triage_reasons", [])) if primary else [],
@@ -601,12 +601,12 @@ def _build_selection_reason(primary: Optional[dict], supporting: list[dict]) -> 
     if confirmed:
         return (
             f"'{filename}' selected as primary because it was confirmed as the best idea-card-like "
-            f"document. Signals: [{top_reasons}]. Additional supporting docs kept for chunking: {support_count}."
+            f"document. Signals: [{top_reasons}]. Additional supporting docs kept for extraction: {support_count}."
         )
 
     return (
         f"'{filename}' selected as primary fallback based on ranking and extraction readiness. "
-        f"Signals: [{top_reasons}]. Additional supporting docs kept for chunking: {support_count}."
+        f"Signals: [{top_reasons}]. Additional supporting docs kept for extraction: {support_count}."
     )
 
 

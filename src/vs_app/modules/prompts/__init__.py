@@ -12,7 +12,6 @@ from .loader import (
     build_selection_system_prompt,
     build_value_stream_classification_prompt,
     load_prompt_yaml,
-    load_rag_prompts,
     render_prompt,
     safe_json_extract,
 )
@@ -31,7 +30,6 @@ __all__ = [
     "build_selection_system_prompt",
     "build_value_stream_classification_prompt",
     "load_prompt_yaml",
-    "load_rag_prompts",
     "render_prompt",
     "safe_json_extract",
 ]

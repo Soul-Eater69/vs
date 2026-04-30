@@ -11,7 +11,7 @@ from .modes import IngestionMode, TicketSourceName
 class IngestTicketCommand:
     ticket_id: str
     source: TicketSourceName = "jira"
-    mode: IngestionMode = "both"
+    mode: IngestionMode = "summary"
     force: bool = False
     persist_debug: bool = False
 
@@ -20,7 +20,6 @@ class IngestTicketCommand:
 class IngestTicketResult:
     ticket_id: str
     summary: dict | None = None
-    chunks: list[dict] | None = None
     errors: list[str] | None = None
 
 

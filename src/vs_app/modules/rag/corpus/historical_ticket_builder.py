@@ -14,7 +14,6 @@ from .corpus_models import RawTicket
 logger = logging.getLogger(__name__)
 _EXTRACTION_SOURCE_BY_TICKET_SOURCE = {
     "jira": "jira_direct",
-    "neo4j": "neo4j_graph",
 }
 
 
@@ -174,19 +173,6 @@ def fetch_tickets_from_jira(
     return fetch_tickets(
         ticket_ids=ticket_ids,
         ticket_source="jira",
-        sharepoint_client=sharepoint_client,
-        extract_attachments=extract_attachments,
-    )
-
-
-def fetch_tickets_from_neo4j(
-    ticket_ids: List[str],
-    sharepoint_client: Any = None,
-    extract_attachments: bool = True,
-) -> List[RawTicket]:
-    return fetch_tickets(
-        ticket_ids=ticket_ids,
-        ticket_source="neo4j",
         sharepoint_client=sharepoint_client,
         extract_attachments=extract_attachments,
     )

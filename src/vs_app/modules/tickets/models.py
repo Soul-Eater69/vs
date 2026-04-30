@@ -1,8 +1,8 @@
 """Normalized ticket domain models.
 
-These types are the source-agnostic representation of a ticket. Jira and Neo4j
-integrations map their raw payloads into these models at the integration
-boundary, so downstream ingestion / RAG code never sees source-specific shapes.
+These types are the source-agnostic representation of a ticket. Jira payloads
+map into these models at the integration boundary, so downstream ingestion / RAG
+code never sees source-specific shapes.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class LinkedTheme:
 class ValueStreamLabel:
     id: str = ""
     name: str = ""
-    source: str = ""  # jira_issuelinks, jira_theme_fallback, neo4j_graph, llm, ...
+    source: str = ""  # jira_issuelinks, jira_theme_fallback, llm, ...
     confidence: float = 1.0
 
 

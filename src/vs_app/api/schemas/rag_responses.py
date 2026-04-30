@@ -28,6 +28,7 @@ class ValueStreamRagResponse(BaseModel):
     warnings: list[Any] = Field(default_factory=list)
     evidence: list[dict] = Field(default_factory=list)
     debug: dict[str, Any] = Field(default_factory=dict)
+    historical_excluded_ticket_ids: list[str] = Field(default_factory=list)
     ground_truth: list[str] = Field(default_factory=list)
 
     @classmethod
@@ -69,4 +70,7 @@ class ValueStreamRagResponse(BaseModel):
             warnings=list(getattr(result, "warnings", []) or []),
             evidence=list(getattr(result, "evidence", []) or []),
             debug=dict(getattr(result, "debug", {}) or {}),
+            historical_excluded_ticket_ids=list(
+                getattr(result, "historical_excluded_ticket_ids", []) or []
+            ),
         )

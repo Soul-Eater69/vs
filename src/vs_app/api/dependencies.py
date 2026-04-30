@@ -9,7 +9,6 @@ from typing import Any
 from vs_app.container import TicketSourceFactory, normalize_ticket_source
 from vs_app.modules.ingestion.service import IngestionService
 from vs_app.modules.ingestion.summary.pipeline import ingest_ticket_summary_payload
-from vs_app.modules.ingestion.chunks.pipeline import ingest_ticket_chunks_payload
 from vs_app.modules.rag.service import ValueStreamRagCommand, ValueStreamRagService
 from vs_app.settings import Settings
 
@@ -85,23 +84,6 @@ class _SummaryPipelineAdapter:
             )
 
 
-class _ChunkPipelineAdapter:
-    def __init__(self, base_factory: TicketSourceFactory, config: Any = None) -> None:
-        self._base_factory = base_factory
-        self._config = config
-
-    async def run(self, ticket: dict) -> Any:
-        payload = _strip_api_metadata(ticket)
-        async with self._base_factory.build(source=_resolve_ticket_source_name(ticket)) as ticket_source:
-            return await ingest_ticket_chunks_payload(
-                payload,
-                ticket_source,
-                None,
-                None,
-                self._config,
-            )
-
-
 class _ApiValueStreamRagService(ValueStreamRagService):
     def __init__(
         self,
@@ -159,7 +141,6 @@ def get_container() -> ApiContainer:
     ingestion = IngestionService(
         ticket_source_factory=_AnnotatedTicketSourceFactory(ticket_source_factory, config=config),
         summary_pipeline=_SummaryPipelineAdapter(ticket_source_factory, config=config),
-        chunk_pipeline=_ChunkPipelineAdapter(ticket_source_factory, config=config),
         debug_writer=None,
     )
     rag = _ApiValueStreamRagService(

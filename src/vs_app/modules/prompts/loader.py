@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 import yaml
 
-from vs_app.shared.constants import PROMPT_YAML_DIR, RAG_PROMPTS_PATH
+from vs_app.shared.constants import PROMPT_YAML_DIR
 # Re-exported for backward compatibility — canonical home is .schemas
 from .schemas import SelectedValueStream, SelectionResult  # noqa: F401
 
@@ -73,17 +73,6 @@ def _load_required_prompt_yaml(name: str, required_keys: list[str]) -> Dict[str,
         raise ValueError(
             f"Missing prompt keys in {PROMPT_YAML_DIR / f'{name}.yaml'}: {missing}"
         )
-    return payload
-
-
-def load_rag_prompts() -> Dict[str, str]:
-    """Load the YAML prompt file for the RAG pipeline."""
-    payload = _load_yaml_payload(str(RAG_PROMPTS_PATH))
-    if "selection_user" not in payload and "user" in payload:
-        payload["selection_user"] = payload["user"]
-    missing = [key for key in ("system", "selection_user") if key not in payload]
-    if missing:
-        raise ValueError(f"Missing prompt keys in {RAG_PROMPTS_PATH}: {missing}")
     return payload
 
 
@@ -218,7 +207,6 @@ __all__ = [
     "build_selection_system_prompt",
     "build_value_stream_classification_prompt",
     "load_prompt_yaml",
-    "load_rag_prompts",
     "render_prompt",
     "safe_json_extract",
 ]

@@ -3,7 +3,7 @@
 Covers three prompts:
   - value_stream_classification.yaml → VsClassificationResult
   - jira_value_stream_verifier.yaml  → VsVerifierResult
-  - selection.yaml / rag_selection.yaml → SelectionResult
+  - selection.yaml / historical_rag_selection.yaml / historical_gap_selection.yaml → SelectionResult
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ class VsVerifierResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# selection.yaml / rag_selection.yaml
+# value-stream selection prompts
 # ---------------------------------------------------------------------------
 
 class SelectedValueStream(BaseModel):

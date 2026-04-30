@@ -193,7 +193,7 @@ async def run(
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Link + attachment usefulness/accessibility report.")
     parser.add_argument("--input-ticket-ids", required=True, metavar="JSON_FILE")
-    parser.add_argument("--source", choices=["jira", "neo4j"], default="neo4j")
+    parser.add_argument("--source", choices=["jira"], default="jira")
     parser.add_argument("--out-file", default="ticket_data/link_access_report.json")
     parser.add_argument("--no-llm", action="store_true", help="Skip LLM classification (fuzzy only).")
     parser.add_argument("--limit", type=int, default=None)

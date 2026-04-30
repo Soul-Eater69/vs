@@ -110,6 +110,7 @@ interface PipelineResult {
   raw_response?: unknown;
   direct_llm_output?: unknown;
   historical_llm_output?: unknown;
+  historical_excluded_ticket_ids?: string[];
   ground_truth?: string[];
   ground_truth_title?: string;
   source_doc_id?: string;
@@ -878,6 +879,7 @@ export default function Home() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [excludeSourceTicketFromHistorical, setExcludeSourceTicketFromHistorical] = useState(true);
   const [dark, setDark] = useState(true);
 
   const [step, setStep] = useState<Step>('idle');
@@ -998,9 +1000,12 @@ export default function Home() {
         top_k_value_streams: count,
         top_k_historical: count,
         use_llm_finalizer: true,
+        exclude_source_ticket_from_historical: excludeSourceTicketFromHistorical,
       };
-      if (uploadedIdeaText.trim()) body.idea_card_text = uploadedIdeaText.trim();
-      else if (selectedTicketId) body.ticket_id = selectedTicketId;
+      if (uploadedIdeaText.trim()) {
+        body.idea_card_text = uploadedIdeaText.trim();
+        if (selectedTicketId) body.ticket_id = selectedTicketId;
+      } else if (selectedTicketId) body.ticket_id = selectedTicketId;
       else throw new Error('Select a Jira idea card or drop an extractable idea-card file.');
 
       const res = await fetch(`${API}/rag/value-streams/stream`, {
@@ -1061,7 +1066,7 @@ export default function Home() {
       setStep('error');
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [count, selectedTicketId, uploadedIdeaText]);
+  }, [count, excludeSourceTicketFromHistorical, selectedTicketId, uploadedIdeaText]);
 
   const busy = step !== 'idle' && step !== 'done' && step !== 'error';
   const card = selectedCard;
@@ -1208,6 +1213,20 @@ export default function Home() {
                     Historical RAG can surface up to 50 value-stream candidates before the merge.
                   </p>
                 </div>
+                <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-zinc-700 dark:text-zinc-200">Exclude source ticket</span>
+                    <span className="block truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                      {selectedTicketId ? selectedTicketId : 'No ticket key selected'}
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={excludeSourceTicketFromHistorical}
+                    onChange={e => setExcludeSourceTicketFromHistorical(e.target.checked)}
+                    className="h-4 w-4 rounded border-zinc-300 text-hcsc accent-hcsc focus:ring-hcsc dark:border-zinc-700 dark:accent-teal-400"
+                  />
+                </label>
                 <button
                   onClick={run}
                   disabled={busy || uploading || !canRun}

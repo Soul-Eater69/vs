@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import pathlib
 import sys
 
@@ -39,8 +38,8 @@ def main() -> None:
     parser.add_argument("--output-dir", type=pathlib.Path, default=OUTPUT_DIR, help="Output directory")
     parser.add_argument(
         "--source",
-        choices=["jira", "neo4j"],
-        default=os.environ.get("INGESTION_TICKET_SOURCE", "jira"),
+        choices=["jira"],
+        default="jira",
         help="Ticket source backend (default: %(default)s).",
     )
 

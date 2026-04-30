@@ -54,20 +54,6 @@ AISEARCH_BASE_URL: str = os.environ.get("AISEARCH_BASE_URL", "")
 AISEARCH_APP_ID: str = os.environ.get("AISEARCH_APP_ID", "")
 AISEARCH_API_PATH: str = "/api/v1/aisearch/search"
 
-# ---------------------------------------------------------------------------
-# Neo4j
-# ---------------------------------------------------------------------------
-NEO4J_URI: str = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_AUTH: tuple[str, str] = (
-    os.environ.get("NEO4J_USER", "neo4j"),
-    os.environ.get("NEO4J_PASSWORD", "neo4j123"),
-)
-NEO4J_DATABASE: str = os.environ.get("NEO4J_DATABASE", "neo4j")
-NEO4J_TICKET_LABEL: str = os.environ.get("NEO4J_TICKET_LABEL", "JIRA")
-NEO4J_TICKET_KEY_PROPERTY: str = os.environ.get("NEO4J_TICKET_KEY_PROPERTY", "key")
-NEO4J_GROUP_LINK_FIELD: str = os.environ.get("NEO4J_GROUP_LINK_FIELD", "inwardIssues")
-NEO4J_ISSUE_TYPE_PROPERTY: str = os.environ.get("NEO4J_ISSUE_TYPE_PROPERTY", "issueType")
-
 JIRA_TOKEN: str = os.environ.get("JIRA_TOKEN", "")
 JIRA_BASE_URL: str = os.environ.get("JIRA_BASE_URL", "").rstrip("/")
 
@@ -78,15 +64,6 @@ class Settings:
     jira_token: str = ""
     verify_ssl: bool = False
 
-    neo4j_uri: str = ""
-    neo4j_user: str = "neo4j"
-    neo4j_password: str = ""
-    neo4j_database: str = "neo4j"
-    neo4j_ticket_label: str = "JIRA"
-    neo4j_ticket_key_property: str = "key"
-    neo4j_group_link_field: str = "inwardIssues"
-    neo4j_issue_type_property: str = "issueType"
-
     default_ticket_source: str = "jira"
 
     @classmethod
@@ -95,14 +72,6 @@ class Settings:
         kwargs: dict = {
             "jira_base_url": JIRA_BASE_URL,
             "jira_token": JIRA_TOKEN,
-            "neo4j_uri": NEO4J_URI,
-            "neo4j_database": NEO4J_DATABASE,
-            "neo4j_ticket_label": NEO4J_TICKET_LABEL,
-            "neo4j_ticket_key_property": NEO4J_TICKET_KEY_PROPERTY,
-            "neo4j_group_link_field": NEO4J_GROUP_LINK_FIELD,
-            "neo4j_issue_type_property": NEO4J_ISSUE_TYPE_PROPERTY,
-            "default_ticket_source": os.environ.get("INGESTION_TICKET_SOURCE", "jira").strip().lower(),
+            "default_ticket_source": "jira",
         }
-        if len(NEO4J_AUTH) == 2:
-            kwargs["neo4j_user"], kwargs["neo4j_password"] = NEO4J_AUTH
         return cls(**kwargs)

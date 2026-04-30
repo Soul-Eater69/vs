@@ -33,7 +33,6 @@ def build_ingestion_config(
         enable_raw_artifact_persistence=False,
         enable_attachment_text_persistence=False,
         enable_debug_stage_persistence=False,
-        enable_prechunk_persistence=False,
         enable_attachment_inventory=True,
         enable_retrieval_views=True,
         skip_llm_summary=skip_llm_summary,
@@ -41,11 +40,8 @@ def build_ingestion_config(
         skip_llm_derived=skip_llm_derived,
     )
 
-    _set_if_present(cfg, "section_only_chunks", False)
     _set_if_present(cfg, "include_section_rollups_in_retrieval", False)
-    _set_if_present(cfg, "section_min_slides", 1)
     _set_if_present(cfg, "max_prefetch_attachments", None)
-    _set_if_present(cfg, "max_chunk_attachments", 10)
 
     return cfg
 

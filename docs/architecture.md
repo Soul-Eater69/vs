@@ -27,7 +27,7 @@ Canonical app code lives under `src/vs_app/`.
 - `rag` for historical RAG / value-stream prediction
 - `tickets` for shared ticket-domain logic
 
-`src/vs_app/integrations` contains external-system adapters such as Jira, Neo4j ticket source access, file extraction, and other infrastructure-facing code.
+`src/vs_app/integrations` contains external-system adapters such as Jira, file extraction, and other infrastructure-facing code.
 
 `src/vs_app/shared` is reserved for low-level shared utilities.
 
@@ -65,8 +65,7 @@ Canonical run commands:
 
 ```bash
 uvicorn vs_app.main:app --reload --port 8000
-python -m vs_app.jobs.jira_batch.jobs.batch_ingest_job
 python -m vs_app.jobs.jira_batch.jobs.extract_tickets
 ```
 
-Neo4j currently acts only as an alternate ticket source. No product-impact knowledge graph is implemented in this repo.
+Jira is the active ticket source. Deprecated Neo4j and chunk-ingestion surfaces are parked under `deprecated/` and are not imported by runtime code.

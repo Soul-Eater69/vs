@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
-from vs_app.modules.tickets.documents import HierarchicalTicketResult, TicketSummaryDocument
+from vs_app.modules.tickets.documents import TicketSummaryDocument
 
 from .modes import IngestionMode
 from .service import TicketExtractionService
 from .summary.pipeline import ingest_ticket_summary, ingest_ticket_summary_payload
-from .chunks.pipeline import ingest_ticket_chunks, ingest_ticket_chunks_payload
 
 logger = logging.getLogger(__name__)
 
-IngestionResult = Union[TicketSummaryDocument, HierarchicalTicketResult]
+IngestionResult = TicketSummaryDocument
 
 
 async def ingest_ticket(
@@ -26,24 +25,16 @@ async def ingest_ticket(
     cfg: Optional[Any] = None,
     mode: IngestionMode = "summary",
 ) -> IngestionResult:
-    """Fetch a ticket and run the requested pipeline."""
-    if mode == "summary":
-        return await ingest_ticket_summary(
-            ticket_key=ticket_key,
-            jira_client=jira_client,
-            llm_client=llm_client,
-            embedding_client=embedding_client,
-            cfg=cfg,
-        )
-    if mode == "chunks":
-        return await ingest_ticket_chunks(
-            ticket_key=ticket_key,
-            jira_client=jira_client,
-            llm_client=llm_client,
-            embedding_client=embedding_client,
-            cfg=cfg,
-        )
-    raise ValueError(f"Unknown ingestion mode: {mode!r}")
+    """Fetch a ticket and run the summary ingestion pipeline."""
+    if mode != "summary":
+        raise ValueError(f"Unsupported ingestion mode: {mode!r}")
+    return await ingest_ticket_summary(
+        ticket_key=ticket_key,
+        jira_client=jira_client,
+        llm_client=llm_client,
+        embedding_client=embedding_client,
+        cfg=cfg,
+    )
 
 
 async def ingest_ticket_payload(
@@ -54,24 +45,16 @@ async def ingest_ticket_payload(
     cfg: Optional[Any] = None,
     mode: IngestionMode = "summary",
 ) -> IngestionResult:
-    """Run the requested pipeline on an already-fetched ticket payload."""
-    if mode == "summary":
-        return await ingest_ticket_summary_payload(
-            ticket_data=ticket_data,
-            jira_client=jira_client,
-            llm_client=llm_client,
-            embedding_client=embedding_client,
-            cfg=cfg,
-        )
-    if mode == "chunks":
-        return await ingest_ticket_chunks_payload(
-            ticket_data=ticket_data,
-            jira_client=jira_client,
-            llm_client=llm_client,
-            embedding_client=embedding_client,
-            cfg=cfg,
-        )
-    raise ValueError(f"Unknown ingestion mode: {mode!r}")
+    """Run summary ingestion on an already-fetched ticket payload."""
+    if mode != "summary":
+        raise ValueError(f"Unsupported ingestion mode: {mode!r}")
+    return await ingest_ticket_summary_payload(
+        ticket_data=ticket_data,
+        jira_client=jira_client,
+        llm_client=llm_client,
+        embedding_client=embedding_client,
+        cfg=cfg,
+    )
 
 
 @dataclass(slots=True)

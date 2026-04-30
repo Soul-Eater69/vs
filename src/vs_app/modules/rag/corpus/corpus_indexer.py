@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import pathlib
 from typing import List, Optional
 
@@ -87,8 +86,8 @@ Examples:
     parser.add_argument("--index-name", default=None, help="Azure Search index name")
     parser.add_argument(
         "--source",
-        choices=["jira", "neo4j"],
-        default=os.environ.get("INGESTION_TICKET_SOURCE", "jira"),
+        choices=["jira"],
+        default="jira",
         help="Ticket source backend (default: %(default)s).",
     )
 

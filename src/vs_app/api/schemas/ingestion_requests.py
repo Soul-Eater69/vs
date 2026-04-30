@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class IngestTicketRequest(BaseModel):
-    source: Literal["jira", "neo4j"] = "jira"
-    mode: Literal["summary", "chunks", "both"] = "both"
+    source: Literal["jira"] = "jira"
+    mode: Literal["summary"] = "summary"
     force: bool = False
     persist_debug: bool = False

@@ -12,13 +12,14 @@ class ValueStreamRagCommand:
     query: str | None = None
     ticket_id: str | None = None
     idea_card_text: str | None = None
-    source: Literal["jira", "neo4j"] | None = None
+    source: Literal["jira"] | None = None
     fetch_count: int = 12
     historical_faiss_dir: str = "ticket_data/_faiss"
     allowed_value_stream_names: list[str] | None = None
     use_llm_finalizer: bool = True
     top_k_historical: int | None = None
     top_k_value_streams: int | None = None
+    exclude_source_ticket_from_historical: bool = True
 
 
 @dataclass(slots=True)
@@ -45,6 +46,7 @@ class ValueStreamRagResult:
     warnings: list[Any]
     evidence: list[dict]
     debug: dict[str, Any]
+    historical_excluded_ticket_ids: list[str]
 
     @property
     def predicted_value_streams(self) -> list[dict]:
@@ -95,7 +97,7 @@ class ValueStreamRagService:
         from .pipeline import select_value_streams
 
         query = self._resolve_query(command)
-        exclude_ids = [command.ticket_id] if command.ticket_id else None
+        exclude_ids = _source_ticket_exclusions(command)
         return (self.pipeline_fn or select_value_streams)(
             query,
             fetch_count=self._resolve_fetch_count(command),
@@ -162,6 +164,7 @@ class ValueStreamRagService:
         payload.setdefault("warnings", [])
         payload.setdefault("evidence", list(historical_support or []))
         payload.setdefault("debug", {"query_views": query_views, "merged": merged})
+        payload.setdefault("historical_excluded_ticket_ids", _source_ticket_exclusions(command) or [])
         return payload
 
     @staticmethod
@@ -225,12 +228,19 @@ class ValueStreamRagService:
             warnings=list(payload.get("warnings", []) or []),
             evidence=list(payload.get("evidence", payload.get("historical_value_stream_support", [])) or []),
             debug=dict(payload.get("debug", {}) or {}),
+            historical_excluded_ticket_ids=list(payload.get("historical_excluded_ticket_ids", []) or []),
         )
 
 
 RagImpactService = ValueStreamRagService
 ImpactAnalysisCommand = ValueStreamRagCommand
 ImpactAnalysisResult = ValueStreamRagResult
+
+
+def _source_ticket_exclusions(command: ValueStreamRagCommand) -> list[str] | None:
+    if not command.exclude_source_ticket_from_historical or not command.ticket_id:
+        return None
+    return [command.ticket_id]
 
 __all__ = [
     "ValueStreamRagService",

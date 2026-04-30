@@ -20,6 +20,7 @@ def test_api_routes_expose_historical_rag_only() -> None:
 
 def test_rag_public_schema_requires_query_input() -> None:
     assert not hasattr(ValueStreamRagRequest(ticket_id="IDMT-123"), "mode")
+    assert ValueStreamRagRequest(ticket_id="IDMT-123").exclude_source_ticket_from_historical is True
 
     try:
         ValueStreamRagRequest()

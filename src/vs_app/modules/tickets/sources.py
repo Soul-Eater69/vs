@@ -1,8 +1,8 @@
 """Ticket source port.
 
-Any integration that can produce a NormalizedTicket (Jira REST, Neo4j graph,
-mocks, JSON fixtures) implements this interface. Downstream ingestion code
-depends only on this abstraction.
+Any integration that can produce a NormalizedTicket (Jira REST, mocks, JSON
+fixtures) implements this interface. Downstream ingestion code depends only on
+this abstraction.
 """
 
 from __future__ import annotations

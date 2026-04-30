@@ -238,6 +238,47 @@ def _extract_mentioned_filename(source_text: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _find_attachment_reference_in_description(
+    description: str,
+    attachments: list[dict[str, str]],
+) -> tuple[str, str, str]:
+    if not description or not attachments:
+        return "", "", ""
+
+    attachment_by_norm: dict[str, tuple[str, str]] = {}
+    for att in attachments:
+        filename = str(att.get("filename") or "")
+        url = str(att.get("url") or "")
+        if filename and url and not _is_bad_neighbor_link(filename, url):
+            attachment_by_norm[_normalize_filename(filename)] = (url, filename)
+
+    best: tuple[int, str, str, str] | None = None
+    for line in description.splitlines():
+        if "attach" not in line.lower():
+            continue
+        for match in FILE_IN_TEXT_RE.finditer(line):
+            mentioned = match.group(1).strip()
+            normalized = _normalize_filename(mentioned)
+            mapped = attachment_by_norm.get(normalized)
+            if not mapped:
+                continue
+            url, filename = mapped
+            if _is_bad_neighbor_link(line, url):
+                continue
+            score = 1
+            if _has_idea_card_label(line) or _has_idea_card_label(filename):
+                score += 3
+            if "business case" in line.lower() or "business case" in filename.lower():
+                score += 2
+            score += max(0, 4 - _filename_extension_rank(filename))
+            if best is None or score > best[0]:
+                best = (score, url, filename, line.strip())
+
+    if best:
+        return best[1], best[2], best[3]
+    return "", "", ""
+
+
 def _best_attachment_by_filename(
     attachments: list[dict[str, str]],
     source_text: str,
@@ -401,6 +442,23 @@ def _normalize_verdict(verdict: dict[str, Any], description: str, attachments: l
             verdict["reason"] = normalized_reason
         verdict["link_selection_strategy"] = selection_strategy
     else:
+        # Broad deterministic fallback for lines like "XYZ Business Case.pptx (attached)".
+        desc_attachment_url, desc_attachment_name, desc_attachment_line = _find_attachment_reference_in_description(
+            description,
+            attachments,
+        )
+        if desc_attachment_url:
+            verdict["has_idea_card"] = True
+            verdict["confidence"] = max(float(verdict.get("confidence") or 0), 0.75)
+            verdict["link"] = desc_attachment_url
+            verdict["source_location"] = "attachment_section"
+            verdict["source_text"] = desc_attachment_line
+            verdict["reason"] = (
+                f"Description references attached file '{desc_attachment_name}'; matched to Jira attachment URL."
+            )
+            verdict["link_selection_strategy"] = "attachment_description_filename_match"
+            return verdict
+
         if str(verdict.get("source_location") or "") == "attachment_section":
             attachment_link, attachment_filename = _select_attachment_link(
                 attachments,

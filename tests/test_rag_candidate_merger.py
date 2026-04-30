@@ -395,6 +395,38 @@ def test_merge_candidate_sources_admits_repeated_implied_recovery_when_weighted_
     assert row["candidate_status_reason"] == "protected_historical_lane"
 
 
+def test_merge_candidate_sources_admits_moderate_repeated_support_after_source_exclusion() -> None:
+    historical_support = [
+        {
+            "entity_id": "hist-invoice",
+            "entity_name": "Manage Invoice and Payment Receipt",
+            "support_count": 10,
+            "direct_count": 0,
+            "implied_count": 10,
+            "weighted_support_count": 0.68,
+            "weighted_direct_count": 0.0,
+            "weighted_implied_count": 0.68,
+            "best_support_score": 0.641,
+            "avg_support_score": 0.56,
+            "supporting_ticket_ids": [
+                "IDMT-8199",
+                "IDMT-12167",
+                "IDMT-31170",
+                "IDMT-31171",
+            ],
+            "historical_reasons": ["[IDMT-8199 / implied] recurring payment workflow"],
+            "label_sources": ["jira_themes_fallback"],
+        }
+    ]
+
+    result = merge_candidate_sources([], historical_support, max_llm_candidates=4)
+
+    row = result["merged_candidates"][0]
+    assert row["candidate_status"] == "sent_to_llm"
+    assert row["candidate_status_reason"] == "protected_historical_lane"
+    assert result["llm_candidates"][0]["entity_name"] == "Manage Invoice and Payment Receipt"
+
+
 def _has_score_language(reason: str) -> bool:
     lower = reason.lower()
     return any(

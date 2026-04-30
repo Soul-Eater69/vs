@@ -34,7 +34,10 @@ def retrieve_historical_support(
             "historical_source": "none",
         }
 
-    fetch_k = max_ticket_hits + len(excluded)
+    exclusion_backfill = 0
+    if excluded:
+        exclusion_backfill = max(8, len(excluded) * 3)
+    fetch_k = max_ticket_hits + exclusion_backfill
     faiss_results = search_local_faiss(
         cleaned,
         index_dir=historical_faiss_dir,

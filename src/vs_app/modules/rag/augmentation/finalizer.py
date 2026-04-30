@@ -351,11 +351,13 @@ def _passes_confirmed_merged_evidence(row: dict | None) -> bool:
     best_score = float(row.get("best_support_score", 0.0) or 0.0)
     weighted_support = float(row.get("weighted_support_count", support_count) or 0.0)
 
-    if best_score < 0.68 or weighted_support < 0.75:
+    if weighted_support < 0.75:
         return False
+    if support_count >= 5 and semantic_score >= 1.20 and best_score >= 0.60:
+        return True
     if support_count >= 5 and semantic_score >= 1.00:
         return True
-    return support_count >= 3 and semantic_score >= 1.35
+    return support_count >= 3 and semantic_score >= 1.35 and best_score >= 0.65
 
 
 def _passes_gap_fill_evidence(row: dict | None) -> bool:
@@ -373,17 +375,45 @@ def _passes_gap_fill_evidence(row: dict | None) -> bool:
         ticket_count == 1
         and direct_count >= 4
         and support_count >= 4
-        and best_score >= 0.75
-        and avg_score >= 0.60
+        and best_score >= 0.62
+        and avg_score >= 0.56
         and weighted_support >= 0.75
     ):
         return True
 
-    return (
+    if (
+        support_count >= 5
+        and direct_count >= 3
+        and best_score >= 0.62
+        and avg_score >= 0.56
+        and weighted_support >= 0.60
+    ):
+        return True
+
+    if (
+        support_count >= 8
+        and implied_count >= 5
+        and best_score >= 0.60
+        and avg_score >= 0.55
+        and weighted_support >= 0.60
+    ):
+        return True
+
+    if (
         support_count >= 3
         and ticket_count >= 2
         and best_score >= 0.70
         and avg_score >= 0.58
+        and weighted_support >= 0.75
+        and (direct_count >= 1 or implied_count >= 3)
+    ):
+        return True
+
+    return (
+        support_count >= 5
+        and ticket_count >= 2
+        and best_score >= 0.64
+        and avg_score >= 0.56
         and weighted_support >= 0.75
         and (direct_count >= 1 or implied_count >= 3)
     )
@@ -562,4 +592,3 @@ def _dedupe_selected(rows: Iterable[dict]) -> List[dict]:
         seen.add(key)
         out.append(row)
     return out
-

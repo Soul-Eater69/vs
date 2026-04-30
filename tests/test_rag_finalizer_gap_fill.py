@@ -192,6 +192,30 @@ def test_finalize_selected_rescues_strong_historical_gap_fill_miss() -> None:
     assert not _has_score_language(final_selected[0]["reason"])
 
 
+def test_finalize_selected_rescues_moderate_repeated_historical_gap_after_source_exclusion() -> None:
+    candidate = _historical_candidate(
+        "Establish Provider Network",
+        best=0.672,
+        avg=0.58,
+        support=5,
+    )
+    candidate["direct_count"] = 5
+    candidate["implied_count"] = 0
+    candidate["weighted_support_count"] = 0.78
+
+    final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[],
+        llm_candidates=[candidate],
+    )
+
+    assert filtered_llm == []
+    assert rescued_confirmed == []
+    assert dropped == []
+    assert [row["entity_name"] for row in rescued] == ["Establish Provider Network"]
+    assert [row["entity_name"] for row in final_selected] == ["Establish Provider Network"]
+
+
 def test_finalize_selected_keeps_dense_single_ticket_direct_historical_selection() -> None:
     candidate = _historical_candidate(
         "Manage Member Care",
@@ -318,6 +342,26 @@ def test_finalize_selected_rescues_repeated_confirmed_merged_miss() -> None:
     assert final_selected[0]["selection_source"] == "confirmed_merged_rescue"
     assert "recurring direct workflow analog" in final_selected[0]["reason"]
     assert not _has_score_language(final_selected[0]["reason"])
+
+
+def test_finalize_selected_rescues_moderate_confirmed_merged_after_source_exclusion() -> None:
+    candidate = _confirmed_candidate(
+        "Discover Business Insights",
+        semantic=1.436,
+        best=0.641,
+        support=9,
+        weighted=1.1,
+    )
+
+    final_selected, _filtered_llm, rescued_confirmed, rescued_gap_fill, _dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[],
+        llm_candidates=[candidate],
+    )
+
+    assert rescued_gap_fill == []
+    assert [row["entity_name"] for row in rescued_confirmed] == ["Discover Business Insights"]
+    assert [row["entity_name"] for row in final_selected] == ["Discover Business Insights"]
 
 
 def test_finalize_selected_rescues_three_hit_strong_semantic_confirmed_miss() -> None:

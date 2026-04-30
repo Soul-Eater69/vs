@@ -39,7 +39,7 @@ def select_value_streams(
         retrieve_historical_support,
         query_for_prompt or cleaned_query,
         historical_faiss_dir=historical_faiss_dir,
-        max_ticket_hits=min(max(12, fetch_count), 24),
+        max_ticket_hits=min(max(12, fetch_count), 40),
         exclude_ticket_ids=exclude_ticket_ids,
     )
     historical = filter_historical_result(historical, exclude_ticket_ids)

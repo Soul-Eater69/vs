@@ -100,7 +100,7 @@ async def predict_value_streams_stream(
             exclude_ids = _source_ticket_exclusions(request)
             historical_kwargs = {
                 "historical_faiss_dir": faiss_dir,
-                "max_ticket_hits": min(max(12, top_k), 24),
+                "max_ticket_hits": min(max(12, top_k), 40),
             }
             if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
                 historical_kwargs["exclude_ticket_ids"] = exclude_ids

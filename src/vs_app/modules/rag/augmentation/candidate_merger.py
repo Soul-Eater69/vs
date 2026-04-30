@@ -340,6 +340,20 @@ def _should_send_historical_recall_to_llm(row: dict, *, support_count: int, min_
     if implied_count >= 5 and best_score >= 0.72 and avg_score >= 0.60:
         return True
 
+    # Source-ticket exclusion removes the strongest neighbor during leave-one-out
+    # testing. Keep repeated, coherent moderate evidence in the LLM lane so the
+    # historical pass can still adjudicate it instead of silently dropping it.
+    if (
+        total_count >= 5
+        and best_score >= 0.60
+        and avg_score >= 0.55
+        and (direct_count >= 1 or implied_count >= 5)
+    ):
+        return True
+
+    if total_count >= 8 and best_score >= 0.60 and avg_score >= 0.52:
+        return True
+
     if total_count >= support_count:
         return weighted_support >= max(1.0, support_count * 0.4)
     return best_score >= min_score and weighted_support >= 0.5

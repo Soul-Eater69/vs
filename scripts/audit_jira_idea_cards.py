@@ -30,6 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger = logging.getLogger(__name__)
 
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
+TOKEN_RE = re.compile(r"[a-z0-9]+")
 DEFAULT_MODEL = "gpt-5-mini-idp"
 DEFAULT_CONCURRENCY = int(os.environ.get("AUDIT_MAX_CONCURRENT", "5"))
 
@@ -126,6 +127,17 @@ def _idea_card_attachment_statement(text: str) -> str:
     return ""
 
 
+def _extract_attachments(fields: dict[str, Any]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for item in fields.get("attachment") or []:
+        filename = str(item.get("filename") or "").strip()
+        url = str(item.get("content") or item.get("self") or "").strip()
+        mime_type = str(item.get("mimeType") or "").strip()
+        if filename or url:
+            out.append({"filename": filename, "url": url, "mime_type": mime_type})
+    return out
+
+
 def _line_for_url(text: str, url: str) -> str:
     if not url:
         return ""
@@ -185,6 +197,64 @@ def _extension_rank(url: str) -> int:
     return len(preferred)
 
 
+def _filename_extension_rank(filename: str) -> int:
+    lowered = filename.lower()
+    preferred = (".pptx", ".ppt", ".pdf", ".docx", ".doc", ".pptm")
+    for idx, ext in enumerate(preferred):
+        if lowered.endswith(ext):
+            return idx
+    return len(preferred)
+
+
+def _token_set(text: str) -> set[str]:
+    stop = {"idea", "card", "link", "and", "the", "for", "with", "that", "this", "from"}
+    return {tok for tok in TOKEN_RE.findall(text.lower()) if len(tok) >= 4 and tok not in stop}
+
+
+def _select_attachment_link(
+    attachments: list[dict[str, str]],
+    *,
+    source_text: str,
+    description: str,
+) -> tuple[str, str]:
+    if not attachments:
+        return "", ""
+
+    description_tokens = _token_set(description)
+    source_tokens = _token_set(source_text)
+    best: tuple[int, int, str, str] | None = None
+    for att in attachments:
+        filename = str(att.get("filename") or "")
+        url = str(att.get("url") or "")
+        if not filename or _is_bad_neighbor_link(filename, url):
+            continue
+        score = 0
+        lowered_name = filename.lower()
+        if _has_idea_card_label(lowered_name) or "proposal" in lowered_name or "deck" in lowered_name:
+            score += 3
+        overlap = len(_token_set(filename) & (source_tokens or description_tokens))
+        if overlap >= 2:
+            score += 2
+        if _filename_extension_rank(filename) <= 3:
+            score += 1
+        if score <= 0:
+            continue
+        rank = _filename_extension_rank(filename)
+        if best is None or (score, -rank) > (best[0], -best[1]):
+            best = (score, rank, url, filename)
+
+    if best:
+        return best[2], best[3]
+
+    # Fallback: if all we have is "see attachments", pick first non-estimate-style doc.
+    for att in sorted(attachments, key=lambda a: _filename_extension_rank(str(a.get("filename") or ""))):
+        filename = str(att.get("filename") or "")
+        url = str(att.get("url") or "")
+        if filename and not _is_bad_neighbor_link(filename, url):
+            return url, filename
+    return "", ""
+
+
 def _candidate_idea_card_urls(text: str, source_text: str = "") -> list[str]:
     urls = _urls(text)
     strict = [url for url in urls if _valid_idea_card_link(text, url, source_text)]
@@ -199,7 +269,7 @@ def _candidate_idea_card_urls(text: str, source_text: str = "") -> list[str]:
     return sorted(relaxed, key=_extension_rank)
 
 
-def _normalize_verdict(verdict: dict[str, Any], description: str) -> dict[str, Any]:
+def _normalize_verdict(verdict: dict[str, Any], description: str, attachments: list[dict[str, str]]) -> dict[str, Any]:
     verdict = dict(verdict)
 
     link = str(verdict.get("link") or "").strip()
@@ -230,10 +300,19 @@ def _normalize_verdict(verdict: dict[str, Any], description: str) -> dict[str, A
                 else normalized_reason
             )
         else:
-            verdict["link"] = ""
-            verdict["source_location"] = "attachment_section"
+            attachment_link, attachment_filename = _select_attachment_link(
+                attachments,
+                source_text=source_text or attachment_statement,
+                description=description,
+            )
+            verdict["link"] = attachment_link
+            verdict["source_location"] = "attachment_section" if attachment_link else "attachment_section"
             verdict["source_text"] = attachment_statement
-            verdict["reason"] = "Description says the idea card is in the attachment section; no direct description link."
+            verdict["reason"] = (
+                f"Description says idea card is in attachments; selected attachment '{attachment_filename}'."
+                if attachment_link
+                else "Description says the idea card is in the attachment section; no direct description link."
+            )
         return verdict
 
     if normalized_link:
@@ -242,6 +321,17 @@ def _normalize_verdict(verdict: dict[str, Any], description: str) -> dict[str, A
         if normalized_reason:
             verdict["reason"] = normalized_reason
     else:
+        if str(verdict.get("source_location") or "") == "attachment_section":
+            attachment_link, attachment_filename = _select_attachment_link(
+                attachments,
+                source_text=source_text,
+                description=description,
+            )
+            if attachment_link:
+                verdict["link"] = attachment_link
+                verdict["source_location"] = "attachment_section"
+                verdict["reason"] = f"Selected attachment '{attachment_filename}' for attachment-section idea card mention."
+                return verdict
         verdict["link"] = ""
         verdict["source_location"] = verdict.get("source_location") or (
             "description_text" if verdict.get("has_idea_card") else "none"
@@ -296,12 +386,23 @@ def _heuristic(text: str, urls: list[str]) -> dict[str, Any]:
     }
 
 
-def _ask_llm(llm_client: Any, ticket_id: str, summary: str, description: str, urls: list[str]) -> dict[str, Any]:
+def _ask_llm(
+    llm_client: Any,
+    ticket_id: str,
+    summary: str,
+    description: str,
+    urls: list[str],
+    attachments: list[dict[str, str]],
+) -> dict[str, Any]:
+    attachment_view = [{"filename": a.get("filename", ""), "url": a.get("url", "")} for a in attachments]
     prompt = f"""Ticket: {ticket_id}
 Summary: {summary}
 
 URLs found in description:
 {json.dumps(urls, indent=2)}
+
+Attachments on ticket:
+{json.dumps(attachment_view, indent=2)}
 
 Description:
 {description[:8000]}
@@ -323,7 +424,7 @@ Description:
             "source_text": "",
             "reason": f"Could not parse LLM response: {raw[:200]}",
         }
-    return _normalize_verdict(parsed, description)
+    return parsed
 
 
 async def _ids_from_jql(ticket_client: Any, jql: str, limit: int | None, page_size: int) -> list[str]:
@@ -344,10 +445,10 @@ async def _ids_from_jql(ticket_client: Any, jql: str, limit: int | None, page_si
     return _clean_ticket_ids(ids)
 
 
-async def _fetch_description(ticket_client: Any, ticket_id: str) -> tuple[str, str]:
-    issue = await ticket_client.client.get_issue_by_key(ticket_id, fields=["summary", "description"])
+async def _fetch_description(ticket_client: Any, ticket_id: str) -> tuple[str, str, list[dict[str, str]]]:
+    issue = await ticket_client.client.get_issue_by_key(ticket_id, fields=["summary", "description", "attachment"])
     fields = issue.get("fields") or {}
-    return str(fields.get("summary") or ""), _description_to_text(fields.get("description"))
+    return str(fields.get("summary") or ""), _description_to_text(fields.get("description")), _extract_attachments(fields)
 
 
 async def _audit_one_ticket(
@@ -358,13 +459,16 @@ async def _audit_one_ticket(
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     async with sem:
         try:
-            summary, description = await _fetch_description(ticket_client, ticket_id)
+            summary, description, attachments = await _fetch_description(ticket_client, ticket_id)
             found_urls = _urls(description)
-            verdict = (
+            raw_verdict = (
                 _heuristic(description, found_urls)
                 if llm_client is None
-                else await asyncio.to_thread(_ask_llm, llm_client, ticket_id, summary, description, found_urls)
+                else await asyncio.to_thread(_ask_llm, llm_client, ticket_id, summary, description, found_urls, attachments)
             )
+            verdict = _normalize_verdict(raw_verdict, description, attachments)
+            attachment_urls = [str(a.get("url") or "") for a in attachments if str(a.get("url") or "")]
+            attachment_names = [str(a.get("filename") or "") for a in attachments if str(a.get("filename") or "")]
             row = {
                 "ticket_id": ticket_id,
                 "summary": summary,
@@ -378,6 +482,10 @@ async def _audit_one_ticket(
                 "reason": verdict.get("reason", "") or "",
                 "has_clear_file_reference": _has_clear_file_reference(verdict),
                 "clear_file_location": _clear_file_location(verdict),
+                "attachment_mentioned": bool(_idea_card_attachment_statement(description)),
+                "attachment_count": len(attachments),
+                "attachment_links": " | ".join(attachment_urls),
+                "attachment_filenames": " | ".join(attachment_names),
             }
             logger.info("[%s] idea_card=%s link=%s", ticket_id, row["has_idea_card"], row["idea_card_link"])
             return ticket_id, row, None

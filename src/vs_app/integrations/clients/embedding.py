@@ -62,7 +62,7 @@ class EmbeddingClient:
     def embed_many(self, texts: list[str]) -> list[list[float]]:
         """Return one embedding vector per input text (batched in a single call)."""
         payload = {
-            "api_version": "2024-04-01",
+            "api_version": "2024-06-01",
             "input": texts,
             "model": self.model,
             "encoding_format": "float",

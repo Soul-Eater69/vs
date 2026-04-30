@@ -2,8 +2,11 @@
 
 Canonical RAG code lives in `src/vs_app/modules/rag`.
 
+For the detailed merge and finalization flow, see [rag_merge_pipeline.md](rag_merge_pipeline.md).
+
 Public API exposes historical RAG only:
 - `POST /rag/value-streams`
+- `POST /rag/value-streams/stream`
 
 Historical RAG in this repo means:
 1. Retrieve candidate value streams from the value-stream index.
@@ -13,5 +16,3 @@ Historical RAG in this repo means:
 5. Return value-stream prediction output.
 
 This repo does not expose plain/semantic/combined public modes.
-
-Neo4j currently acts only as an alternate ticket source. No product-impact KG is implemented in this repo.

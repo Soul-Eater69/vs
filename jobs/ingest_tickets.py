@@ -68,6 +68,7 @@ def main() -> int:
             source=args.source,
             concurrency=args.concurrency,
             force=args.force,
+            aggregate_name=args.aggregate_name,
             enable_llm=not args.no_llm,
             enable_embeddings=not args.no_embeddings,
             build_faiss=args.build_faiss,
@@ -89,6 +90,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--output-dir", default="ticket_data")
+    parser.add_argument(
+        "--aggregate-name",
+        default="_all_summaries.json",
+        help="Aggregate summary JSON filename written under --output-dir.",
+    )
     parser.add_argument("--source", choices=["jira"], default="jira")
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--force", action="store_true", help="Reprocess tickets with existing summary.json.")
@@ -107,6 +113,7 @@ async def run_batch(
     source: str,
     concurrency: int,
     force: bool,
+    aggregate_name: str,
     enable_llm: bool,
     enable_embeddings: bool,
     build_faiss: bool,
@@ -162,8 +169,9 @@ async def run_batch(
         if summary is not None:
             summaries.append(summary)
 
+    aggregate_path = output_dir / aggregate_name
     write_json(
-        output_dir / "_all_summaries.json",
+        aggregate_path,
         {
             "total": len(summaries),
             "summaries": summaries,
@@ -185,7 +193,7 @@ async def run_batch(
     print("Batch ingest complete")
     print(f"  processed:       {len(summaries)} / {len(ticket_ids)}")
     print(f"  failed:          {len(errors)}")
-    print(f"  summaries:       {output_dir / '_all_summaries.json'}")
+    print(f"  summaries:       {aggregate_path}")
     if faiss_result:
         print(f"  faiss:           {faiss_result['index_dir']}")
         print(f"  faiss summaries: {faiss_result['summary_doc_count']}")
@@ -218,6 +226,7 @@ async def ingest_one_ticket(
         config=cfg,
         llm_client=llm_client,
     )
+    ensure_value_stream_labels(ticket_data, llm_client=llm_client)
     result = await ingest_ticket_summary_payload(
         ticket_data=ticket_data,
         jira_client=jira_client,
@@ -229,6 +238,49 @@ async def ingest_one_ticket(
     write_json(summary_path, summary_doc)
     logger.info("Wrote %s", summary_path)
     return summary_doc
+
+
+def ensure_value_stream_labels(ticket_data: dict, *, llm_client: Any = None) -> None:
+    """Patch missing labels using the old batch-index mapping path."""
+    if ticket_data.get("value_stream_names") or ticket_data.get("value_stream_ids"):
+        return
+
+    fields = ticket_data.get("fields") or {}
+    issuelinks = fields.get("issuelinks") or []
+    try:
+        from vs_app.modules.ingestion.value_stream_labels.link_classification import classify_links
+        from vs_app.modules.ingestion.value_stream_labels.theme_extraction import extract_themes
+        from vs_app.modules.ingestion.value_stream_labels.value_stream_mapping import (
+            resolve_value_stream_mapping,
+        )
+    except Exception as exc:
+        logger.warning("Value-stream mapping helpers unavailable: %s", exc)
+        return
+
+    if not ticket_data.get("themes"):
+        ticket_data["themes"] = extract_themes(issuelinks)
+
+    mapping = resolve_value_stream_mapping(
+        ticket_data,
+        classify_links(issuelinks),
+        llm_client=llm_client,
+    )
+    names = list(mapping.get("vs_names") or [])
+    ids = list(mapping.get("vs_ids") or [])
+    if not names and not ids:
+        logger.warning(
+            "%s has no resolvable value-stream links/themes",
+            ticket_data.get("key") or "<unknown>",
+        )
+        return
+
+    ticket_data["value_stream_names"] = names
+    ticket_data["value_stream_ids"] = ids
+    ticket_data["value_stream_statuses"] = list(mapping.get("vs_statuses") or [])
+    ticket_data["linked_value_streams"] = list(mapping.get("linked_value_streams") or [])
+    ticket_data["value_stream_label_source"] = str(
+        mapping.get("label_source") or "jira_issuelinks"
+    )
 
 
 def resolve_ticket_ids(
@@ -262,12 +314,12 @@ def load_ticket_ids(path: Path) -> list[str]:
     if path.suffix.lower() == ".json":
         payload = read_json(path)
         if isinstance(payload, list):
-            return [str(value) for value in payload]
+            return ticket_ids_from_values(payload)
         if isinstance(payload, dict):
             for key in ("ticket_ids", "tickets", "ids"):
                 values = payload.get(key)
                 if isinstance(values, list):
-                    return [str(value) for value in values]
+                    return ticket_ids_from_values(values)
         raise SystemExit(f"Could not find ticket IDs in JSON file: {path}")
 
     ids: list[str] = []
@@ -276,6 +328,20 @@ def load_ticket_ids(path: Path) -> list[str]:
         if not clean or clean.startswith("#"):
             continue
         ids.extend(part.strip() for part in clean.replace(",", " ").split() if part.strip())
+    return ids
+
+
+def ticket_ids_from_values(values: list[Any]) -> list[str]:
+    ids: list[str] = []
+    for value in values:
+        if isinstance(value, dict):
+            for key in ("ticket_id", "ticketId", "key", "id", "doc_id", "docId"):
+                ticket_id = str(value.get(key) or "").strip()
+                if ticket_id:
+                    ids.append(ticket_id)
+                    break
+            continue
+        ids.append(str(value))
     return ids
 
 
@@ -294,4 +360,3 @@ def write_json(path: Path, payload: Any) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

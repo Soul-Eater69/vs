@@ -143,11 +143,13 @@ def _resolve_existing_index_path(
 
 
 def _load_summary_artifacts(output_dir: Path) -> list[dict]:
-    aggregate_path = output_dir / "_all_summaries.json"
-    if aggregate_path.exists():
-        payload = _read_json(aggregate_path)
-        if isinstance(payload, dict):
-            return [row for row in (payload.get("summaries") or []) if isinstance(row, dict)]
+    for aggregate_path in (output_dir / "summaries.json", output_dir / "_all_summaries.json"):
+        if aggregate_path.exists():
+            payload = _read_json(aggregate_path)
+            if isinstance(payload, dict):
+                return [row for row in (payload.get("summaries") or []) if isinstance(row, dict)]
+            if isinstance(payload, list):
+                return [row for row in payload if isinstance(row, dict)]
 
     docs: list[dict] = []
     for path in sorted(output_dir.glob("*/summary.json")):

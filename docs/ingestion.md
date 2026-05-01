@@ -17,15 +17,16 @@ Canonical job entrypoints:
 - `py -3 jobs/update_faiss_index.py --input-dir ticket_data --index-dir ticket_data/_faiss`
 
 Use `ingest_tickets.py` for historical RAG data. It writes:
-- `ticket_data/<ticket-id>/summary.json`
-- `ticket_data/_all_summaries.json`
+- `ticket_data/summaries.json`
 
-Pass `--force` to overwrite an existing per-ticket `summary.json`.
-Pass `--aggregate-name <name>.json` if you want the aggregate file to be named something other than `_all_summaries.json`.
+It appends/replaces each ticket object as that ticket finishes, so a long batch leaves usable partial results.
+Pass `--force` to replace existing ticket objects in `summaries.json`.
+Pass `--aggregate-name <name>.json` if you want the aggregate file to be named something other than `summaries.json`.
 
 Use `extract_tickets.py` only when you want raw extraction JSON for inspection.
 
 The FAISS update job expects summary artifacts in `ticket_data`:
+- `ticket_data/summaries.json`,
 - `ticket_data/_all_summaries.json`, or
 - `ticket_data/<ticket-id>/summary.json`
 

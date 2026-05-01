@@ -2,7 +2,13 @@ from pathlib import Path
 import json
 import shutil
 
-from jobs.ingest_tickets import ensure_value_stream_labels, load_ticket_ids, resolve_ticket_ids
+from jobs.ingest_tickets import (
+    ensure_value_stream_labels,
+    load_summary_map,
+    load_ticket_ids,
+    resolve_ticket_ids,
+    write_summary_aggregate,
+)
 
 
 def test_resolve_ticket_ids_dedupes_uppercases_and_limits() -> None:
@@ -56,3 +62,27 @@ def test_ensure_value_stream_labels_uses_issue_link_mapping() -> None:
     assert ticket_data["value_stream_ids"] == ["GROUP-1"]
     assert ticket_data["value_stream_names"] == ["Issue Payment"]
     assert ticket_data["value_stream_label_source"] == "jira_issuelinks"
+
+
+def test_summary_aggregate_loads_and_replaces_by_ticket_id() -> None:
+    tmp_dir = Path("pytest-cache-files-ingest-job-test")
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir()
+    try:
+        aggregate = tmp_dir / "summaries.json"
+        write_summary_aggregate(
+            aggregate,
+            [
+                {"ticket_id": "IDMT-1", "summary_text": "old"},
+                {"ticket_id": "IDMT-2", "summary_text": "keep"},
+            ],
+        )
+        rows = load_summary_map(aggregate)
+        rows["IDMT-1"] = {"ticket_id": "IDMT-1", "summary_text": "new"}
+        write_summary_aggregate(aggregate, rows.values())
+
+        reloaded = load_summary_map(aggregate)
+        assert reloaded["IDMT-1"]["summary_text"] == "new"
+        assert reloaded["IDMT-2"]["summary_text"] == "keep"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)

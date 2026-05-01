@@ -3,8 +3,7 @@
 This is the root-level replacement for the old batch_ingest_job summary path.
 It writes:
 
-  ticket_data/<TICKET-ID>/summary.json
-  ticket_data/_all_summaries.json
+  ticket_data/summaries.json
 
 Optionally it also rebuilds:
 
@@ -80,7 +79,7 @@ def main() -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Batch ingest Jira tickets into ticket_data/<ticket>/summary.json artifacts.",
+        description="Batch ingest Jira tickets into an append-updated summaries.json artifact.",
     )
     parser.add_argument("ticket_ids", nargs="*", metavar="TICKET_ID")
     parser.add_argument(
@@ -92,12 +91,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="ticket_data")
     parser.add_argument(
         "--aggregate-name",
-        default="_all_summaries.json",
+        default="summaries.json",
         help="Aggregate summary JSON filename written under --output-dir.",
     )
     parser.add_argument("--source", choices=["jira"], default="jira")
     parser.add_argument("--concurrency", type=int, default=3)
-    parser.add_argument("--force", action="store_true", help="Reprocess tickets with existing summary.json.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Reprocess tickets that already exist in summaries.json.",
+    )
     parser.add_argument("--no-llm", action="store_true", help="Use heuristic summaries only.")
     parser.add_argument("--no-embeddings", action="store_true", help="Do not write summary_embedding.")
     parser.add_argument("--build-faiss", action="store_true", help="Rebuild FAISS after summaries are written.")
@@ -120,6 +123,9 @@ async def run_batch(
     faiss_dir: Path,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    aggregate_path = output_dir / aggregate_name
+    summaries_by_ticket = load_summary_map(aggregate_path)
+    aggregate_lock = asyncio.Lock()
 
     cfg = build_ingestion_config(
         llm_model="gpt-5-mini-idp",
@@ -143,15 +149,21 @@ async def run_batch(
         async def guarded(ticket_id: str) -> tuple[str, dict | None, str | None]:
             async with semaphore:
                 try:
+                    if not force and ticket_id in summaries_by_ticket:
+                        logger.info("%s already in %s - skipping (use --force)", ticket_id, aggregate_path)
+                        return ticket_id, summaries_by_ticket[ticket_id], None
+
                     summary = await ingest_one_ticket(
                         ticket_id=ticket_id,
-                        output_dir=output_dir,
                         jira_client=jira_client,
                         llm_client=llm_client,
                         embedding_client=embedding_client,
                         cfg=cfg,
-                        force=force,
                     )
+                    async with aggregate_lock:
+                        summaries_by_ticket[ticket_id] = summary
+                        write_summary_aggregate(aggregate_path, summaries_by_ticket.values())
+                    logger.info("Appended %s to %s", ticket_id, aggregate_path)
                     return ticket_id, summary, None
                 except Exception as exc:
                     logger.exception("Failed to ingest %s", ticket_id)
@@ -169,14 +181,8 @@ async def run_batch(
         if summary is not None:
             summaries.append(summary)
 
-    aggregate_path = output_dir / aggregate_name
-    write_json(
-        aggregate_path,
-        {
-            "total": len(summaries),
-            "summaries": summaries,
-        },
-    )
+    if summaries:
+        write_summary_aggregate(aggregate_path, summaries_by_ticket.values())
     if errors:
         write_json(output_dir / "_errors.json", errors)
 
@@ -202,24 +208,17 @@ async def run_batch(
             print(f"  [{ticket_id}] ERROR: {error}")
         else:
             names = list((summary or {}).get("value_stream_names") or [])
-            print(f"  [{ticket_id}] summary.json value_streams={names}")
+            print(f"  [{ticket_id}] summaries.json value_streams={names}")
 
 
 async def ingest_one_ticket(
     *,
     ticket_id: str,
-    output_dir: Path,
     jira_client: Any,
     llm_client: Any,
     embedding_client: Any,
     cfg: Any,
-    force: bool,
 ) -> dict:
-    ticket_dir = output_dir / ticket_id
-    summary_path = ticket_dir / "summary.json"
-    if summary_path.exists() and not force:
-        return read_json(summary_path)
-
     ticket_data = await get_ticket_data_compat(
         jira_client,
         ticket_id,
@@ -235,8 +234,6 @@ async def ingest_one_ticket(
         cfg=cfg,
     )
     summary_doc = result.to_index_doc()
-    write_json(summary_path, summary_doc)
-    logger.info("Wrote %s", summary_path)
     return summary_doc
 
 
@@ -343,6 +340,39 @@ def ticket_ids_from_values(values: list[Any]) -> list[str]:
             continue
         ids.append(str(value))
     return ids
+
+
+def load_summary_map(path: Path) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+    payload = read_json(path)
+    rows: list[Any]
+    if isinstance(payload, dict):
+        rows = list(payload.get("summaries") or [])
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        rows = []
+
+    out: dict[str, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ticket_id = str(row.get("ticket_id") or row.get("key") or "").strip().upper()
+        if ticket_id:
+            out[ticket_id] = row
+    return out
+
+
+def write_summary_aggregate(path: Path, summaries: Any) -> None:
+    rows = [row for row in summaries if isinstance(row, dict)]
+    write_json(
+        path,
+        {
+            "total": len(rows),
+            "summaries": rows,
+        },
+    )
 
 
 def read_json(path: Path) -> Any:

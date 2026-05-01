@@ -40,7 +40,7 @@ def main() -> int:
     if summary_count == 0 and not args.allow_empty:
         raise SystemExit(
             f"No summary artifacts found in {input_dir}. Expected "
-            "_all_summaries.json or <ticket>/summary.json."
+            "summaries.json, _all_summaries.json, or <ticket>/summary.json."
         )
 
     print(f"Input:       {input_dir}")
@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input-dir",
         default="ticket_data",
-        help="Directory containing _all_summaries.json or per-ticket summary.json files.",
+        help="Directory containing summaries.json or compatible summary artifacts.",
     )
     parser.add_argument(
         "--index-dir",
@@ -99,8 +99,9 @@ def validate_input_dir(input_dir: Path) -> None:
 
 
 def count_summary_artifacts(input_dir: Path) -> int:
-    aggregate = input_dir / "_all_summaries.json"
-    if aggregate.exists():
+    for aggregate in (input_dir / "summaries.json", input_dir / "_all_summaries.json"):
+        if not aggregate.exists():
+            continue
         payload = read_json(aggregate)
         if isinstance(payload, dict) and isinstance(payload.get("summaries"), list):
             return len(payload["summaries"])
@@ -137,4 +138,3 @@ def read_json(path: Path) -> Any:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

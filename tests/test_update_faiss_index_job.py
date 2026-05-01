@@ -10,7 +10,7 @@ def test_counts_aggregate_summary_and_chunk_artifacts() -> None:
     shutil.rmtree(tmp_dir, ignore_errors=True)
     tmp_dir.mkdir()
     try:
-        (tmp_dir / "_all_summaries.json").write_text(
+        (tmp_dir / "summaries.json").write_text(
             json.dumps({"summaries": [{"ticket_id": "IDMT-1"}, {"ticket_id": "IDMT-2"}]}),
             encoding="utf-8",
         )

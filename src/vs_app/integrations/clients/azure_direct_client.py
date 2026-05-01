@@ -150,6 +150,7 @@ class AzureDirectSearchClient:
         top_k: int = 5,
         filter_expression: Optional[str] = None,
         select: Optional[List[str]] = None,
+        search_fields: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Pure keyword (BM25) search - no vector involved.
@@ -166,6 +167,7 @@ class AzureDirectSearchClient:
             filter=filter_expression,
             top=top_k,
             select=select or _DEFAULT_SELECT_FIELDS,
+            search_fields=search_fields,
         )
 
         return self._collect(results)
@@ -178,6 +180,7 @@ class AzureDirectSearchClient:
         exhaustive: bool = False,
         filter_expression: Optional[str] = None,
         select: Optional[List[str]] = None,
+        search_fields: Optional[List[str]] = None,
         semantic_config: Optional[str] = config.AZURE_SEARCH_SEMANTIC_CONFIG,
         use_semantic_rerank: bool = True,
     ) -> List[Dict[str, Any]]:
@@ -212,6 +215,7 @@ class AzureDirectSearchClient:
             filter=filter_expression,
             top=top_k,
             select=select or _DEFAULT_SELECT_FIELDS,
+            search_fields=search_fields,
         )
 
         if use_semantic_rerank and semantic_config:

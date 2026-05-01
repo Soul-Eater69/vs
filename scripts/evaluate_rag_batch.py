@@ -284,11 +284,14 @@ def run_batch(
             except Exception as exc:
                 result = failed_result(item, exc)
             results.append(result)
-            print(
-                f"[{completed}/{total}] {result.ticket_id} "
-                f"{result.status} p={result.precision:.3f} r={result.recall:.3f} "
-                f"f1={result.f1:.3f} {result.elapsed_seconds:.1f}s"
-            )
+            if result.status == "ok":
+                print(
+                    f"[{completed}/{total}] {result.ticket_id} "
+                    f"{result.status} p={result.precision:.3f} r={result.recall:.3f} "
+                    f"f1={result.f1:.3f} {result.elapsed_seconds:.1f}s"
+                )
+            else:
+                print(f"[{completed}/{total}] {result.ticket_id} error {result.error}")
 
     return sorted(results, key=lambda row: row.ticket_id)
 

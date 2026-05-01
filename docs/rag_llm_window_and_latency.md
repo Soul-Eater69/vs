@@ -473,7 +473,7 @@ Now direct selection uses:
 max_select = min(22, max(12, ceil(candidate_count * 0.65)))
 ```
 
-The implementation also applies an evidence-aware ceiling based on how many strong direct candidates are in the prompt. This keeps the high-recall headroom but avoids giving a noisy direct prompt permission to select nearly everything.
+The implementation now uses the direct candidate count only. We intentionally avoid an evidence-aware ceiling here because the eval set showed recall dropping when plausible direct candidates were hidden behind another post-retrieval gate.
 
 Examples:
 
@@ -752,7 +752,7 @@ The LLM is not allowed to invent streams.
 
 This is an important safety rail: widening the LLM window gives the model more real candidates, but it still cannot pick arbitrary labels.
 
-### Step 4: Filter Weak Selections
+### Step 4: Filter Weak Historical-Only Selections
 
 Historical-only selections get evidence checked again.
 
@@ -764,32 +764,7 @@ weak_historical_gap_fill_evidence
 
 This is why some historical-only false positives do not make final output even if the model picked them.
 
-Confirmed direct selections are also checked. A row being `MERGED` only means semantic retrieval and historical support both touched the same value stream; it does not automatically mean the evidence is strong. Weak confirmed rows can be false positives when they have low semantic scores and only a few historical hits.
-
-For a confirmed row selected by the LLM to survive, it now needs evidence such as:
-
-```text
-semantic_score >= 1.35
-or semantic_score >= 1.25 and best_support_score >= 0.58
-or support_count >= 5 and semantic_score >= 1.20 and best_support_score >= 0.60
-or support_count >= 8 and semantic_score >= 1.10 and best_support_score >= 0.60
-```
-
-Semantic-only direct selections are filtered too:
-
-```text
-semantic_score >= 1.25
-```
-
-This is meant to filter rows like:
-
-```text
-MERGED / SENT TO LLM / PROTECTED CONFIRMED LANE
-semantic around 1.15
-historical support around 3 hits
-```
-
-Those rows are useful to see in debug, but they should not automatically become final predictions.
+Direct LLM selections are trusted after sanitizer validation. That means `confirmed_direct` and `semantic_direct` rows selected by the LLM are kept even when their scores are borderline. This is the recall-first setting: the ground-truth labels can be incomplete, so the pipeline should not discard a plausible direct business selection just because one numeric gate is low.
 
 ### Step 5: Merge Selected Rows
 
@@ -816,7 +791,7 @@ If the LLM skipped one but evidence is strong enough, `_rescue_confirmed_merged(
 Current budget:
 
 ```text
-_CONFIRMED_MERGED_RESCUE_BUDGET = 8
+_CONFIRMED_MERGED_RESCUE_BUDGET = 12
 ```
 
 Evidence gate:
@@ -824,9 +799,9 @@ Evidence gate:
 ```text
 weighted_support >= 0.75
 and one of:
-  support_count >= 5 and semantic_score >= 1.25 and best_score >= 0.60
-  support_count >= 8 and semantic_score >= 1.15 and best_score >= 0.60
-  support_count >= 3 and semantic_score >= 1.40 and best_score >= 0.68
+  support_count >= 5 and semantic_score >= 1.20 and best_score >= 0.60
+  support_count >= 5 and semantic_score >= 1.00
+  support_count >= 3 and semantic_score >= 1.35 and best_score >= 0.65
 ```
 
 This rescue exists because `confirmed_direct` rows are the most trustworthy: two independent paths found the same value stream.

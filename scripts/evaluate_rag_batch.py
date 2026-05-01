@@ -91,6 +91,7 @@ def main() -> int:
         shuffle=not args.no_shuffle,
         require_ground_truth=not args.allow_missing_ground_truth,
         ticket_ids=args.ticket_ids,
+        min_ground_truth_streams=args.min_ground_truth_streams,
     )
 
     if not items:
@@ -105,7 +106,8 @@ def main() -> int:
     started = datetime.now(timezone.utc)
     print(
         f"Evaluating {len(items)} tickets with concurrency={args.concurrency}, "
-        f"top_k={args.fetch_count}, exclude_source={not args.include_source_ticket}"
+        f"top_k={args.fetch_count}, exclude_source={not args.include_source_ticket}, "
+        f"min_truth_streams={args.min_ground_truth_streams}"
     )
 
     results = run_batch(
@@ -124,6 +126,7 @@ def main() -> int:
         "limit": args.limit,
         "concurrency": args.concurrency,
         "fetch_count": args.fetch_count,
+        "min_ground_truth_streams": args.min_ground_truth_streams,
         "exclude_source_ticket": not args.include_source_ticket,
         "summary": summary,
         "results": [serialize_result(row) for row in results],
@@ -158,6 +161,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--fetch-count", type=int, default=30)
+    parser.add_argument(
+        "--min-ground-truth-streams",
+        type=int,
+        default=2,
+        help=(
+            "Minimum number of ground-truth value streams a ticket must have to be sampled. "
+            "Default 2 avoids single-label tickets dominating precision/recall diagnostics."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no-shuffle", action="store_true")
     parser.add_argument(
@@ -220,6 +232,7 @@ def discover_items(
     shuffle: bool,
     require_ground_truth: bool,
     ticket_ids: list[str] | None,
+    min_ground_truth_streams: int = 2,
 ) -> list[EvaluationItem]:
     if not idea_cards_dir.exists():
         raise SystemExit(f"Idea-card folder not found: {idea_cards_dir}")
@@ -235,6 +248,8 @@ def discover_items(
             continue
         ground_truth = ground_truth_by_ticket.get(ticket_id, [])
         if require_ground_truth and not ground_truth:
+            continue
+        if require_ground_truth and len(ground_truth) < max(1, min_ground_truth_streams):
             continue
         candidates.append(
             EvaluationItem(
@@ -414,6 +429,9 @@ def summarize(results: list[TicketMetrics]) -> dict[str, Any]:
         "total": len(results),
         "ok": len(ok_rows),
         "errors": len(error_rows),
+        "precision": round(micro_precision, 4),
+        "recall": round(micro_recall, 4),
+        "f1": round(micro_f1, 4),
         "macro_precision": round(average(row.precision for row in ok_rows), 4),
         "macro_recall": round(average(row.recall for row in ok_rows), 4),
         "macro_f1": round(average(row.f1 for row in ok_rows), 4),
@@ -526,12 +544,9 @@ def print_summary(summary: dict[str, Any]) -> None:
     print("")
     print("Summary")
     print(f"  tickets:         {summary['ok']}/{summary['total']} ok ({summary['errors']} errors)")
-    print(f"  macro precision: {summary['macro_precision']:.4f}")
-    print(f"  macro recall:    {summary['macro_recall']:.4f}")
-    print(f"  macro f1:        {summary['macro_f1']:.4f}")
-    print(f"  micro precision: {summary['micro_precision']:.4f}")
-    print(f"  micro recall:    {summary['micro_recall']:.4f}")
-    print(f"  micro f1:        {summary['micro_f1']:.4f}")
+    print(f"  precision:       {summary['precision']:.4f}")
+    print(f"  recall:          {summary['recall']:.4f}")
+    print(f"  f1:              {summary['f1']:.4f}")
     print(f"  avg seconds:     {summary['avg_elapsed_seconds']:.3f}")
 
 

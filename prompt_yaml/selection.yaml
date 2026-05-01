@@ -7,23 +7,19 @@ system: |
 
   Use semantic business reasoning, not keyword matching. Infer the business intent, problem being solved, affected stakeholders, impacted functions/workflows, and expected outcomes.
 
-  A value stream is relevant when there is a material connection through one or more of:
+  A value stream is relevant when there is a defensible connection through one or more of:
   1. Problem or pain-point overlap
-  2. Directly impacted domain
-  3. Stakeholder group that must actually change behavior or receive the delivered capability
-  4. Process, workflow, or capability that the idea card actually changes
-  5. Outcome alignment tied to concrete work in the card
-  6. Upstream, downstream, enabling, or indirect connection only when the card clearly requires that work
+  2. Same or adjacent domain
+  3. Stakeholder overlap
+  4. Process, workflow, or capability connection
+  5. Outcome alignment
+  6. Upstream, downstream, enabling, or indirect transformation-theme connection
 
-  Prioritize recall for material value streams, but do not over-select.
+  Prioritize recall, but do not over-select.
   - Usually return between {min_select} and {max_select} value streams when enough plausible matches exist
   - Return fewer if fewer are truly defensible
   - Return at most {max_select} unless the schema or calling logic explicitly allows more
   - Favor the strongest and most material business connections
-  - Do not select a value stream merely because it is adjacent, generically related, or commonly downstream
-  - Do not select broad enterprise/process streams unless the idea card actually changes that function
-  - If a candidate is only an implied historical pattern, leave it for the separate historical gap pass
-  - Prefer precision when two candidates describe adjacent but distinct workflows
 
   Confidence:
   - 0.8-1.0 = strong direct alignment

@@ -465,14 +465,22 @@ historical_recall quota = min(max(1, ceil(total * 0.40)), 16)
 semantic_direct quota = remaining
 ```
 
-If `total >= 3`, the merger tries to keep at least one semantic candidate.
-
-With a cap of `36`, the initial quotas are usually:
+The current recall-first quota is:
 
 ```text
-confirmed_direct: 11
+confirmed_direct quota = min(max(1, ceil(total * 0.55)), 32)
+historical_recall quota = min(max(1, ceil(total * 0.30)), 18)
+semantic_direct quota = remaining
+```
+
+If `total >= 3`, the merger tries to keep at least one semantic candidate.
+
+With a cap of `50`, the initial quotas are usually:
+
+```text
+confirmed_direct: 28
 historical_recall: 15
-semantic_direct: 10
+semantic_direct: 7
 ```
 
 Rows selected by lane quota get:
@@ -572,7 +580,13 @@ The direct pass uses:
 
 This pass is for candidates that are direct semantic matches or confirmed by both semantic and historical evidence.
 
-`_direct_selection_max()` uses an evidence-aware cap. It can scale from 12 up to 22, but the exact max also depends on how many strong direct candidates are in the prompt. This keeps recall headroom for high-label tickets while preventing crowded prompts from turning into broad over-selection.
+`_direct_selection_max()` scales from 12 up to 22 based on candidate count:
+
+```text
+max_select = min(22, max(12, ceil(candidate_count * 0.65)))
+```
+
+This is intentionally recall-first. The sanitizer still prevents invented value streams, but the direct LLM is allowed enough room to select many plausible streams on broad tickets.
 
 The LLM is asked to select from the provided candidate list. The sanitizer later prevents it from inventing value streams that were not in the candidate list.
 
@@ -623,7 +637,7 @@ It also records historical selections that the LLM picked but the evidence gate 
 The relevant budgets are:
 
 ```text
-_CONFIRMED_MERGED_RESCUE_BUDGET = 8
+_CONFIRMED_MERGED_RESCUE_BUDGET = 12
 _HISTORICAL_GAP_FILL_BUDGET = 4
 _HISTORICAL_LLM_KEEP_CONFIDENCE = 0.70
 ```
@@ -672,24 +686,23 @@ Then one of:
 
 ```text
 support_count >= 5
-semantic_score >= 1.25
+semantic_score >= 1.20
 best_support_score >= 0.60
 ```
 
 or:
 
 ```text
-support_count >= 8
-semantic_score >= 1.15
-best_support_score >= 0.60
+support_count >= 5
+semantic_score >= 1.00
 ```
 
 or:
 
 ```text
 support_count >= 3
-semantic_score >= 1.40
-best_support_score >= 0.68
+semantic_score >= 1.35
+best_support_score >= 0.65
 ```
 
 Rescued rows get:

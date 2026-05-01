@@ -97,7 +97,7 @@ def test_direct_selection_max_scales_for_many_confirmed_candidates() -> None:
     assert _direct_selection_max(50) == 22
 
 
-def test_direct_selection_max_uses_evidence_budget_for_noisy_direct_prompt() -> None:
+def test_direct_selection_max_uses_candidate_count_for_recall_headroom() -> None:
     weak_candidates = [
         _confirmed_candidate(f"Weak Confirmed {idx}", semantic=1.15, best=0.62, support=3)
         for idx in range(30)
@@ -107,7 +107,7 @@ def test_direct_selection_max_uses_evidence_budget_for_noisy_direct_prompt() -> 
         for idx in range(4)
     ]
 
-    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 12
+    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 22
 
 
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:
@@ -345,7 +345,7 @@ def test_finalize_selected_rewrites_score_based_llm_reason() -> None:
     assert not _has_score_language(final_selected[0]["reason"])
 
 
-def test_finalize_selected_drops_low_score_semantic_direct_llm_selection() -> None:
+def test_finalize_selected_keeps_low_score_semantic_direct_llm_selection() -> None:
     llm_selected = _selected("Adjacent Semantic Candidate")
     semantic_candidate = {
         "entity_id": "semantic-low",
@@ -362,8 +362,8 @@ def test_finalize_selected_drops_low_score_semantic_direct_llm_selection() -> No
         llm_candidates=[semantic_candidate],
     )
 
-    assert final_selected == []
-    assert filtered_llm == []
+    assert [row["entity_name"] for row in final_selected] == ["Adjacent Semantic Candidate"]
+    assert [row["entity_name"] for row in filtered_llm] == ["Adjacent Semantic Candidate"]
     assert rescued_confirmed == []
     assert rescued == []
     assert dropped == []
@@ -396,7 +396,7 @@ def test_finalize_selected_keeps_clear_semantic_direct_llm_selection() -> None:
 def test_finalize_selected_rescues_repeated_confirmed_merged_miss() -> None:
     candidate = _confirmed_candidate(
         "Manage Invoice and Payment Receipt",
-        semantic=1.253,
+        semantic=1.203,
         best=0.710,
         support=8,
     )
@@ -495,7 +495,7 @@ def test_finalize_selected_does_not_rescue_two_hit_borderline_confirmed_candidat
     assert dropped == []
 
 
-def test_finalize_selected_drops_weak_confirmed_direct_llm_selection() -> None:
+def test_finalize_selected_keeps_weak_confirmed_direct_llm_selection() -> None:
     candidate = _confirmed_candidate(
         "Appeal Decision",
         semantic=1.152,
@@ -510,8 +510,8 @@ def test_finalize_selected_drops_weak_confirmed_direct_llm_selection() -> None:
         llm_candidates=[candidate],
     )
 
-    assert final_selected == []
-    assert filtered_llm == []
+    assert [row["entity_name"] for row in final_selected] == ["Appeal Decision"]
+    assert [row["entity_name"] for row in filtered_llm] == ["Appeal Decision"]
     assert rescued_confirmed == []
     assert rescued_gap_fill == []
     assert dropped == []

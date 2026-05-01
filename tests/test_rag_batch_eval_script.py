@@ -45,9 +45,36 @@ def test_discover_items_samples_matching_idea_cards_with_ground_truth() -> None:
             shuffle=False,
             require_ground_truth=True,
             ticket_ids=None,
+            min_ground_truth_streams=1,
         )
 
         assert [item.ticket_id for item in items] == ["IDMT-1"]
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_discover_items_skips_single_label_tickets_by_default() -> None:
+    tmp_dir = Path("pytest-cache-files-rag-eval-min-truth-test")
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    tmp_dir.mkdir()
+    try:
+        (tmp_dir / "IDMT-1.txt").write_text("one", encoding="utf-8")
+        (tmp_dir / "IDMT-2.txt").write_text("two", encoding="utf-8")
+
+        items = discover_items(
+            idea_cards_dir=tmp_dir,
+            ground_truth_by_ticket={
+                "IDMT-1": ["A"],
+                "IDMT-2": ["A", "B"],
+            },
+            limit=10,
+            seed=7,
+            shuffle=False,
+            require_ground_truth=True,
+            ticket_ids=None,
+        )
+
+        assert [item.ticket_id for item in items] == ["IDMT-2"]
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -110,6 +137,9 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
 
     assert summary["macro_precision"] == 0.75
     assert summary["macro_recall"] == 0.75
+    assert summary["precision"] == 0.6667
+    assert summary["recall"] == 0.6667
+    assert summary["f1"] == 0.6667
     assert summary["micro_precision"] == 0.6667
     assert summary["micro_recall"] == 0.6667
     assert summary["avg_elapsed_seconds"] == 2.0

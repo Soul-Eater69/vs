@@ -92,9 +92,9 @@ def test_split_llm_candidates_keeps_direct_and_historical_passes_disjoint() -> N
 
 
 def test_direct_selection_max_scales_for_many_confirmed_candidates() -> None:
-    assert _direct_selection_max(8) == 12
-    assert _direct_selection_max(30) == 20
-    assert _direct_selection_max(50) == 22
+    assert _direct_selection_max(8) == 10
+    assert _direct_selection_max(30) == 15
+    assert _direct_selection_max(50) == 18
 
 
 def test_direct_selection_max_uses_evidence_budget_for_noisy_direct_prompt() -> None:
@@ -107,7 +107,7 @@ def test_direct_selection_max_uses_evidence_budget_for_noisy_direct_prompt() -> 
         for idx in range(4)
     ]
 
-    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 12
+    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 10
 
 
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:
@@ -294,6 +294,7 @@ def test_finalize_selected_keeps_semantic_selected_outside_gap_fill_budget() -> 
         "candidate_lane": "semantic_direct",
         "from_historical": False,
         "from_semantic": True,
+        "semantic_score": 1.40,
     }
     historical_candidate = _historical_candidate("Recover Overpayment", best=0.73, avg=0.63)
 
@@ -327,6 +328,7 @@ def test_finalize_selected_rewrites_score_based_llm_reason() -> None:
         "candidate_lane": "semantic_direct",
         "from_historical": False,
         "from_semantic": True,
+        "semantic_score": 1.72,
         "description": "Creating and launching new products for the market.",
     }
 
@@ -343,10 +345,58 @@ def test_finalize_selected_rewrites_score_based_llm_reason() -> None:
     assert not _has_score_language(final_selected[0]["reason"])
 
 
+def test_finalize_selected_drops_low_score_semantic_direct_llm_selection() -> None:
+    llm_selected = _selected("Adjacent Semantic Candidate")
+    semantic_candidate = {
+        "entity_id": "semantic-low",
+        "entity_name": "Adjacent Semantic Candidate",
+        "candidate_lane": "semantic_direct",
+        "from_historical": False,
+        "from_semantic": True,
+        "semantic_score": 1.12,
+    }
+
+    final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[llm_selected],
+        llm_candidates=[semantic_candidate],
+    )
+
+    assert final_selected == []
+    assert filtered_llm == []
+    assert rescued_confirmed == []
+    assert rescued == []
+    assert dropped == []
+
+
+def test_finalize_selected_keeps_clear_semantic_direct_llm_selection() -> None:
+    llm_selected = _selected("Clear Semantic Candidate")
+    semantic_candidate = {
+        "entity_id": "semantic-clear",
+        "entity_name": "Clear Semantic Candidate",
+        "candidate_lane": "semantic_direct",
+        "from_historical": False,
+        "from_semantic": True,
+        "semantic_score": 1.31,
+    }
+
+    final_selected, filtered_llm, rescued_confirmed, rescued, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[llm_selected],
+        llm_candidates=[semantic_candidate],
+    )
+
+    assert [row["entity_name"] for row in final_selected] == ["Clear Semantic Candidate"]
+    assert [row["entity_name"] for row in filtered_llm] == ["Clear Semantic Candidate"]
+    assert rescued_confirmed == []
+    assert rescued == []
+    assert dropped == []
+
+
 def test_finalize_selected_rescues_repeated_confirmed_merged_miss() -> None:
     candidate = _confirmed_candidate(
         "Manage Invoice and Payment Receipt",
-        semantic=1.203,
+        semantic=1.253,
         best=0.710,
         support=8,
     )

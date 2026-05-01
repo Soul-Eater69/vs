@@ -773,6 +773,12 @@ or support_count >= 5 and semantic_score >= 1.20 and best_support_score >= 0.60
 or support_count >= 8 and semantic_score >= 1.10 and best_support_score >= 0.60
 ```
 
+Semantic-only direct selections are filtered too:
+
+```text
+semantic_score >= 1.25
+```
+
 This is meant to filter rows like:
 
 ```text
@@ -808,7 +814,7 @@ If the LLM skipped one but evidence is strong enough, `_rescue_confirmed_merged(
 Current budget:
 
 ```text
-_CONFIRMED_MERGED_RESCUE_BUDGET = 12
+_CONFIRMED_MERGED_RESCUE_BUDGET = 8
 ```
 
 Evidence gate:
@@ -816,9 +822,9 @@ Evidence gate:
 ```text
 weighted_support >= 0.75
 and one of:
-  support_count >= 5 and semantic_score >= 1.20 and best_score >= 0.60
-  support_count >= 5 and semantic_score >= 1.00
-  support_count >= 3 and semantic_score >= 1.35 and best_score >= 0.65
+  support_count >= 5 and semantic_score >= 1.25 and best_score >= 0.60
+  support_count >= 8 and semantic_score >= 1.15 and best_score >= 0.60
+  support_count >= 3 and semantic_score >= 1.40 and best_score >= 0.68
 ```
 
 This rescue exists because `confirmed_direct` rows are the most trustworthy: two independent paths found the same value stream.

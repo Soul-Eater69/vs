@@ -572,7 +572,7 @@ The direct pass uses:
 
 This pass is for candidates that are direct semantic matches or confirmed by both semantic and historical evidence.
 
-`_direct_selection_max()` scales from 12 up to 22 as the candidate list grows. This matters for tickets whose ground truth contains more than 12 value streams; otherwise the LLM prompt itself prevents full recall even when retrieval and merge found the right streams.
+`_direct_selection_max()` now uses an evidence-aware cap. It usually scales from 10 up to 18, but the exact max also depends on how many strong direct candidates are in the prompt. This keeps crowded prompts from turning into broad over-selection.
 
 The LLM is asked to select from the provided candidate list. The sanitizer later prevents it from inventing value streams that were not in the candidate list.
 
@@ -623,7 +623,7 @@ It also records historical selections that the LLM picked but the evidence gate 
 The relevant budgets are:
 
 ```text
-_CONFIRMED_MERGED_RESCUE_BUDGET = 12
+_CONFIRMED_MERGED_RESCUE_BUDGET = 8
 _HISTORICAL_GAP_FILL_BUDGET = 4
 _HISTORICAL_LLM_KEEP_CONFIDENCE = 0.70
 ```
@@ -672,23 +672,24 @@ Then one of:
 
 ```text
 support_count >= 5
-semantic_score >= 1.20
+semantic_score >= 1.25
 best_support_score >= 0.60
 ```
 
 or:
 
 ```text
-support_count >= 5
-semantic_score >= 1.00
+support_count >= 8
+semantic_score >= 1.15
+best_support_score >= 0.60
 ```
 
 or:
 
 ```text
 support_count >= 3
-semantic_score >= 1.35
-best_support_score >= 0.65
+semantic_score >= 1.40
+best_support_score >= 0.68
 ```
 
 Rescued rows get:

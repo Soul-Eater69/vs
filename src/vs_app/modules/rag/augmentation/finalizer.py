@@ -15,7 +15,7 @@ from .prompt_context import (
 logger = logging.getLogger(__name__)
 
 _HISTORICAL_GAP_FILL_BUDGET = 4
-_CONFIRMED_MERGED_RESCUE_BUDGET = 12
+_CONFIRMED_MERGED_RESCUE_BUDGET = 8
 _HISTORICAL_LLM_KEEP_CONFIDENCE = 0.70
 
 
@@ -171,13 +171,13 @@ def _run_selection_pass(
 
 def _direct_selection_max(candidates: int | List[dict]) -> int:
     if isinstance(candidates, int):
-        return min(22, max(12, math.ceil(max(0, candidates) * 0.65)))
+        return min(18, max(10, math.ceil(max(0, candidates) * 0.50)))
 
     candidate_count = len(candidates)
     strong_count = sum(1 for row in candidates if _is_strong_direct_prompt_candidate(row))
-    scaled_cap = math.ceil(candidate_count * 0.65)
-    evidence_cap = strong_count + 4
-    return min(22, max(12, min(scaled_cap, evidence_cap)))
+    scaled_cap = math.ceil(candidate_count * 0.50)
+    evidence_cap = strong_count + 3
+    return min(18, max(10, min(scaled_cap, evidence_cap)))
 
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:
@@ -215,6 +215,8 @@ def _finalize_selected(
             dropped_gap_fill.append(_with_gap_fill_reason(row, candidate, "weak_historical_gap_fill_evidence"))
             continue
         if _is_confirmed_merged_candidate(candidate) and not _passes_confirmed_llm_evidence(candidate):
+            continue
+        if _is_semantic_direct_candidate(candidate) and not _passes_semantic_llm_evidence(candidate):
             continue
         filtered_llm_selected.append(_rewrite_score_reason(row, candidate))
 
@@ -360,6 +362,16 @@ def _is_confirmed_merged_candidate(row: dict | None) -> bool:
     )
 
 
+def _is_semantic_direct_candidate(row: dict | None) -> bool:
+    if not row:
+        return False
+    return (
+        str(row.get("candidate_lane") or "") == "semantic_direct"
+        and bool(row.get("from_semantic"))
+        and not bool(row.get("from_historical"))
+    )
+
+
 def _passes_confirmed_merged_evidence(row: dict | None) -> bool:
     if not row:
         return False
@@ -370,11 +382,11 @@ def _passes_confirmed_merged_evidence(row: dict | None) -> bool:
 
     if weighted_support < 0.75:
         return False
-    if support_count >= 5 and semantic_score >= 1.20 and best_score >= 0.60:
+    if support_count >= 5 and semantic_score >= 1.25 and best_score >= 0.60:
         return True
-    if support_count >= 5 and semantic_score >= 1.00:
+    if support_count >= 8 and semantic_score >= 1.15 and best_score >= 0.60:
         return True
-    return support_count >= 3 and semantic_score >= 1.35 and best_score >= 0.65
+    return support_count >= 3 and semantic_score >= 1.40 and best_score >= 0.68
 
 
 def _passes_confirmed_llm_evidence(row: dict | None) -> bool:
@@ -394,6 +406,12 @@ def _passes_confirmed_llm_evidence(row: dict | None) -> bool:
     if support_count >= 8 and semantic_score >= 1.10 and best_score >= 0.60 and weighted_support >= 0.75:
         return True
     return False
+
+
+def _passes_semantic_llm_evidence(row: dict | None) -> bool:
+    if not row:
+        return False
+    return float(row.get("semantic_score", 0.0) or 0.0) >= 1.25
 
 
 def _is_strong_direct_prompt_candidate(row: dict) -> bool:

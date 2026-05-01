@@ -109,7 +109,7 @@ def test_merge_candidate_sources_protects_historical_recall_from_semantic_crowdi
             "avg_support_score": 0.74,
             "supporting_ticket_ids": ["IDMT-1", "IDMT-2", "IDMT-3"],
             "historical_reasons": ["[IDMT-1 / implied] similar digital care rollout"],
-            "label_sources": ["jira_themes_fallback"],
+            "label_sources": ["jira_issuelinks"],
         }
     ]
 
@@ -173,7 +173,7 @@ def test_merge_candidate_sources_prioritizes_repeated_historical_gap_within_lane
                 "IDMT-15",
             ],
             "historical_reasons": ["[IDMT-10 / implied] recurring billing analog"],
-            "label_sources": ["jira_themes_fallback"],
+            "label_sources": ["jira_issuelinks"],
         },
         {
             "entity_id": "hist-repeated-util",
@@ -188,7 +188,7 @@ def test_merge_candidate_sources_prioritizes_repeated_historical_gap_within_lane
             "avg_support_score": 0.62,
             "supporting_ticket_ids": ["IDMT-20", "IDMT-21", "IDMT-22", "IDMT-23"],
             "historical_reasons": ["[IDMT-20 / implied] recurring utilization analog"],
-            "label_sources": ["jira_themes_fallback"],
+            "label_sources": ["jira_issuelinks"],
         },
     ]
 
@@ -383,7 +383,7 @@ def test_merge_candidate_sources_admits_repeated_implied_recovery_when_weighted_
             "avg_support_score": 0.67,
             "supporting_ticket_ids": ["IDMT-1", "IDMT-2", "IDMT-3", "IDMT-4"],
             "historical_reasons": ["[IDMT-1 / implied] recurring payment and billing workflow"],
-            "label_sources": ["jira_themes_fallback"],
+            "label_sources": ["jira_issuelinks"],
         }
     ]
 
@@ -415,7 +415,7 @@ def test_merge_candidate_sources_admits_moderate_repeated_support_after_source_e
                 "IDMT-31171",
             ],
             "historical_reasons": ["[IDMT-8199 / implied] recurring payment workflow"],
-            "label_sources": ["jira_themes_fallback"],
+            "label_sources": ["jira_issuelinks"],
         }
     ]
 
@@ -487,7 +487,7 @@ def test_merge_candidate_sources_keeps_deep_confirmed_ground_truth_inside_wider_
             "avg_support_score": 0.57,
             "supporting_ticket_ids": [f"IDMT-H{idx}", f"IDMT-H{idx + 100}"],
             "historical_reasons": [f"[IDMT-H{idx} / implied] recurring gap analog"],
-            "label_sources": ["jira_themes_fallback"],
+            "label_sources": ["jira_issuelinks"],
         }
         for idx in range(12)
     )

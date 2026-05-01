@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from vs_app.modules.ingestion.value_stream_labels import value_stream_mapping
 from vs_app.modules.ingestion.value_stream_labels.value_stream_mapping import (
     resolve_value_stream_mapping,
 )
 
 
-def test_theme_fallback_resolves_value_stream_prefix_before_product_suffix() -> None:
+def test_missing_value_stream_links_returns_no_labels() -> None:
     result = resolve_value_stream_mapping(
         {
             "themes": [
@@ -36,25 +35,21 @@ def test_theme_fallback_resolves_value_stream_prefix_before_product_suffix() -> 
         {"vs": []},
     )
 
-    assert result["label_source"] == "jira_themes_fallback"
-    assert result["vs_names"] == [
-        "Order to Cash for Group Coverage",
-        "Perform Engagement",
-        "Resolve Request-Inquiry",
-    ]
-    assert "Fill and Manage Prescriptions" not in result["vs_names"]
+    assert result["label_source"] == "jira_issuelinks"
+    assert result["vs_names"] == []
+    assert result["vs_ids"] == []
+    assert result["linked_value_streams"] == []
 
 
-def test_unresolved_theme_fallback_sends_full_raw_line_to_llm(monkeypatch) -> None:
-    captured_entries = []
+def test_missing_value_stream_links_does_not_call_llm_verifier(monkeypatch) -> None:
+    from vs_app.modules.ingestion.value_stream_labels import value_stream_mapping
 
     def fake_verify(entries, llm_client=None):
-        captured_entries.extend(entries)
-        return {}
+        raise AssertionError("LLM verifier should not run without VS issue links")
 
     monkeypatch.setattr(value_stream_mapping, "_verify_names_with_llm", fake_verify)
 
-    resolve_value_stream_mapping(
+    result = resolve_value_stream_mapping(
         {
             "themes": [
                 {
@@ -70,9 +65,4 @@ def test_unresolved_theme_fallback_sends_full_raw_line_to_llm(monkeypatch) -> No
         llm_client=object(),
     )
 
-    assert captured_entries == [
-        {
-            "raw_name": "Unknown Prefix : Widget Program",
-            "cleaned_name": "Widget Program",
-        }
-    ]
+    assert result["vs_names"] == []

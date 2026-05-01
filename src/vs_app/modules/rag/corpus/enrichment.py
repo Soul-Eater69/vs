@@ -30,13 +30,6 @@ def _build_prompt(raw_text: str, vs_labels: List[str]) -> str:
     return build_historical_enrichment_prompt(raw_text=cleaned, vs_list=vs_list)
 
 
-def _make_fallback_vs(vs_labels: List[str], reason: str) -> List[VSAttachment]:
-    return [
-        VSAttachment(vs_name=name, inference_type=InferenceType.DIRECT, reason=reason)
-        for name in vs_labels
-    ]
-
-
 def enrich_one(ticket: RawTicket, model: str = ENRICHMENT_MODEL) -> EnrichedTicket:
     from vs_app.integrations.clients.llm import IDPChatOpenAI
 
@@ -54,7 +47,6 @@ def enrich_one(ticket: RawTicket, model: str = ENRICHMENT_MODEL) -> EnrichedTick
         logger.warning("[ENRICH] %s: text too short, skipping LLM", ticket.ticket_id)
         base.enrichment_status = "failed"
         base.summary = ticket.title
-        base.value_streams = _make_fallback_vs(ticket.value_stream_labels, "No text for classification")
         return base
 
     try:
@@ -69,19 +61,10 @@ def enrich_one(ticket: RawTicket, model: str = ENRICHMENT_MODEL) -> EnrichedTick
         base.domain_tags = result.domain_tags
         base.enrichment_status = "enriched"
 
-        classified = {item.vs_name.lower().strip() for item in result.vs_classifications}
         for item in result.vs_classifications:
             base.value_streams.append(VSAttachment(
                 vs_name=item.vs_name, inference_type=item.inference_type, reason=item.reason,
             ))
-
-        for name in ticket.value_stream_labels:
-            if name.lower().strip() not in classified:
-                base.value_streams.append(VSAttachment(
-                    vs_name=name,
-                    inference_type=InferenceType.DIRECT,
-                    reason="Not classified by LLM, defaulted to direct",
-                ))
 
         direct = sum(1 for value in base.value_streams if value.inference_type == InferenceType.DIRECT)
         logger.info(
@@ -96,7 +79,6 @@ def enrich_one(ticket: RawTicket, model: str = ENRICHMENT_MODEL) -> EnrichedTick
         logger.error("[ENRICH] %s failed: %s", ticket.ticket_id, exc)
         base.enrichment_status = "failed"
         base.summary = ticket.title
-        base.value_streams = _make_fallback_vs(ticket.value_stream_labels, "LLM enrichment failed")
 
     return base
 

@@ -64,19 +64,22 @@ def classify_ticket_value_streams(
     llm_client: Any | None,
     cfg: Any,
 ) -> list[dict[str, str]]:
-    """Add per-value-stream provenance (inference_type: direct | implied)."""
+    """Classify supplied value-stream labels as direct or implied.
+
+    This does not discover new labels and does not default unresolved labels.
+    Tickets should already have verified Jira value-stream issue-link labels.
+    """
     normalized_names = [str(name).strip() for name in value_stream_names if str(name).strip()]
     normalized_ids = [str(vs_id).strip() for vs_id in value_stream_ids]
-    fallback_rows = _fallback_value_stream_rows(
-        value_stream_ids=normalized_ids,
-        value_stream_names=normalized_names,
-        label_source=label_source,
-    )
     if not normalized_names:
-        return fallback_rows
+        return []
 
     if llm_client is None or not consolidated_text.strip():
-        return fallback_rows
+        logger.warning(
+            "%s value-stream direct/implied classification skipped; labels will not be indexed",
+            ticket_id,
+        )
+        return []
 
     prompt = build_value_stream_classification_prompt(
         ticket_id=ticket_id,
@@ -102,7 +105,7 @@ def classify_ticket_value_streams(
         if key in seen:
             continue
 
-        reason = item.reason.strip() or _fallback_reason(label_source)
+        reason = item.reason.strip() or "Classified from ticket text and verified Jira value-stream labels."
 
         matched.append(
             {
@@ -114,17 +117,7 @@ def classify_ticket_value_streams(
         )
         seen.add(key)
 
-    for row in fallback_rows:
-        if row["vs_name"].lower() in seen:
-            continue
-        patched = dict(row)
-        patched["inference_type"] = _fallback_inference_type(label_source)
-        patched["reason"] = (
-            "Not classified by the LLM; preserved as lower-confidence Jira provenance."
-        )
-        matched.append(patched)
-
-    return matched or fallback_rows
+    return matched
 
 
 def _call_llm(prompt: str, llm_client: Any, cfg: Any) -> str:
@@ -167,39 +160,6 @@ def _match_known_value_stream(candidate: str, known_names: list[str]) -> str:
 
 def _normalize_name(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
-
-
-def _fallback_reason(label_source: str) -> str:
-    if label_source == "jira_issuelinks":
-        return "Resolved from direct Jira issue-link value stream labels."
-    if label_source == "jira_themes_fallback":
-        return "Resolved from linked Jira themes because no direct value-stream issue links were present."
-    return f"Resolved from Jira label source '{label_source}'."
-
-
-def _fallback_value_stream_rows(
-    value_stream_ids: list[str],
-    value_stream_names: list[str],
-    label_source: str,
-) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    inference_type = _fallback_inference_type(label_source)
-    for idx, name in enumerate(value_stream_names):
-        rows.append(
-            {
-                "vs_id": value_stream_ids[idx] if idx < len(value_stream_ids) else "",
-                "vs_name": name,
-                "inference_type": inference_type,
-                "reason": _fallback_reason(label_source),
-            }
-        )
-    return rows
-
-
-def _fallback_inference_type(label_source: str) -> str:
-    if str(label_source or "").strip() == "jira_issuelinks":
-        return "direct"
-    return "implied"
 
 
 def _empty_summary(ticket_id: str) -> TicketSummaryDocument:

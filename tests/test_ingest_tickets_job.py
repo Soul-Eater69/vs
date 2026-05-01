@@ -64,6 +64,32 @@ def test_ensure_value_stream_labels_uses_issue_link_mapping() -> None:
     assert ticket_data["value_stream_label_source"] == "jira_issuelinks"
 
 
+def test_ensure_value_stream_labels_does_not_fallback_to_themes() -> None:
+    ticket_data = {
+        "key": "IDMT-1",
+        "fields": {
+            "issuelinks": [
+                {
+                    "type": {"outward": "implements"},
+                    "outwardIssue": {
+                        "key": "GROUP-1",
+                        "fields": {
+                            "summary": "GROUP-1: Issue Payment",
+                            "issuetype": {"name": "Theme"},
+                            "status": {"name": "Active"},
+                        },
+                    },
+                }
+            ]
+        },
+    }
+
+    ensure_value_stream_labels(ticket_data)
+
+    assert "value_stream_names" not in ticket_data
+    assert "value_stream_ids" not in ticket_data
+
+
 def test_summary_aggregate_loads_and_replaces_by_ticket_id() -> None:
     tmp_dir = Path("pytest-cache-files-ingest-job-test")
     shutil.rmtree(tmp_dir, ignore_errors=True)

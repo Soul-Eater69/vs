@@ -229,10 +229,9 @@ def _label_source_adjustment(row: dict) -> float:
     sources = {str(value).strip() for value in (row.get("label_sources") or []) if str(value).strip()}
     if not sources:
         return 0.0
+    # Current generated summaries should use jira_issuelinks.
     if "jira_issuelinks" in sources:
         return 0.06
-    if sources == {"jira_themes_fallback"}:
-        return -0.04
     return 0.0
 
 

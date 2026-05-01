@@ -91,11 +91,11 @@ The historical retriever then:
 The extra search depth is:
 
 ```text
-exclusion_backfill = max(8, len(excluded_ticket_ids) * 3)
+exclusion_backfill = len(excluded_ticket_ids)
 fetch_k = max_ticket_hits + exclusion_backfill
 ```
 
-This matters because if `IDMT-19761` is the best FAISS neighbor for `IDMT-19761`, removing it can pull the whole historical lane down. Backfill helps, but it cannot fully replace a perfect self-hit.
+This matters because if `IDMT-19761` is the best FAISS neighbor for `IDMT-19761`, removing it creates one hole in the result list. Because the historical index is summary-level, the same ticket should appear only once, so one extra raw FAISS result is enough for the normal UI leave-one-out case.
 
 The response includes:
 
@@ -162,7 +162,7 @@ Each value-stream support row contains:
 - `best_support_score`: strongest FAISS score among supporting tickets.
 - `avg_support_score`: average FAISS score across support observations.
 - `supporting_ticket_ids`: unique supporting ticket IDs.
-- `label_sources`: sources such as `jira_issuelinks` or `jira_themes_fallback`.
+- `label_sources`: current generated data should use `jira_issuelinks`.
 - `historical_reasons`: short summaries used later in prompts and reasons.
 
 ## Merge Inputs
@@ -259,7 +259,6 @@ Label source adjustment:
 
 ```text
 jira_issuelinks present       => +0.06
-only jira_themes_fallback     => -0.04
 otherwise                    =>  0.00
 ```
 
@@ -925,7 +924,7 @@ Use this order.
 2. If auto-selected, tighten the relevant auto-select gate.
 3. If LLM-selected historical-only, inspect whether high-confidence LLM override allowed it.
 4. If rescued, inspect the matching rescue gate.
-5. Check `label_sources`. If the evidence is only `jira_themes_fallback`, consider adding a stronger penalty or requiring more tickets.
+5. Check `label_sources`. Current generated data should be `jira_issuelinks`; any other source means the index was built from old or unexpected metadata.
 6. Check whether one broad ticket is supplying many streams. If so, weighted support is the intended control.
 
 ## Field Glossary

@@ -195,19 +195,6 @@ def canonicalize_value_stream_names(
     return _dedupe_names(canonical)
 
 
-def is_valid_vs_name(name: str) -> bool:
-    cleaned = (name or "").strip()
-    if not cleaned:
-        return False
-    if re.fullmatch(r"[A-Z]{1,5}", cleaned):
-        return False
-    if re.match(r"^(CP|IVL)\s*\d", cleaned):
-        return False
-    if re.search(r"\b(20|21)\d{2}\b", cleaned):
-        return False
-    return (" " in cleaned) or len(cleaned) >= 4
-
-
 def _normalize_theme_summary(summary: str) -> str:
     text = clean_value_stream_name((summary or "").strip())
     return re.sub(r"\s{2,}", " ", text).strip(" :-")
@@ -218,34 +205,25 @@ def resolve_value_stream_mapping(
     classified_links: dict,
     llm_client: Any | None = None,
 ) -> dict[str, Any]:
-    """Resolve value stream names/IDs from classified links or theme fallback."""
+    """Resolve value stream names/IDs from Jira value-stream issue links.
+
+    Tickets without value-stream issue links are intentionally left unlabeled.
+    The ingestion workflow is expected to ingest/evaluate only tickets that have
+    verified value-stream links.
+    """
     vs_links = list((classified_links or {}).get("vs") or [])
     label_source = "jira_issuelinks"
 
-    if not vs_links:
-        themes = list((ticket_data or {}).get("themes") or [])
-        if themes:
-            normalized: list[dict] = []
-            for theme in themes:
-                issue_type = str(theme.get("issue_type") or "").strip().lower()
-                if issue_type and "theme" not in issue_type:
-                    continue
-
-                summary_raw = str(theme.get("summary_raw") or theme.get("summary") or "")
-                summary = _normalize_theme_summary(summary_raw)
-                if not is_valid_vs_name(summary):
-                    continue
-                normalized.append({
-                    "key": str(theme.get("key") or ""),
-                    "summary": summary,
-                    "summary_raw": summary_raw,
-                    "status": str(theme.get("status") or ""),
-                    "issue_type": str(theme.get("issue_type") or ""),
-                })
-            vs_links = normalized
-            label_source = "jira_themes_fallback"
-
     vs_links = _dedupe_rows(vs_links)
+    if not vs_links:
+        return {
+            "vs_links": [],
+            "vs_ids": [],
+            "vs_names": [],
+            "vs_statuses": [],
+            "linked_value_streams": [],
+            "label_source": label_source,
+        }
 
     verified_links: list[dict] = []
     per_link_names: list[str] = []

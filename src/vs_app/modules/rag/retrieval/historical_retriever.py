@@ -36,7 +36,7 @@ def retrieve_historical_support(
 
     exclusion_backfill = 0
     if excluded:
-        exclusion_backfill = max(8, len(excluded) * 3)
+        exclusion_backfill = len(excluded)
     fetch_k = max_ticket_hits + exclusion_backfill
     faiss_results = search_local_faiss(
         cleaned,
@@ -60,10 +60,8 @@ def retrieve_historical_support(
             "best_score": float(row.get("score", 0.0) or 0.0),
             "title": str(meta.get("title") or ticket_id),
             "summary_preview": str(row.get("content") or "")[:320],
-            "value_stream_labels": meta.get("value_stream_labels", []),
             "value_stream_names": meta.get("value_stream_names", []),
             "value_stream_ids": meta.get("value_stream_ids", []),
-            "stream_support_type": meta.get("stream_support_type", {}),
             "direct_vs_names": meta.get("direct_vs_names", []),
             "implied_vs_names": meta.get("implied_vs_names", []),
             "label_source": meta.get("label_source", ""),
@@ -194,17 +192,20 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
 
 
 def _extract_hit_value_stream_support(hit: dict) -> List[dict]:
+    """Read ingestion-time value-stream labels from a FAISS summary hit.
+
+    Current summaries must contain direct_vs_names and implied_vs_names. If those
+    fields are absent or empty, the hit contributes no value-stream support.
+    """
     label_source = str(hit.get("label_source") or "").strip()
-    fallback_names = _dedupe_text_list(
-        hit.get("value_stream_names")
-        or hit.get("value_stream_labels")
-        or []
+    all_names = _dedupe_text_list(
+        list(hit.get("direct_vs_names") or []) + list(hit.get("implied_vs_names") or [])
     )
-    fallback_ids = [str(value).strip() for value in (hit.get("value_stream_ids") or [])]
+    metadata_ids = [str(value).strip() for value in (hit.get("value_stream_ids") or [])]
     id_by_name = {
-        name: fallback_ids[idx]
-        for idx, name in enumerate(fallback_names)
-        if idx < len(fallback_ids) and fallback_ids[idx]
+        name: metadata_ids[idx]
+        for idx, name in enumerate(all_names)
+        if idx < len(metadata_ids) and metadata_ids[idx]
     }
 
     direct_names = _dedupe_text_list(hit.get("direct_vs_names") or [])
@@ -214,24 +215,6 @@ def _extract_hit_value_stream_support(hit: dict) -> List[dict]:
         for name in _dedupe_text_list(hit.get("implied_vs_names") or [])
         if name.lower() not in direct_set
     ]
-
-    support_types = hit.get("stream_support_type") or {}
-    if not direct_names and not implied_names and isinstance(support_types, dict):
-        for name in fallback_names:
-            inference_type = str(support_types.get(name, "")).strip().lower()
-            if inference_type == "direct":
-                direct_names.append(name)
-                direct_set.add(name.lower())
-            elif inference_type == "implied" and name.lower() not in direct_set:
-                implied_names.append(name)
-
-    if not direct_names and not implied_names:
-        fallback_inference = "direct" if label_source == "jira_issuelinks" else "implied"
-        if fallback_inference == "direct":
-            direct_names = list(fallback_names)
-            direct_set = {name.lower() for name in direct_names}
-        else:
-            implied_names = list(fallback_names)
 
     stream_names = direct_names + [name for name in implied_names if name.lower() not in direct_set]
     if not stream_names:

@@ -229,37 +229,188 @@ This matters for testing. If `IDMT-19761` searches the historical index and the 
 When exclusions are active:
 
 ```python
-exclusion_backfill = max(8, len(excluded_ticket_ids) * 3)
+exclusion_backfill = len(excluded_ticket_ids)
 fetch_k = max_ticket_hits + exclusion_backfill
 ```
+
+In normal UI testing there is usually exactly one excluded ticket: the selected source ticket.
+
+So with one excluded ticket:
+
+```python
+len(excluded_ticket_ids) = 1
+exclusion_backfill = 1
+fetch_k = max_ticket_hits + 1
+```
+
+That means the pipeline asks FAISS for one extra raw result, then filters out the source ticket, then keeps only the requested number of non-excluded hits.
+
+### Without Source-Ticket Exclusion
+
+If `fetch_count = 30`:
+
+```text
+historical_max_ticket_hits = min(max(12, 30), 40) = 30
+excluded_ticket_ids = []
+exclusion_backfill = 0
+fetch_k = 30
+```
+
+Flow:
+
+```text
+Ask FAISS for 30 raw ticket hits
+Keep up to 30 ticket hits
+Convert those 30 tickets into value-stream support
+```
+
+If the source ticket is the top FAISS result, it stays in those 30 hits.
+
+### With Source-Ticket Exclusion
+
+If `fetch_count = 30` and the selected ticket is `IDMT-19761`:
+
+```text
+historical_max_ticket_hits = 30
+excluded_ticket_ids = ["IDMT-19761"]
+exclusion_backfill = 1
+fetch_k = 30 + 1 = 31
+```
+
+Flow:
+
+```text
+Ask FAISS for 31 raw ticket hits
+Drop any hit whose ticket_id is IDMT-19761
+Keep the first 30 non-excluded ticket hits
+Convert those 30 tickets into value-stream support
+```
+
+So the backfill does not increase the final number of historical ticket hits. It only increases the temporary FAISS request size by the number of excluded tickets so the pipeline can still end with about 30 usable non-source hits after removing the source ticket.
 
 ### Why Backfill Exists
 
 If the self-ticket is removed, the FAISS result list now has a hole. Backfill fetches extra neighbors so the pipeline can still return the requested number of non-excluded historical tickets.
 
-### Why `max(8, len(excluded) * 3)`
+### Why `len(excluded_ticket_ids)`
 
-For normal UI use, only one ticket is excluded. `len(excluded) * 3` would fetch only 3 extra rows, which can be too small if near-duplicates or bad metadata are also filtered. The minimum `8` is a practical cushion.
+For normal UI use, only one ticket is excluded and the historical index is built from summaries, so a ticket should appear at most once. Asking for one extra result is enough to replace that one removed source ticket.
 
-For batch or future multi-ticket exclusions, `len(excluded) * 3` scales the cushion with the number of removed IDs.
+For batch or future multi-ticket exclusions, the extra request size scales one-for-one with the number of removed IDs.
 
 ## Step 5: Convert FAISS Hits To Value-Stream Support
 
 Historical retrieval turns ticket-level hits into value-stream-level support.
 
-For each historical ticket:
+Important: direct vs implied is already decided during ingestion.
+
+The FAISS summary index stores that result as metadata on each summary document. At RAG time, the historical retriever does not re-classify direct vs implied. It reads the stored metadata and aggregates it.
+
+In the current generated data, the value-stream labels are expected to come from Jira issue links and already include direct/implied splits:
+
+```json
+{
+  "ticket_id": "IDMT-8199",
+  "summary_preview": "...",
+  "direct_vs_names": ["Resolve Request-Inquiry"],
+  "implied_vs_names": ["Manage Member Care"],
+  "label_source": "jira_issuelinks"
+}
+```
+
+So the normal path is simple:
+
+```text
+Ingestion resolves Jira issue-link labels.
+Ingestion writes direct_vs_names and implied_vs_names into FAISS summary metadata.
+Historical RAG reads those stored fields from FAISS hits.
+Historical RAG aggregates them into value-stream support rows.
+```
+
+More specifically, ingestion resolves value-stream issue links like this:
+
+```mermaid
+flowchart TD
+    A[Jira issuelinks] --> B[classify_links]
+    B --> C[Keep links whose type/category means value stream]
+    C --> D[Clean linked issue summary text]
+    D --> E[Try exact/canonical match against approved 50 VS names]
+    E -->|matched| F[Use approved canonical VS name]
+    E -->|not matched| G[Try fuzzy match against approved 50 VS names]
+    G -->|clear match| F
+    G -->|unresolved or ambiguous| H[LLM verifier]
+    H --> I[Send unresolved link text plus approved 50 VS list]
+    I -->|approved match| F
+    I -->|no safe match| J[Drop unresolved link]
+    F --> K[Resolved VS labels from Jira issue links]
+```
+
+The LLM verifier is not asked to infer all value streams from the whole ticket. It only receives the unresolved Jira issue-link text and the approved value-stream list, then tries to map that linked issue text to one of the approved names.
+
+After the names are resolved, a separate ingestion step classifies each resolved value stream as:
+
+```text
+direct
+implied
+```
+
+That classifier receives:
+
+```text
+raw/consolidated ticket text
++ the resolved value-stream labels attached/fetched from the ticket
+```
+
+and asks the LLM to mark each supplied label as direct or implied. This step is classification of known labels, not discovery of new labels.
+
+That direct/implied classification is what later becomes:
+
+```text
+direct_vs_names
+implied_vs_names
+```
+
+in the FAISS summary metadata.
+
+### What Happens If There Are No VS Issue Links
+
+There is no theme fallback in the current contract.
+
+Tickets should be ingested/evaluated only after verifying they have value-stream issue links. If a ticket has no resolvable VS issue links, ingestion leaves it unlabeled instead of trying to infer labels from themes.
+
+File: `src/vs_app/modules/ingestion/value_stream_labels/value_stream_mapping.py`
+
+```text
+No value-stream issue links
+  -> no value_stream_names
+  -> no value_stream_ids
+  -> do not create theme-derived labels
+```
+
+### Direct/Implied Classifier Requirement
+
+File: `src/vs_app/modules/ingestion/summary/llm_summary_extractor.py`
+
+After ingestion has a list of resolved value-stream labels, it asks the LLM to classify those labels as direct or implied.
+
+If the LLM is unavailable, the ticket text is empty, or the LLM does not return a classification for a supplied label, ingestion does not silently default that label to direct or implied.
+
+```text
+No direct/implied classification
+  -> no direct_vs_names / implied_vs_names for that label
+  -> the label does not contribute historical VS support later
+```
+
+This keeps bad or incomplete ingestion visible instead of hiding it behind a fallback.
+
+For each historical ticket hit during RAG:
 
 1. Prefer `direct_vs_names`.
 2. Add `implied_vs_names` that are not already direct.
-3. If direct/implied are missing, use `stream_support_type`.
-4. If that is missing too, fall back to `value_stream_names` or `value_stream_labels`.
 
-Fallback inference:
+There is no RAG-time fallback from `value_stream_names` or `value_stream_labels` into direct/implied support. For the current index, the required fields are `direct_vs_names`, `implied_vs_names`, and `label_source = jira_issuelinks`.
 
-| Label Source | Fallback Type |
-| --- | --- |
-| `jira_issuelinks` | direct |
-| anything else | implied |
+So when this document says "historical support is direct" or "historical support is implied", that is not a new decision made by the RAG query. It is the direct/implied label that was already stored during FAISS ingestion.
 
 ### Per-Ticket Weight
 
@@ -354,7 +505,7 @@ historical_strength =
 | `best_support_score` | Peak similarity from FAISS. This is the base historical relevance signal. |
 | `0.18 * weighted_direct_count` | Direct historical labels are strong evidence, but should not dominate semantic similarity. |
 | `0.06 * weighted_implied_count` | Implied labels help, but are weaker than direct labels. |
-| `label_source_adjustment` | Small source quality correction. |
+| `label_source_adjustment` | Small boost when the historical labels came from Jira issue links. In current data this is normally `+0.06` for historical rows. |
 
 ### Why Direct Is `0.18`
 
@@ -371,7 +522,7 @@ That makes repeated explicit evidence matter, while a single direct label only n
 
 ### Why Implied Is `0.06`
 
-Implied support is useful but fuzzier. It may come from themes, downstream work, or fallback labels.
+Implied support is useful but fuzzier. It comes from the ingestion-time direct/implied classifier when the supplied Jira value-stream label is related to the ticket but not the primary directly changed stream.
 
 The formula makes direct support exactly 3x implied support:
 
@@ -390,17 +541,15 @@ One direct support signal is worth about three implied support signals.
 ```python
 if "jira_issuelinks" in sources:
     +0.06
-elif only "jira_themes_fallback":
-    -0.04
 else:
     0.00
 ```
 
-These offsets should break ties, not rewrite the ranking.
+This offset should break ties, not rewrite the ranking.
 
-`jira_issuelinks` is more explicit, so it gets a small boost. Theme fallback is fuzzier, so it gets a small penalty when it is the only source.
+`jira_issuelinks` is explicit business metadata from Jira relationships, so it gets a small boost. Since the current generated data is expected to use Jira issue links, this usually acts as a small historical-evidence confidence bump, not as a choice between multiple active data sources.
 
-The numbers are smaller than direct/implied support because source quality should influence confidence, not become the main evidence.
+The number is smaller than direct/implied support because source quality should influence confidence, not become the main evidence.
 
 ### Example Historical Strength
 
@@ -589,14 +738,14 @@ best_support_score >= 0.60
 avg_support_score >= 0.52
 ```
 
-or weighted fallback:
+or weighted evidence gate:
 
 ```text
 support_count >= 2
 weighted_support_count >= max(1.0, support_count * 0.4)
 ```
 
-or final fallback:
+or final low-score evidence gate:
 
 ```text
 best_support_score >= 0.45
@@ -1090,7 +1239,6 @@ The numeric weights are not learned model coefficients. They are practical heuri
 The constants are deliberately small where they are offsets:
 
 - `+0.06` source boost is a tie-breaker.
-- `-0.04` fallback penalty is a small caution.
 - `0.18` direct support is meaningful but not dominant.
 - `0.06` implied support is useful but weak.
 - `0.25` historical boost on confirmed rows keeps semantic score primary.

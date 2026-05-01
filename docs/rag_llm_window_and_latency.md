@@ -297,7 +297,7 @@ historical_strength =
     + label_source_adjustment
 ```
 
-`jira_issuelinks` gets a positive adjustment because it is more explicit. `jira_themes_fallback` gets a small penalty when it is the only source because it is fuzzier.
+`jira_issuelinks` gets a small positive adjustment because current generated data is expected to come from verified Jira value-stream issue links.
 
 ### Step 5: Compute Ranking Score
 

@@ -118,7 +118,7 @@ ticket_hits[] — each hit has:
   - direct_functions_canonical[]
   - implied_functions_canonical[]
   - stream_support_type {vs_name: "direct"|"implied"}
-  - label_source ("jira_issuelinks" | "jira_themes_fallback" | ...)
+  - label_source ("jira_issuelinks" for current generated data)
       │
       ▼
 _build_support_from_faiss_hits()  ← aggregates per VS across all hits
@@ -146,8 +146,8 @@ A ticket tagged with 12 VS contributes only **0.083** per VS. This prevents a si
 ```
 1. Use direct_vs_names / implied_vs_names (explicit per-name classification)
 2. Fall back to stream_support_type dict {name: "direct"|"implied"}
-3. Fall back to label_source:
-   - "jira_issuelinks"    → treat all as "direct"
+3. Fall back to label_source only for older metadata:
+   - "jira_issuelinks"    -> treat all as "direct"
    - anything else        → treat all as "implied"
 ```
 
@@ -192,7 +192,7 @@ historical_strength =
     best_support_score
   + 0.18 × weighted_direct_count
   + 0.06 × weighted_implied_count
-  + label_source_adjustment          # +0.06 for jira_issuelinks, -0.04 for themes_fallback
+  + label_source_adjustment          # +0.06 for jira_issuelinks
 ```
 
 A VS with `best_support_score=0.755` and `weighted_direct_count=0.67` gets:
@@ -395,7 +395,6 @@ If the same VS appears in both (e.g. LLM also picked something auto-selected), t
 | Ranking: historical-only scale factor | **0.70** | `augmentation.py` | Projects hist score onto semantic scale |
 | Ranking: merged historical boost | **0.25** | `augmentation.py` | Historical adds to semantic for merged |
 | label_source bonus: jira_issuelinks | **+0.06** | `augmentation.py` | Explicit link = stronger signal |
-| label_source penalty: themes_fallback | **-0.04** | `augmentation.py` | Theme-inferred = weaker signal |
 
 ---
 

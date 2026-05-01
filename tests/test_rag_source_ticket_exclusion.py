@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from types import ModuleType
 
 from vs_app.modules.rag.service import ValueStreamRagCommand, ValueStreamRagService
-from vs_app.modules.rag.retrieval.historical_retriever import filter_historical_result
+from vs_app.modules.rag.retrieval.historical_retriever import (
+    filter_historical_result,
+    retrieve_historical_support,
+)
 
 
 def _minimal_payload() -> dict:
@@ -105,3 +110,47 @@ def test_filter_historical_result_removes_source_hit_and_rebuilds_support() -> N
     assert [row["entity_name"] for row in filtered["historical_value_stream_support"]] == [
         "Neighbor Stream"
     ]
+
+
+def test_source_ticket_exclusion_fetches_one_extra_summary_hit(monkeypatch) -> None:
+    captured: dict = {}
+
+    fake_store = ModuleType("vs_app.integrations.sinks.faiss_store")
+
+    def faiss_index_exists(*, index_dir: str, kind: str) -> bool:
+        return True
+
+    def search_local_faiss(query: str, *, index_dir: str, kind: str, top_k: int) -> list[dict]:
+        captured["top_k"] = top_k
+        return [
+            {
+                "score": 0.9,
+                "content": "self",
+                "metadata": {
+                    "ticket_id": "IDMT-19761",
+                    "direct_vs_names": ["Self Stream"],
+                },
+            },
+            {
+                "score": 0.8,
+                "content": "neighbor",
+                "metadata": {
+                    "ticket_id": "IDMT-12167",
+                    "direct_vs_names": ["Neighbor Stream"],
+                },
+            },
+        ]
+
+    fake_store.faiss_index_exists = faiss_index_exists
+    fake_store.search_local_faiss = search_local_faiss
+    monkeypatch.setitem(sys.modules, "vs_app.integrations.sinks.faiss_store", fake_store)
+
+    result = retrieve_historical_support(
+        "query",
+        historical_faiss_dir="unused",
+        max_ticket_hits=30,
+        exclude_ticket_ids=["IDMT-19761"],
+    )
+
+    assert captured["top_k"] == 31
+    assert [hit["ticket_id"] for hit in result["historical_ticket_hits"]] == ["IDMT-12167"]

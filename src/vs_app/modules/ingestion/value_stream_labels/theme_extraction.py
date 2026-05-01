@@ -35,11 +35,11 @@ def resolve_value_streams(
     issuelinks: List[Dict[str, Any]],
     llm_client: Any | None = None,
 ) -> Dict[str, Any]:
-    """Resolve canonical value stream names from themes + classified links.
+    """Resolve canonical value stream names from classified value-stream links.
 
     Returns dict with keys: value_stream_names, value_stream_ids,
     value_stream_statuses, value_stream_label_source.
-    Falls back to themes-only representation on import/resolution failure.
+    Linked themes are no longer used as a value-stream fallback.
     """
     try:
         from .link_classification import classify_links
@@ -47,7 +47,7 @@ def resolve_value_streams(
 
         classified_links = classify_links(issuelinks)
         vs_mapping = resolve_value_stream_mapping(
-            {"themes": themes},
+            {},
             classified_links,
             llm_client=llm_client,
         )

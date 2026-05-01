@@ -238,7 +238,7 @@ async def ingest_one_ticket(
 
 
 def ensure_value_stream_labels(ticket_data: dict, *, llm_client: Any = None) -> None:
-    """Patch missing labels using the old batch-index mapping path."""
+    """Patch missing labels from verified Jira value-stream issue links only."""
     if ticket_data.get("value_stream_names") or ticket_data.get("value_stream_ids"):
         return
 
@@ -246,16 +246,12 @@ def ensure_value_stream_labels(ticket_data: dict, *, llm_client: Any = None) -> 
     issuelinks = fields.get("issuelinks") or []
     try:
         from vs_app.modules.ingestion.value_stream_labels.link_classification import classify_links
-        from vs_app.modules.ingestion.value_stream_labels.theme_extraction import extract_themes
         from vs_app.modules.ingestion.value_stream_labels.value_stream_mapping import (
             resolve_value_stream_mapping,
         )
     except Exception as exc:
         logger.warning("Value-stream mapping helpers unavailable: %s", exc)
         return
-
-    if not ticket_data.get("themes"):
-        ticket_data["themes"] = extract_themes(issuelinks)
 
     mapping = resolve_value_stream_mapping(
         ticket_data,
@@ -266,7 +262,7 @@ def ensure_value_stream_labels(ticket_data: dict, *, llm_client: Any = None) -> 
     ids = list(mapping.get("vs_ids") or [])
     if not names and not ids:
         logger.warning(
-            "%s has no resolvable value-stream links/themes",
+            "%s has no resolvable value-stream issue links",
             ticket_data.get("key") or "<unknown>",
         )
         return

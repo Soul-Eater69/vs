@@ -93,13 +93,31 @@ Why this exists:
 
 ## Step 2: Retrieval Limits
 
-The request count is normalized before retrieval:
+The UI sends a requested candidate count. In the code this arrives as `fetch_count`. Before the pipeline calls any retriever, that one number is turned into three separate limits:
 
 ```python
 top_k = min(max(12, fetch_count), 50)
 max_llm_candidates = min(max(top_k + 15, 40), 50)
 historical_max_ticket_hits = min(max(12, fetch_count), 40)
 ```
+
+These three values are used in different places:
+
+| Value | Used By | What It Controls |
+| --- | --- | --- |
+| `top_k` | `retrieve_semantic_candidates(..., top_k=top_k)` | How many direct semantic value-stream candidates come back from the value-stream index. |
+| `historical_max_ticket_hits` | `retrieve_historical_support(..., max_ticket_hits=historical_max_ticket_hits)` | How many similar historical tickets are kept from FAISS before they are converted into value-stream support. |
+| `max_llm_candidates` | `merge_candidate_sources(..., max_llm_candidates=max_llm_candidates)` | How many merged value-stream candidates are allowed to reach the final LLM review step. |
+
+The important distinction:
+
+```text
+top_k controls semantic value streams.
+historical_max_ticket_hits controls historical tickets.
+max_llm_candidates controls merged value-stream rows after semantic and historical evidence are combined.
+```
+
+So `max_llm_candidates = 45` does not mean 45 tickets are retrieved. It means that after semantic value streams and historical ticket-derived value streams are merged, up to 45 unique value-stream candidates can be sent to the LLM.
 
 ### Why Minimum 12
 
@@ -138,6 +156,22 @@ Historical FAISS retrieves prior tickets, not value streams. More tickets means 
 | 40 | 40 | 40 | 50 |
 | 50 | 50 | 40 | 50 |
 | 75 | 50 | 40 | 50 |
+
+Example with `fetch_count = 30`:
+
+```text
+top_k = 30
+historical_max_ticket_hits = 30
+max_llm_candidates = 45
+```
+
+The run does this:
+
+1. Retrieve up to 30 semantic value-stream candidates from the value-stream index.
+2. Retrieve up to 30 historical FAISS ticket hits.
+3. Convert those historical tickets into value-stream support rows.
+4. Merge semantic and historical value-stream rows by name.
+5. Allow up to 45 merged value-stream rows into the LLM candidate window.
 
 ## Step 3: Semantic Value-Stream Retrieval
 

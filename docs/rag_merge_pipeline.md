@@ -572,7 +572,7 @@ The direct pass uses:
 
 This pass is for candidates that are direct semantic matches or confirmed by both semantic and historical evidence.
 
-`_direct_selection_max()` now uses an evidence-aware cap. It usually scales from 10 up to 18, but the exact max also depends on how many strong direct candidates are in the prompt. This keeps crowded prompts from turning into broad over-selection.
+`_direct_selection_max()` uses an evidence-aware cap. It can scale from 12 up to 22, but the exact max also depends on how many strong direct candidates are in the prompt. This keeps recall headroom for high-label tickets while preventing crowded prompts from turning into broad over-selection.
 
 The LLM is asked to select from the provided candidate list. The sanitizer later prevents it from inventing value streams that were not in the candidate list.
 

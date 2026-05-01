@@ -92,9 +92,9 @@ def test_split_llm_candidates_keeps_direct_and_historical_passes_disjoint() -> N
 
 
 def test_direct_selection_max_scales_for_many_confirmed_candidates() -> None:
-    assert _direct_selection_max(8) == 10
-    assert _direct_selection_max(30) == 15
-    assert _direct_selection_max(50) == 18
+    assert _direct_selection_max(8) == 12
+    assert _direct_selection_max(30) == 20
+    assert _direct_selection_max(50) == 22
 
 
 def test_direct_selection_max_uses_evidence_budget_for_noisy_direct_prompt() -> None:
@@ -107,7 +107,7 @@ def test_direct_selection_max_uses_evidence_budget_for_noisy_direct_prompt() -> 
         for idx in range(4)
     ]
 
-    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 10
+    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 12
 
 
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:

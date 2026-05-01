@@ -171,13 +171,13 @@ def _run_selection_pass(
 
 def _direct_selection_max(candidates: int | List[dict]) -> int:
     if isinstance(candidates, int):
-        return min(18, max(10, math.ceil(max(0, candidates) * 0.50)))
+        return min(22, max(12, math.ceil(max(0, candidates) * 0.65)))
 
     candidate_count = len(candidates)
     strong_count = sum(1 for row in candidates if _is_strong_direct_prompt_candidate(row))
-    scaled_cap = math.ceil(candidate_count * 0.50)
-    evidence_cap = strong_count + 3
-    return min(18, max(10, min(scaled_cap, evidence_cap)))
+    scaled_cap = math.ceil(candidate_count * 0.65)
+    evidence_cap = strong_count + 4
+    return min(22, max(12, min(scaled_cap, evidence_cap)))
 
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:

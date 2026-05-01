@@ -473,6 +473,8 @@ Now direct selection uses:
 max_select = min(22, max(12, ceil(candidate_count * 0.65)))
 ```
 
+The implementation also applies an evidence-aware ceiling based on how many strong direct candidates are in the prompt. This keeps the high-recall headroom but avoids giving a noisy direct prompt permission to select nearly everything.
+
 Examples:
 
 | Direct candidates | Max selectable |

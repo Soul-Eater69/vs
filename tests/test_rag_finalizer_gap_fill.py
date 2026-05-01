@@ -94,7 +94,7 @@ def test_split_llm_candidates_keeps_direct_and_historical_passes_disjoint() -> N
 def test_direct_selection_max_scales_for_many_confirmed_candidates() -> None:
     assert _direct_selection_max(8) == 12
     assert _direct_selection_max(30) == 20
-    assert _direct_selection_max(50) == 24
+    assert _direct_selection_max(50) == 22
 
 
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:

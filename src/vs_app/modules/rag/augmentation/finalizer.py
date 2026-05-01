@@ -170,7 +170,7 @@ def _run_selection_pass(
 
 
 def _direct_selection_max(candidate_count: int) -> int:
-    return min(24, max(12, math.ceil(max(0, candidate_count) * 0.65)))
+    return min(22, max(12, math.ceil(max(0, candidate_count) * 0.65)))
 
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:

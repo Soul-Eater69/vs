@@ -63,7 +63,7 @@ The candidate window is normalized:
 
 ```text
 top_k = min(max(12, fetch_count), 50)
-max_llm_candidates = min(max(top_k + 20, 40), 60)
+max_llm_candidates = min(max(top_k + 15, 40), 50)
 historical max_ticket_hits = min(max(12, fetch_count), 40)
 ```
 
@@ -71,7 +71,7 @@ This means:
 
 - The pipeline never asks for fewer than 12 retrieval candidates.
 - It never retrieves more than 50 semantic value-stream candidates.
-- It sends a wider 40-60 merged-candidate review window to the LLM so cross-confirmed historical matches are not cut just because the ticket has many labels.
+- It sends a wider 40-50 merged-candidate review window to the LLM so cross-confirmed historical matches are not cut just because the ticket has many labels.
 - Historical FAISS ticket hits are capped at 40.
 
 ## Historical Source-Ticket Exclusion
@@ -171,7 +171,7 @@ Each value-stream support row contains:
 
 - `semantic_candidates`: value streams found directly from the current idea card.
 - `historical_support`: value streams inferred from similar prior tickets.
-- `max_llm_candidates`: usually between 40 and 60.
+- `max_llm_candidates`: usually between 40 and 50.
 
 Semantic candidates usually have:
 
@@ -572,7 +572,7 @@ The direct pass uses:
 
 This pass is for candidates that are direct semantic matches or confirmed by both semantic and historical evidence.
 
-`_direct_selection_max()` scales from 12 up to 24 as the candidate list grows. This matters for tickets whose ground truth contains more than 12 value streams; otherwise the LLM prompt itself prevents full recall even when retrieval and merge found the right streams.
+`_direct_selection_max()` scales from 12 up to 22 as the candidate list grows. This matters for tickets whose ground truth contains more than 12 value streams; otherwise the LLM prompt itself prevents full recall even when retrieval and merge found the right streams.
 
 The LLM is asked to select from the provided candidate list. The sanitizer later prevents it from inventing value streams that were not in the candidate list.
 

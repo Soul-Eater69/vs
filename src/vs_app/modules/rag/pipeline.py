@@ -21,7 +21,7 @@ def select_value_streams(
     from .retrieval.semantic_retriever import retrieve_semantic_candidates
 
     top_k = min(max(12, fetch_count), 50)
-    max_llm_candidates = min(max(top_k + 20, 40), 60)
+    max_llm_candidates = min(max(top_k + 15, 40), 50)
     cleaned_query = clean_ppt_text(query)
 
     with ThreadPoolExecutor(max_workers=2) as executor:

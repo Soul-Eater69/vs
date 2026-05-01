@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vs_app.modules.rag.augmentation.candidate_merger import merge_candidate_sources
+from vs_app.modules.rag.augmentation.candidate_merger import _lane_quotas, merge_candidate_sources
 
 
 def test_merge_candidate_sources_preserves_expected_top_level_keys() -> None:
@@ -425,6 +425,81 @@ def test_merge_candidate_sources_admits_moderate_repeated_support_after_source_e
     assert row["candidate_status"] == "sent_to_llm"
     assert row["candidate_status_reason"] == "protected_historical_lane"
     assert result["llm_candidates"][0]["entity_name"] == "Manage Invoice and Payment Receipt"
+
+
+def test_lane_quotas_protect_more_confirmed_rows_for_large_review_cap() -> None:
+    quotas = _lane_quotas(50)
+
+    assert quotas["confirmed_direct"] >= 27
+    assert quotas["historical_recall"] >= 15
+    assert quotas["semantic_direct"] >= 1
+    assert sum(quotas.values()) == 50
+
+
+def test_merge_candidate_sources_keeps_deep_confirmed_ground_truth_inside_wider_llm_cap() -> None:
+    semantic_candidates = [
+        {
+            "entity_id": f"vs-confirmed-{idx}",
+            "entity_name": f"Confirmed Candidate {idx}",
+            "description": "Directly related workflow.",
+            "semantic_score": 1.62 - idx * 0.006,
+        }
+        for idx in range(30)
+    ]
+    semantic_candidates.extend(
+        {
+            "entity_id": f"vs-semantic-{idx}",
+            "entity_name": f"Semantic Candidate {idx}",
+            "description": "Semantic-only workflow.",
+            "semantic_score": 1.60 - idx * 0.02,
+        }
+        for idx in range(10)
+    )
+    historical_support = [
+        {
+            "entity_id": f"vs-confirmed-{idx}",
+            "entity_name": f"Confirmed Candidate {idx}",
+            "support_count": 3,
+            "direct_count": 1,
+            "implied_count": 2,
+            "weighted_support_count": 0.9,
+            "weighted_direct_count": 0.5,
+            "weighted_implied_count": 0.4,
+            "best_support_score": 0.64 + idx * 0.001,
+            "avg_support_score": 0.58,
+            "supporting_ticket_ids": [f"IDMT-{idx}", f"IDMT-{idx + 100}"],
+            "historical_reasons": [f"[IDMT-{idx} / direct] recurring workflow analog"],
+            "label_sources": ["jira_issuelinks"],
+        }
+        for idx in range(30)
+    ]
+    historical_support.extend(
+        {
+            "entity_id": f"hist-only-{idx}",
+            "entity_name": f"Historical Candidate {idx}",
+            "support_count": 6,
+            "direct_count": 1,
+            "implied_count": 5,
+            "weighted_support_count": 1.1,
+            "weighted_direct_count": 0.5,
+            "weighted_implied_count": 0.6,
+            "best_support_score": 0.69,
+            "avg_support_score": 0.57,
+            "supporting_ticket_ids": [f"IDMT-H{idx}", f"IDMT-H{idx + 100}"],
+            "historical_reasons": [f"[IDMT-H{idx} / implied] recurring gap analog"],
+            "label_sources": ["jira_themes_fallback"],
+        }
+        for idx in range(12)
+    )
+
+    result = merge_candidate_sources(semantic_candidates, historical_support, max_llm_candidates=50)
+    by_name = {row["entity_name"]: row for row in result["merged_candidates"]}
+
+    deep_confirmed = by_name["Confirmed Candidate 24"]
+    assert len(result["llm_candidates"]) == 50
+    assert deep_confirmed["candidate_status"] == "sent_to_llm"
+    assert deep_confirmed["candidate_status_reason"] == "protected_confirmed_lane"
+    assert any(row["candidate_lane"] == "semantic_direct" for row in result["llm_candidates"])
 
 
 def _has_score_language(reason: str) -> bool:

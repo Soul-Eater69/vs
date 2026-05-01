@@ -420,7 +420,7 @@ FAISS fixes this indirectly: it finds **historical tickets** that discussed Wome
 |--------|--------|-----------|-------|
 | Before fixes | ~58% | ~66% | historical_only never reached LLM (cut at #29) |
 | After sort fix + max_select=15 + loose thresholds | 100% | 52% | Too many auto-selected, LLM over-picked |
-| **Current** | ~92%+ | ~65%+ | Tightened merged threshold (1.0→1.5, 4→5 hits), direct shortcut (2→3), max_select back to 12 |
+| **Current** | TBD after batch run | TBD after batch run | Wider 40-60 LLM candidate window, stronger confirmed-lane protection, direct max_select scales up to 24 |
 
 ---
 

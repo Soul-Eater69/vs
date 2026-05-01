@@ -518,23 +518,23 @@ def _lane_quotas(total: int) -> Dict[str, int]:
             "semantic_direct": 0,
         }
 
-    confirmed = min(max(1, math.ceil(total * 0.30)), 12)
-    historical = min(max(1, math.ceil(total * 0.40)), 16)
+    confirmed = min(max(1, math.ceil(total * 0.55)), 32)
+    historical = min(max(1, math.ceil(total * 0.30)), 18)
 
     while confirmed + historical > total:
-        if historical >= confirmed and historical > 1:
-            historical -= 1
-        elif confirmed > 1:
+        if confirmed > historical and confirmed > 1:
             confirmed -= 1
+        elif historical > 1:
+            historical -= 1
         else:
             break
 
     semantic = max(0, total - confirmed - historical)
     if total >= 3 and semantic == 0:
-        if historical > 1:
-            historical -= 1
-        elif confirmed > 1:
+        if confirmed > historical and confirmed > 1:
             confirmed -= 1
+        elif historical > 1:
+            historical -= 1
         semantic = 1
 
     return {

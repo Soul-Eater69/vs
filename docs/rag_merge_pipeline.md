@@ -63,7 +63,7 @@ The candidate window is normalized:
 
 ```text
 top_k = min(max(12, fetch_count), 50)
-max_llm_candidates = min(max(top_k, 18), 36)
+max_llm_candidates = min(max(top_k + 20, 40), 60)
 historical max_ticket_hits = min(max(12, fetch_count), 40)
 ```
 
@@ -71,7 +71,7 @@ This means:
 
 - The pipeline never asks for fewer than 12 retrieval candidates.
 - It never retrieves more than 50 semantic value-stream candidates.
-- It never sends more than 36 merged candidates to the LLM.
+- It sends a wider 40-60 merged-candidate review window to the LLM so cross-confirmed historical matches are not cut just because the ticket has many labels.
 - Historical FAISS ticket hits are capped at 40.
 
 ## Historical Source-Ticket Exclusion
@@ -171,7 +171,7 @@ Each value-stream support row contains:
 
 - `semantic_candidates`: value streams found directly from the current idea card.
 - `historical_support`: value streams inferred from similar prior tickets.
-- `max_llm_candidates`: usually between 18 and 36.
+- `max_llm_candidates`: usually between 40 and 60.
 
 Semantic candidates usually have:
 
@@ -568,9 +568,11 @@ The direct pass uses:
 
 - `build_direct_candidate_prompt()`
 - `prompt_yaml/selection.yaml`
-- `build_system_prompt(min_select=4, max_select=12)`
+- `build_system_prompt(min_select=4, max_select=_direct_selection_max(len(candidates)))`
 
 This pass is for candidates that are direct semantic matches or confirmed by both semantic and historical evidence.
+
+`_direct_selection_max()` scales from 12 up to 24 as the candidate list grows. This matters for tickets whose ground truth contains more than 12 value streams; otherwise the LLM prompt itself prevents full recall even when retrieval and merge found the right streams.
 
 The LLM is asked to select from the provided candidate list. The sanitizer later prevents it from inventing value streams that were not in the candidate list.
 
@@ -621,7 +623,7 @@ It also records historical selections that the LLM picked but the evidence gate 
 The relevant budgets are:
 
 ```text
-_CONFIRMED_MERGED_RESCUE_BUDGET = 6
+_CONFIRMED_MERGED_RESCUE_BUDGET = 12
 _HISTORICAL_GAP_FILL_BUDGET = 4
 _HISTORICAL_LLM_KEEP_CONFIDENCE = 0.70
 ```

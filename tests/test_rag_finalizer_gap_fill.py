@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from vs_app.modules.rag.augmentation.finalizer import _finalize_selected, _split_llm_candidates
+from vs_app.modules.rag.augmentation.finalizer import (
+    _direct_selection_max,
+    _finalize_selected,
+    _split_llm_candidates,
+)
 
 
 def _historical_candidate(name: str, *, best: float, avg: float, support: int = 3) -> dict:
@@ -85,6 +89,12 @@ def test_split_llm_candidates_keeps_direct_and_historical_passes_disjoint() -> N
 
     assert [row["entity_name"] for row in direct] == ["Confirmed", "Semantic"]
     assert [row["entity_name"] for row in historical] == ["Historical"]
+
+
+def test_direct_selection_max_scales_for_many_confirmed_candidates() -> None:
+    assert _direct_selection_max(8) == 12
+    assert _direct_selection_max(30) == 20
+    assert _direct_selection_max(50) == 24
 
 
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:

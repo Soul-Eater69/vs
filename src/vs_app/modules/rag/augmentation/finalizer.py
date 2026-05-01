@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import logging
+import math
 import re
 from typing import Iterable, List
 
@@ -14,7 +15,7 @@ from .prompt_context import (
 logger = logging.getLogger(__name__)
 
 _HISTORICAL_GAP_FILL_BUDGET = 4
-_CONFIRMED_MERGED_RESCUE_BUDGET = 6
+_CONFIRMED_MERGED_RESCUE_BUDGET = 12
 _HISTORICAL_LLM_KEEP_CONFIDENCE = 0.70
 
 
@@ -154,7 +155,10 @@ def _run_selection_pass(
             query_for_prompt=query_for_prompt,
             candidates=candidates,
         )
-        system_prompt = build_system_prompt(min_select=4, max_select=12)
+        system_prompt = build_system_prompt(
+            min_select=4,
+            max_select=_direct_selection_max(len(candidates)),
+        )
 
     result = gen_svc.generate_structured(
         query=prompt,
@@ -163,6 +167,10 @@ def _run_selection_pass(
     )
     parsed = result.model_dump() if hasattr(result, "model_dump") else {"selected_value_streams": []}
     return sanitize_selected(parsed, candidates)
+
+
+def _direct_selection_max(candidate_count: int) -> int:
+    return min(24, max(12, math.ceil(max(0, candidate_count) * 0.65)))
 
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:

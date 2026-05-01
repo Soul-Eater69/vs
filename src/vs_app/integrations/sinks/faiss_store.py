@@ -31,20 +31,25 @@ def build_local_faiss_indexes(
     index_path.mkdir(parents=True, exist_ok=True)
     embeddings = embedding or EmbeddingClient()
 
-    summary_docs = [_summary_to_document(row) for row in summaries if _summary_text(row)]
+    summary_docs, indexed_summary_ids, skipped_summaries = _build_summary_documents(summaries)
     chunk_docs = [_chunk_to_document(row) for row in chunks if str(row.get("text") or "").strip()]
 
     summary_count = _build_index(summary_docs, index_path / "summaries", embeddings)
     chunk_count = _build_index(chunk_docs, index_path / "chunks", embeddings)
 
     _write_json(index_path / "summary_docs.json", summaries)
+    _write_json(index_path / "skipped_summary_docs.json", skipped_summaries)
     _write_json(index_path / "chunk_docs.json", chunks)
     _write_json(
         index_path / "manifest.json",
         {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "source_output_dir": str(output_path),
+            "source_summary_count": len(summaries),
             "summary_doc_count": summary_count,
+            "summary_doc_ids": indexed_summary_ids,
+            "skipped_summary_count": len(skipped_summaries),
+            "skipped_summary_docs": skipped_summaries,
             "chunk_doc_count": chunk_count,
             "summary_index_dir": str(index_path / "summaries"),
             "chunk_index_dir": str(index_path / "chunks"),
@@ -59,7 +64,10 @@ def build_local_faiss_indexes(
     )
     return {
         "index_dir": str(index_path),
+        "source_summary_count": len(summaries),
         "summary_doc_count": summary_count,
+        "skipped_summary_count": len(skipped_summaries),
+        "skipped_summary_docs": skipped_summaries,
         "chunk_doc_count": chunk_count,
     }
 
@@ -192,6 +200,34 @@ def _summary_to_document(summary: dict) -> Document:
 
 def _summary_text(summary: dict) -> str:
     return format_structured_summary_text(summary)
+
+
+def _build_summary_documents(summaries: list[dict]) -> tuple[list[Document], list[str], list[dict]]:
+    docs: list[Document] = []
+    indexed_ids: list[str] = []
+    skipped: list[dict] = []
+
+    for index, row in enumerate(summaries):
+        ticket_id = str(row.get("ticket_id") or row.get("key") or "").strip()
+        text = _summary_text(row).strip()
+        if not text:
+            skipped.append(
+                {
+                    "ticket_id": ticket_id,
+                    "index": index,
+                    "reason": "empty_formatted_summary_text",
+                    "present_fields": sorted(
+                        key for key, value in row.items() if value not in ("", [], {}, None)
+                    ),
+                }
+            )
+            continue
+
+        docs.append(_summary_to_document(row))
+        if ticket_id:
+            indexed_ids.append(ticket_id)
+
+    return docs, indexed_ids, skipped
 
 
 def _chunk_to_document(chunk: dict) -> Document:

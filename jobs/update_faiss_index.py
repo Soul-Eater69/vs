@@ -59,12 +59,19 @@ def main() -> int:
     print("")
     print("FAISS build complete")
     print(f"  index_dir:       {result['index_dir']}")
+    print(f"  source summaries:{result.get('source_summary_count', result['summary_doc_count'])}")
     print(f"  summary_docs:    {result['summary_doc_count']}")
+    print(f"  skipped:         {result.get('skipped_summary_count', 0)}")
     print(f"  chunk_docs:      {result['chunk_doc_count']}")
     print(f"  manifest:        {index_dir / 'manifest.json'}")
     print(f"  summary index:   {index_dir / 'summaries'}")
     if result.get("chunk_doc_count", 0):
         print(f"  chunk index:     {index_dir / 'chunks'}")
+    skipped = result.get("skipped_summary_docs") or []
+    if skipped:
+        print("  skipped ids:")
+        for row in skipped:
+            print(f"    {row.get('ticket_id') or '<missing ticket_id>'}: {row.get('reason')}")
     return 0
 
 

@@ -157,7 +157,7 @@ def _run_selection_pass(
         )
         system_prompt = build_system_prompt(
             min_select=4,
-            max_select=_direct_selection_max(len(candidates)),
+            max_select=_direct_selection_max(candidates),
         )
 
     result = gen_svc.generate_structured(
@@ -169,8 +169,15 @@ def _run_selection_pass(
     return sanitize_selected(parsed, candidates)
 
 
-def _direct_selection_max(candidate_count: int) -> int:
-    return min(22, max(12, math.ceil(max(0, candidate_count) * 0.65)))
+def _direct_selection_max(candidates: int | List[dict]) -> int:
+    if isinstance(candidates, int):
+        return min(22, max(12, math.ceil(max(0, candidates) * 0.65)))
+
+    candidate_count = len(candidates)
+    strong_count = sum(1 for row in candidates if _is_strong_direct_prompt_candidate(row))
+    scaled_cap = math.ceil(candidate_count * 0.65)
+    evidence_cap = strong_count + 4
+    return min(22, max(12, min(scaled_cap, evidence_cap)))
 
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:
@@ -206,6 +213,8 @@ def _finalize_selected(
             and not _passes_high_confidence_historical_selection(row, candidate)
         ):
             dropped_gap_fill.append(_with_gap_fill_reason(row, candidate, "weak_historical_gap_fill_evidence"))
+            continue
+        if _is_confirmed_merged_candidate(candidate) and not _passes_confirmed_llm_evidence(candidate):
             continue
         filtered_llm_selected.append(_rewrite_score_reason(row, candidate))
 
@@ -366,6 +375,34 @@ def _passes_confirmed_merged_evidence(row: dict | None) -> bool:
     if support_count >= 5 and semantic_score >= 1.00:
         return True
     return support_count >= 3 and semantic_score >= 1.35 and best_score >= 0.65
+
+
+def _passes_confirmed_llm_evidence(row: dict | None) -> bool:
+    if not row:
+        return False
+    support_count = int(row.get("support_count", 0) or 0)
+    semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
+    best_score = float(row.get("best_support_score", 0.0) or 0.0)
+    weighted_support = float(row.get("weighted_support_count", support_count) or 0.0)
+
+    if semantic_score >= 1.35:
+        return True
+    if semantic_score >= 1.25 and best_score >= 0.58:
+        return True
+    if support_count >= 5 and semantic_score >= 1.20 and best_score >= 0.60:
+        return True
+    if support_count >= 8 and semantic_score >= 1.10 and best_score >= 0.60 and weighted_support >= 0.75:
+        return True
+    return False
+
+
+def _is_strong_direct_prompt_candidate(row: dict) -> bool:
+    lane = str(row.get("candidate_lane") or "")
+    if lane == "confirmed_direct":
+        return _passes_confirmed_llm_evidence(row)
+    if lane == "semantic_direct":
+        return float(row.get("semantic_score", 0.0) or 0.0) >= 1.35
+    return False
 
 
 def _passes_gap_fill_evidence(row: dict | None) -> bool:

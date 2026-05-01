@@ -97,6 +97,19 @@ def test_direct_selection_max_scales_for_many_confirmed_candidates() -> None:
     assert _direct_selection_max(50) == 22
 
 
+def test_direct_selection_max_uses_evidence_budget_for_noisy_direct_prompt() -> None:
+    weak_candidates = [
+        _confirmed_candidate(f"Weak Confirmed {idx}", semantic=1.15, best=0.62, support=3)
+        for idx in range(30)
+    ]
+    strong_candidates = [
+        _confirmed_candidate(f"Strong Confirmed {idx}", semantic=1.36, best=0.62, support=3)
+        for idx in range(4)
+    ]
+
+    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 12
+
+
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:
     weak_candidate = _historical_candidate("Receive Care", best=0.691, avg=0.62, support=4)
     weak_selection = _selected("Receive Care")
@@ -427,6 +440,50 @@ def test_finalize_selected_does_not_rescue_two_hit_borderline_confirmed_candidat
     )
 
     assert final_selected == []
+    assert rescued_confirmed == []
+    assert rescued_gap_fill == []
+    assert dropped == []
+
+
+def test_finalize_selected_drops_weak_confirmed_direct_llm_selection() -> None:
+    candidate = _confirmed_candidate(
+        "Appeal Decision",
+        semantic=1.152,
+        best=0.642,
+        support=3,
+        weighted=0.9,
+    )
+
+    final_selected, filtered_llm, rescued_confirmed, rescued_gap_fill, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[_selected("Appeal Decision")],
+        llm_candidates=[candidate],
+    )
+
+    assert final_selected == []
+    assert filtered_llm == []
+    assert rescued_confirmed == []
+    assert rescued_gap_fill == []
+    assert dropped == []
+
+
+def test_finalize_selected_keeps_confirmed_direct_with_clear_semantic_support() -> None:
+    candidate = _confirmed_candidate(
+        "Ensure Compliance",
+        semantic=1.292,
+        best=0.641,
+        support=2,
+        weighted=0.7,
+    )
+
+    final_selected, filtered_llm, rescued_confirmed, rescued_gap_fill, dropped = _finalize_selected(
+        auto_selected=[],
+        llm_selected=[_selected("Ensure Compliance")],
+        llm_candidates=[candidate],
+    )
+
+    assert [row["entity_name"] for row in final_selected] == ["Ensure Compliance"]
+    assert [row["entity_name"] for row in filtered_llm] == ["Ensure Compliance"]
     assert rescued_confirmed == []
     assert rescued_gap_fill == []
     assert dropped == []

@@ -750,7 +750,7 @@ The LLM is not allowed to invent streams.
 
 This is an important safety rail: widening the LLM window gives the model more real candidates, but it still cannot pick arbitrary labels.
 
-### Step 4: Filter Weak Historical Selections
+### Step 4: Filter Weak Selections
 
 Historical-only selections get evidence checked again.
 
@@ -761,6 +761,27 @@ weak_historical_gap_fill_evidence
 ```
 
 This is why some historical-only false positives do not make final output even if the model picked them.
+
+Confirmed direct selections are also checked. A row being `MERGED` only means semantic retrieval and historical support both touched the same value stream; it does not automatically mean the evidence is strong. Weak confirmed rows can be false positives when they have low semantic scores and only a few historical hits.
+
+For a confirmed row selected by the LLM to survive, it now needs evidence such as:
+
+```text
+semantic_score >= 1.35
+or semantic_score >= 1.25 and best_support_score >= 0.58
+or support_count >= 5 and semantic_score >= 1.20 and best_support_score >= 0.60
+or support_count >= 8 and semantic_score >= 1.10 and best_support_score >= 0.60
+```
+
+This is meant to filter rows like:
+
+```text
+MERGED / SENT TO LLM / PROTECTED CONFIRMED LANE
+semantic around 1.15
+historical support around 3 hits
+```
+
+Those rows are useful to see in debug, but they should not automatically become final predictions.
 
 ### Step 5: Merge Selected Rows
 

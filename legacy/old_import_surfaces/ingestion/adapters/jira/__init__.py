@@ -9,7 +9,6 @@ from vs_app.integrations.jira import (  # noqa: F401
     JIRARestClient,
     JiraTicketClient,
     build_ticket_payload,
-    get_ticket_data_compat,
     jira_field_provider,
     merge_attachments,
 )
@@ -23,7 +22,6 @@ __all__ = [
     "JiraTicketClient",
     "build_ticket_fetcher",
     "build_ticket_payload",
-    "get_ticket_data_compat",
     "jira_field_provider",
     "merge_attachments",
     "normalize_ticket_source",

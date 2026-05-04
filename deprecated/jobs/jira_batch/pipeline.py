@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from vs_app.integrations.embeddings.client import embed_batch
-from vs_app.integrations.jira import get_ticket_data_compat
 from vs_app.modules.ingestion.value_stream_labels.link_classification import classify_links
 from .extract import (
     build_chunks,
@@ -42,8 +41,7 @@ async def ingest_ticket(
       - ticket_key, metadata, chunks, value_stream mapping, summary, embeddings
     """
     # 1) Fetch from Jira
-    ticket_data = await get_ticket_data_compat(
-        jira_client,
+    ticket_data = await jira_client.get_ticket_data(
         ticket_id,
         llm_client=llm_client,
     )

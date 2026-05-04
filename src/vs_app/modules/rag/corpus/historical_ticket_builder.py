@@ -5,7 +5,6 @@ import logging
 from typing import Any, Dict, Iterable, List, Optional
 
 from vs_app.container import build_ticket_fetcher, normalize_ticket_source
-from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
 from vs_app.modules.tickets.text_assembly import build_retrieval_text
 from vs_app.modules.tickets.text_processing import clean_description, extract_comment_texts
 
@@ -84,8 +83,7 @@ async def _extract_ticket(
     extraction_source: str = "jira_direct",
 ) -> Optional[RawTicket]:
     try:
-        ticket_data = await get_ticket_data_compat(
-            ticket_client,
+        ticket_data = await ticket_client.get_ticket_data(
             ticket_id,
             config=config,
         )

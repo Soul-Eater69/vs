@@ -12,7 +12,7 @@ from .schemas import IngestTicketCommand, IngestTicketResult
 
 
 class TicketExtractionService:
-    """Facade over a ticket client; bridges use cases to fetch compatibility helpers."""
+    """Facade over a ticket client; bridges use cases to ticket fetching."""
 
     def __init__(self, ticket_client: Any | None = None, jira_client: Any | None = None) -> None:
         self._ticket_client = ticket_client if ticket_client is not None else jira_client
@@ -20,9 +20,7 @@ class TicketExtractionService:
             raise ValueError("A ticket client is required")
 
     async def extract_ticket(self, ticket_id: str, cfg: Any) -> dict:
-        from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
-
-        return await get_ticket_data_compat(self._ticket_client, ticket_id, config=cfg)
+        return await self._ticket_client.get_ticket_data(ticket_id, config=cfg)
 
 
 class IngestionService:

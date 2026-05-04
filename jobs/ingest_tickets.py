@@ -32,7 +32,6 @@ if str(SRC) not in sys.path:
 
 
 from vs_app.container import build_ticket_fetcher
-from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
 from vs_app.jobs.jira_batch.runtime.runtime_factory import (
     build_ingestion_config,
     try_build_embedding_client,
@@ -219,8 +218,7 @@ async def ingest_one_ticket(
     embedding_client: Any,
     cfg: Any,
 ) -> dict:
-    ticket_data = await get_ticket_data_compat(
-        jira_client,
+    ticket_data = await jira_client.get_ticket_data(
         ticket_id,
         config=cfg,
         llm_client=llm_client,

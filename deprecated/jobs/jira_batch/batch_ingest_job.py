@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from vs_app.container import build_ticket_fetcher
-from vs_app.integrations.jira import get_ticket_data_compat
 from vs_app.integrations.sinks.faiss_store import build_local_faiss_indexes
 from vs_app.modules.ingestion import IngestionDeps
 from vs_app.modules.ingestion.chunks.pipeline import ingest_ticket_chunks_payload
@@ -178,8 +177,7 @@ async def process_ticket(
             return summary, chunks
 
     # --- Fetch once from the selected source ---
-    ticket_data = await get_ticket_data_compat(
-        deps.jira_client,
+    ticket_data = await deps.jira_client.get_ticket_data(
         ticket_id,
         config=cfg,
         llm_client=deps.llm_client,

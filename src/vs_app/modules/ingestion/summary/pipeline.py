@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 from vs_app.integrations.embeddings.client import embed_batch
 from vs_app.modules.tickets.documents import TicketSummaryDocument
-from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
 
 from .heuristic_summary import build_heuristic_summary
 from .llm_summary_extractor import classify_ticket_value_streams, summarize_ticket
@@ -27,8 +26,7 @@ async def ingest_ticket_summary(
 ) -> TicketSummaryDocument:
     """Full summary-mode pipeline for a single ticket."""
     cfg = _default_cfg(cfg)
-    ticket_data = await get_ticket_data_compat(
-        jira_client,
+    ticket_data = await jira_client.get_ticket_data(
         ticket_key,
         config=cfg,
         llm_client=llm_client,

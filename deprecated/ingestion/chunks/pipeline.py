@@ -4,7 +4,6 @@ import logging
 from typing import Any, Optional
 
 from vs_app.integrations.embeddings.client import embed_batch
-from vs_app.integrations.jira.fetch_compat import get_ticket_data_compat
 from vs_app.modules.tickets.documents import HierarchicalTicketResult
 
 from .chunk_builder import build_from_attachments, build_from_ticket_body
@@ -21,8 +20,7 @@ async def ingest_ticket_chunks(
 ) -> HierarchicalTicketResult:
     """Full chunk pipeline for a single ticket."""
     cfg = _default_cfg(cfg)
-    ticket_data = await get_ticket_data_compat(
-        jira_client,
+    ticket_data = await jira_client.get_ticket_data(
         ticket_key,
         config=cfg,
         llm_client=llm_client,

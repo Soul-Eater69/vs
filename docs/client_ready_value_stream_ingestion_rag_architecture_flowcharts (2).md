@@ -206,39 +206,72 @@ flowchart TD
 
 ## 8. RAG Prediction Flow
 
-At prediction time, the system takes a new idea card and runs two retrieval paths in parallel.
+At prediction time, the system takes a new idea card and turns it into a controlled set of value-stream recommendations.
+
+The flow below is intentionally shown as a **flowchart** instead of a sequence diagram, because this is easier for a client audience to follow. It shows the decision path from raw input to final selected value streams.
 
 ```mermaid
-sequenceDiagram
-    participant Input as Idea Card
-    participant Prep as Query Preparation
-    participant Taxonomy as VS Taxonomy Index
-    participant History as Historical Index
-    participant Merge as Candidate Merge
-    participant LLM as LLM Selector
-    participant Final as Finalizer
+flowchart TD
+    A[New idea card text or Jira ticket ID] --> B[Clean raw business text]
+    A --> C[Condense idea card into short business summary]
 
-    Input->>Prep: Raw idea-card text
-    Prep->>Taxonomy: Search approved value streams
-    Prep->>History: Search similar historical tickets
-    Taxonomy-->>Merge: Semantic value-stream candidates
-    History-->>Merge: Similar historical tickets
-    Merge->>Merge: Convert ticket hits into VS support
-    Merge->>Merge: Merge, score, lane, and cap candidates
-    Merge-->>LLM: Bounded candidate set only
-    LLM-->>Final: Selected candidates + business reasons
-    Final->>Final: Sanitize and dedupe
-    Final-->>Input: Final value-stream recommendations
+    B --> D[Semantic retrieval over approved value-stream taxonomy]
+    C --> E[Historical retrieval over similar prior Jira tickets]
+
+    E --> F[Convert historical ticket hits into value-stream support]
+
+    D --> G[Merge candidates by value-stream name]
+    F --> G
+
+    G --> H[Assign source bucket and candidate lane]
+    H --> I[Compute evidence and ranking score]
+
+    I --> J{Candidate triage}
+    J -->|Very strong evidence| K[Auto-select candidate]
+    J -->|Review-worthy evidence| L[Send to bounded LLM candidate window]
+    J -->|Weak evidence or over cap| M[Drop before LLM]
+
+    L --> N{Candidate lane}
+    N -->|Confirmed direct or semantic direct| O[Direct LLM selection pass]
+    N -->|Historical recall| P[Historical gap selection pass]
+
+    O --> Q[Sanitize LLM selections]
+    P --> Q
+    K --> R[Finalizer]
+    Q --> R
+
+    R --> S[Recover very strong missed candidates]
+    S --> T[Limit historical-only gap-fill additions]
+    T --> U[Dedupe by value-stream name]
+    U --> V[Final value-stream recommendations with reasons and evidence]
 ```
+
+### How to read this flow
+
+| Stage | What happens | Why it matters |
+|---|---|---|
+| Query preparation | The input is cleaned for search and condensed for prompts. | Keeps retrieval focused and reduces prompt noise. |
+| Semantic retrieval | The idea card is matched against approved value-stream names and descriptions. | Finds direct business alignment from the current idea card. |
+| Historical retrieval | The same idea card is matched against historical Jira ticket summaries. | Finds precedent and downstream patterns that may not be directly stated. |
+| Candidate merge | Semantic and historical evidence are combined by value-stream name. | Prevents duplicate candidates and shows whether evidence agrees. |
+| Candidate triage | Strong candidates can be auto-selected; plausible candidates go to the LLM; weak candidates are dropped. | Controls cost, noise, and over-selection. |
+| LLM selection | The LLM selects only from the bounded candidate list. | Gives reasoning without allowing free-form label creation. |
+| Finalizer | The output is sanitized, deduped, and checked for evidence quality. | Produces a governed recommendation list. |
 
 ### The two retrieval paths
 
 | Path | What it finds | Example |
 |---|---|---|
-| Semantic taxonomy retrieval | Directly relevant approved value streams | “Resolve Request-Inquiry” from inquiry-related wording |
+| Semantic taxonomy retrieval | Approved value streams that directly match the current idea card | “Resolve Request-Inquiry” from inquiry-related wording |
 | Historical ticket retrieval | Prior tickets with similar business patterns | Past billing/inquiry tickets that also touched payment receipt |
 
----
+### Why both paths are needed
+
+```text
+Semantic retrieval answers: What does this idea card directly look like?
+Historical retrieval answers: What did similar work impact in the past?
+Merged RAG answers: Which approved value streams are defensible using both current text and historical precedent?
+```
 
 ## 9. Candidate Merge Model
 

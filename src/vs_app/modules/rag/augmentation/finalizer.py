@@ -149,15 +149,19 @@ def _run_selection_pass(
             precedent_candidates=precedent_candidates,
             historical_ticket_hits=historical_ticket_hits,
         )
-        system_prompt = build_system_prompt(min_select=0, max_select=12)
+        system_prompt = build_system_prompt(
+            min_select=0,
+            max_select=_historical_gap_selection_max(candidates),
+        )
     else:
         prompt = build_direct_candidate_prompt(
             query_for_prompt=query_for_prompt,
             candidates=candidates,
         )
+        min_select, max_select = _direct_selection_bounds(candidates)
         system_prompt = build_system_prompt(
-            min_select=4,
-            max_select=_direct_selection_max(candidates),
+            min_select=min_select,
+            max_select=max_select,
         )
 
     result = gen_svc.generate_structured(
@@ -171,7 +175,24 @@ def _run_selection_pass(
 
 def _direct_selection_max(candidates: int | List[dict]) -> int:
     candidate_count = candidates if isinstance(candidates, int) else len(candidates)
-    return min(22, max(12, math.ceil(max(0, candidate_count) * 0.65)))
+    if candidate_count <= 0:
+        return 0
+    return min(22, max(6, math.ceil(candidate_count * 0.50)))
+
+
+def _direct_selection_bounds(candidates: int | List[dict]) -> tuple[int, int]:
+    max_select = _direct_selection_max(candidates)
+    if max_select <= 0:
+        return 0, 0
+    min_select = min(3, max(1, math.ceil(max_select * 0.20)))
+    return min_select, max_select
+
+
+def _historical_gap_selection_max(candidates: int | List[dict]) -> int:
+    candidate_count = candidates if isinstance(candidates, int) else len(candidates)
+    if candidate_count <= 0:
+        return 0
+    return min(8, max(3, math.ceil(candidate_count * 0.35)))
 
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:

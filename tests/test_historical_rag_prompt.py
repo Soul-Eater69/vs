@@ -8,4 +8,4 @@ def test_historical_prompt_keeps_distinct_confirmed_workflows() -> None:
 
     assert "confirmed_direct candidates" in prompt
     assert "Do not drop a distinct downstream workflow" in prompt
-    assert "do not reject Appeal Decision merely because Adjudicate Claim" in prompt
+    assert "do not select downstream or neighboring workflows by default" in prompt

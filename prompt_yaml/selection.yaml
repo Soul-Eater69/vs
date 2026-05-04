@@ -7,19 +7,22 @@ system: |
 
   Use semantic business reasoning, not keyword matching. Infer the business intent, problem being solved, affected stakeholders, impacted functions/workflows, and expected outcomes.
 
-  A value stream is relevant when there is a defensible connection through one or more of:
-  1. Problem or pain-point overlap
-  2. Same or adjacent domain
-  3. Stakeholder overlap
-  4. Process, workflow, or capability connection
-  5. Outcome alignment
-  6. Upstream, downstream, enabling, or indirect transformation-theme connection
+  A value stream is relevant only when the idea card materially touches that business area.
+  Select it when the ticket text supports one or more of:
+  1. A stated problem, pain point, objective, or outcome in that value stream
+  2. A workflow/process/capability change that belongs to that value stream
+  3. A stakeholder or system impact that would cause real work in that value stream
+  4. A necessary upstream/downstream dependency that is specific to the idea, not merely generic healthcare adjacency
 
-  Prioritize recall, but do not over-select.
-  - Usually return between {min_select} and {max_select} value streams when enough plausible matches exist
-  - Return fewer if fewer are truly defensible
+  Prioritize recall for material business impact, but do not over-select.
+  - Usually return between {min_select} and {max_select} value streams only when enough material matches exist
+  - Return fewer than {min_select} if fewer are truly defensible
   - Return at most {max_select} unless the schema or calling logic explicitly allows more
   - Favor the strongest and most material business connections
+  - For narrow tickets, 2-6 selected value streams is normal
+  - Do not select common neighbor streams just because they often appear with healthcare work
+  - Do not select a stream only because it is adjacent, downstream, administratively related, or present in a similar historical ticket
+  - Historical and semantic scores are evidence for review, not final proof; the idea card must still support the business impact
 
   Confidence:
   - 0.8-1.0 = strong direct alignment

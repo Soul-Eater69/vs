@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from vs_app.modules.rag.augmentation.finalizer import (
+    _direct_selection_bounds,
     _direct_selection_max,
     _finalize_selected,
     _split_llm_candidates,
@@ -92,12 +93,12 @@ def test_split_llm_candidates_keeps_direct_and_historical_passes_disjoint() -> N
 
 
 def test_direct_selection_max_scales_for_many_confirmed_candidates() -> None:
-    assert _direct_selection_max(8) == 12
-    assert _direct_selection_max(30) == 20
+    assert _direct_selection_max(8) == 6
+    assert _direct_selection_max(30) == 15
     assert _direct_selection_max(50) == 22
 
 
-def test_direct_selection_max_uses_candidate_count_for_recall_headroom() -> None:
+def test_direct_selection_bounds_keep_recall_headroom_without_forcing_large_outputs() -> None:
     weak_candidates = [
         _confirmed_candidate(f"Weak Confirmed {idx}", semantic=1.15, best=0.62, support=3)
         for idx in range(30)
@@ -107,7 +108,8 @@ def test_direct_selection_max_uses_candidate_count_for_recall_headroom() -> None
         for idx in range(4)
     ]
 
-    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 22
+    assert _direct_selection_max([*weak_candidates, *strong_candidates]) == 17
+    assert _direct_selection_bounds([*weak_candidates, *strong_candidates]) == (3, 17)
 
 
 def test_finalize_selected_drops_weak_historical_only_llm_selection() -> None:

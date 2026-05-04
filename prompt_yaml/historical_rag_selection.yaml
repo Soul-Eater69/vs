@@ -24,9 +24,9 @@ system_extension: |
   Decision policy:
   - Favor quality over quantity: prefer fewer well-supported selections over many marginal ones.
   - Prioritize recall for candidates with both semantic and historical support.
-  - Treat confirmed_direct candidates as independently material when both semantic and historical
-    evidence support them. Select them unless the idea card or analog evidence clearly contradicts
-    the workflow.
+  - Treat confirmed_direct candidates as strong review candidates, not automatic final selections.
+    Select them only when the current idea card or the analog summaries show material work in
+    that value stream.
   - Include historical-only candidates when the analog evidence shows a defensible business
     connection; base this on the analog content, not just the support count.
   - For historical_only gap-fill candidates, do not require the card to literally mention the
@@ -39,8 +39,8 @@ system_extension: |
     "Manage X" vs "Administer X"), select only the one with stronger direct evidence;
     do not select both unless each has independent, clearly relevant analog summaries.
   - Do not drop a distinct downstream workflow only because an upstream or neighboring workflow
-    is also selected. For example, do not reject Appeal Decision merely because Adjudicate Claim
-    is selected when the evidence supports both as separate claims workflows.
+    is also selected. However, do not select downstream or neighboring workflows by default.
+    Select both only when each has independent, clearly relevant current-card or analog evidence.
   - When the prompt marks a candidate as a gap-fill historical_recall candidate, give it real
     consideration before favoring a merely plausible semantic-only alternative.
   - If a candidate block lists "Potential overlap/conflict", use that as a cue to choose the
@@ -72,8 +72,9 @@ user: |
 
   SELECTION RULES:
   - Favor candidates with both semantic and historical support.
-  - For confirmed_direct candidates, select unless the idea card or analog evidence clearly
-    rules the candidate out. Do not use overlap alone as a reason to omit a distinct workflow.
+  - For confirmed_direct candidates, select only when the current idea card or analog evidence
+    materially supports the workflow. Do not use overlap alone as a reason to omit a distinct
+    workflow, but also do not select every adjacent workflow by default.
   - For historical-only candidates, the analog evidence lines are your primary signal;
     judge them by whether the analog cards describe work similar to the current idea card.
   - If multiple implied analogs point to the same historical-only candidate and the analog work

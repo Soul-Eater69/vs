@@ -23,25 +23,26 @@ def select_value_streams(
     top_k = min(max(12, fetch_count), 50)
     max_llm_candidates = min(max(top_k + 15, 40), 50)
     cleaned_query = clean_ppt_text(query)
+    query_for_prompt = condense_idea_card(query, max_chars=3500)
+    retrieval_query = query_for_prompt or cleaned_query
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        condense_future = executor.submit(condense_idea_card, query, max_chars=3500)
         semantic_future = executor.submit(
             retrieve_semantic_candidates,
-            cleaned_query,
+            retrieval_query,
             top_k=top_k,
             allowed_value_stream_names=allowed_value_stream_names,
         )
-        query_for_prompt = condense_future.result()
+        historical_future = executor.submit(
+            _retrieve_historical_support_compat,
+            retrieve_historical_support,
+            retrieval_query,
+            historical_faiss_dir=historical_faiss_dir,
+            max_ticket_hits=min(max(12, fetch_count), 40),
+            exclude_ticket_ids=exclude_ticket_ids,
+        )
         semantic_candidates = semantic_future.result()
-
-    historical = _retrieve_historical_support_compat(
-        retrieve_historical_support,
-        query_for_prompt or cleaned_query,
-        historical_faiss_dir=historical_faiss_dir,
-        max_ticket_hits=min(max(12, fetch_count), 40),
-        exclude_ticket_ids=exclude_ticket_ids,
-    )
+        historical = historical_future.result()
     historical = filter_historical_result(historical, exclude_ticket_ids)
 
     augmented = merge_candidate_sources(
@@ -50,7 +51,7 @@ def select_value_streams(
         max_llm_candidates=max_llm_candidates,
     )
     generated = generate_value_streams(
-        query_for_prompt=query_for_prompt or cleaned_query,
+        query_for_prompt=retrieval_query,
         llm_candidates=augmented["llm_candidates"],
         auto_selected=augmented["auto_selected_value_streams"],
         historical_ticket_hits=historical.get("historical_ticket_hits", []),

@@ -83,20 +83,14 @@ async def predict_value_streams_stream(
             else:
                 raise ValueError("No idea card text or ticket ID provided")
 
-            # Step 2: Condense + semantic VS search run in parallel.
-            yield _sse("step", {"step": "prepare", "label": "Condensing and searching VS in parallel..."})
+            # Step 2: Condense once. The same condensed query feeds semantic VS and historical retrieval.
+            yield _sse("step", {"step": "condense", "label": "Condensing idea card for retrieval..."})
             cleaned_query = await asyncio.to_thread(clean_ppt_text, raw_text)
-            condense_task = asyncio.create_task(asyncio.to_thread(condense_idea_card, raw_text))
-            semantic_task = asyncio.create_task(asyncio.to_thread(
-                retrieve_semantic_candidates,
-                cleaned_query,
-                top_k=top_k_vs,
-            ))
+            query_for_prompt = await asyncio.to_thread(condense_idea_card, raw_text)
+            retrieval_query = query_for_prompt or cleaned_query
 
-            query_for_prompt, semantic_candidates = await asyncio.gather(condense_task, semantic_task)
-
-            # Step 3: Historical FAISS
-            yield _sse("step", {"step": "historical", "label": "Searching historical FAISS..."})
+            # Step 3: Semantic VS + historical FAISS both use the condensed query.
+            yield _sse("step", {"step": "semantic", "label": "Searching VS and history from condensed query..."})
             exclude_ids = _source_ticket_exclusions(request)
             historical_kwargs = {
                 "historical_faiss_dir": faiss_dir,
@@ -104,11 +98,21 @@ async def predict_value_streams_stream(
             }
             if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
                 historical_kwargs["exclude_ticket_ids"] = exclude_ids
-            historical = await asyncio.to_thread(
-                retrieve_historical_support,
-                query_for_prompt or cleaned_query,
-                **historical_kwargs,
+            semantic_task = asyncio.create_task(
+                asyncio.to_thread(
+                    retrieve_semantic_candidates,
+                    retrieval_query,
+                    top_k=top_k_vs,
+                )
             )
+            historical_task = asyncio.create_task(
+                asyncio.to_thread(
+                    retrieve_historical_support,
+                    retrieval_query,
+                    **historical_kwargs,
+                )
+            )
+            semantic_candidates, historical = await asyncio.gather(semantic_task, historical_task)
             historical = filter_historical_result(historical, exclude_ids)
 
             # Step 4: Merge candidates
@@ -123,7 +127,7 @@ async def predict_value_streams_stream(
             yield _sse("step", {"step": "llm_select", "label": "Running direct and historical LLM passes..."})
             generated = await asyncio.to_thread(
                 generate_value_streams,
-                query_for_prompt=query_for_prompt or cleaned_query,
+                query_for_prompt=retrieval_query,
                 llm_candidates=augmented["llm_candidates"],
                 auto_selected=augmented["auto_selected_value_streams"],
                 historical_ticket_hits=historical.get("historical_ticket_hits", []),

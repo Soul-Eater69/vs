@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from vs_app.integrations.embeddings.client import embed_batch
-from vs_app.modules.ingestion.value_stream_labels.link_classification import classify_links
+from vs_app.modules.ingestion.jira.value_stream_labels.link_classification import classify_links
 from .extract import (
     build_chunks,
     extract_attachment_texts,
@@ -19,7 +19,7 @@ from .extract import (
     extract_description,
     extract_metadata,
 )
-from vs_app.modules.ingestion.value_stream_labels.value_stream_mapping import (
+from vs_app.modules.ingestion.jira.value_stream_labels.value_stream_mapping import (
     resolve_value_stream_mapping,
     resolve_value_stream_epics_mapping,
 )

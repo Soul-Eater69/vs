@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from vs_app.modules.ingestion.value_stream_labels.theme_extraction import (
+from vs_app.modules.ingestion.jira.value_stream_labels.theme_extraction import (
     extract_themes,
     resolve_value_streams,
 )

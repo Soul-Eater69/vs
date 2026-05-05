@@ -2,7 +2,7 @@
 
 `JiraTicketClient` is the Jira implementation of the TicketFetcher port.
 REST calls are delegated to the authenticated `JIRARestClient` (below).
-Payload shape is assembled by `vs_app.integrations.jira.mapper`.
+Payload shape is assembled by `vs_app.modules.ingestion.jira.mapper`.
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ from vs_app.integrations.files.attachment_extraction import (
     download_attachment,
     fetch_attachment_content,
 )
+from vs_app.modules.ingestion.jira.mapper import build_ticket_payload
 from vs_app.modules.tickets.sources import TicketFetcher
 
-from .mapper import build_ticket_payload
 from .rest_client import JIRARestClient as CoreJIRARestClient
 
 logger = logging.getLogger(__name__)

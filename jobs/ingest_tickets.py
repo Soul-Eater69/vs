@@ -243,8 +243,8 @@ def ensure_value_stream_labels(ticket_data: dict, *, llm_client: Any = None) -> 
     fields = ticket_data.get("fields") or {}
     issuelinks = fields.get("issuelinks") or []
     try:
-        from vs_app.modules.ingestion.value_stream_labels.link_classification import classify_links
-        from vs_app.modules.ingestion.value_stream_labels.value_stream_mapping import (
+        from vs_app.modules.ingestion.jira.value_stream_labels.link_classification import classify_links
+        from vs_app.modules.ingestion.jira.value_stream_labels.value_stream_mapping import (
             resolve_value_stream_mapping,
         )
     except Exception as exc:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from vs_app.integrations.jira.mapper import build_ticket_payload
+from vs_app.modules.ingestion.jira.mapper import build_ticket_payload
 from vs_app.modules.ingestion.summary import text_consolidator
 from vs_app.modules.ingestion.summary.text_consolidator import consolidate_ticket_text
 

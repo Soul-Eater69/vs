@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vs_app.modules.ingestion.value_stream_labels.value_stream_mapping import (
+from vs_app.modules.ingestion.jira.value_stream_labels.value_stream_mapping import (
     resolve_value_stream_mapping,
 )
 
@@ -42,7 +42,7 @@ def test_missing_value_stream_links_returns_no_labels() -> None:
 
 
 def test_missing_value_stream_links_does_not_call_llm_verifier(monkeypatch) -> None:
-    from vs_app.modules.ingestion.value_stream_labels import value_stream_mapping
+    from vs_app.modules.ingestion.jira.value_stream_labels import value_stream_mapping
 
     def fake_verify(entries, llm_client=None):
         raise AssertionError("LLM verifier should not run without VS issue links")

@@ -23,9 +23,9 @@ from typing import Optional
 
 from vs_app.container import build_ticket_fetcher
 from vs_app.jobs.jira_batch.runtime.runtime_factory import try_build_llm
-from vs_app.modules.ingestion.idea_cards.models import AuditRunMetadata, TicketAuditRecord
-from vs_app.modules.ingestion.idea_cards.report import write_audit_output
-from vs_app.modules.ingestion.idea_cards.service import audit_ticket
+from vs_app.ingestion.idea_cards.models import AuditRunMetadata, TicketAuditRecord
+from vs_app.ingestion.idea_cards.report import write_audit_output
+from vs_app.ingestion.idea_cards.service import audit_ticket
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")

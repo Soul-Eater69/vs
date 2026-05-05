@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from vs_app.modules.ingestion.summary import pipeline
+from vs_app.ingestion.summary import pipeline
 
 
 class Cfg:

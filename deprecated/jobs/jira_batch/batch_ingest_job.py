@@ -11,9 +11,9 @@ from typing import Any, Optional
 
 from vs_app.container import build_ticket_fetcher
 from vs_app.integrations.sinks.faiss_store import build_local_faiss_indexes
-from vs_app.modules.ingestion import IngestionDeps
-from vs_app.modules.ingestion.chunks.pipeline import ingest_ticket_chunks_payload
-from vs_app.modules.ingestion.summary.pipeline import ingest_ticket_summary_payload
+from vs_app.ingestion import IngestionDeps
+from vs_app.ingestion.chunks.pipeline import ingest_ticket_chunks_payload
+from vs_app.ingestion.summary.pipeline import ingest_ticket_summary_payload
 from vs_app.modules.tickets.text_formatting import (
     extract_description_text,
     extract_substantive_comments,

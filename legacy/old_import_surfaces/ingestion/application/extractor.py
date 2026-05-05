@@ -1,3 +1,3 @@
-"""Backward-compat shim. Canonical: vs_app.modules.ingestion.summary.text_consolidator."""
+"""Backward-compat shim. Canonical: vs_app.ingestion.summary.text_consolidator."""
 
-from vs_app.modules.ingestion.summary.text_consolidator import *  # noqa: F401,F403
+from vs_app.ingestion.summary.text_consolidator import *  # noqa: F401,F403

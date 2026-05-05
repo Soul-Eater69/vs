@@ -5,4 +5,4 @@ from vs_app.integrations.jira.client import (  # noqa: F401
     JIRARestClient,
     JiraTicketClient,
 )
-from vs_app.modules.ingestion.jira.mapper import merge_attachments as _merge_attachments  # noqa: F401
+from vs_app.ingestion.jira.mapper import merge_attachments as _merge_attachments  # noqa: F401

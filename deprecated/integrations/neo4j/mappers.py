@@ -19,11 +19,11 @@ from urllib.parse import unquote, urlparse
 
 from vs_app.integrations.files.description_links import extract_description_link_attachments
 from vs_app.integrations.files.mime import EXT_TO_MIME
-from vs_app.modules.ingestion.jira.value_stream_labels.epic_extraction import (
+from vs_app.ingestion.jira.value_stream_labels.epic_extraction import (
     extract_epics,
     map_value_streams_to_epics,
 )
-from vs_app.modules.ingestion.jira.value_stream_labels.theme_extraction import resolve_value_streams
+from vs_app.ingestion.jira.value_stream_labels.theme_extraction import resolve_value_streams
 
 # ---------------------------------------------------------------------------
 # Property-key groups (Neo4j loaders vary — we check a set of candidates)

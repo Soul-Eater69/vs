@@ -1,3 +1,3 @@
-"""Backward-compat shim. Canonical: vs_app.modules.ingestion.attachments.router."""
+"""Backward-compat shim. Canonical: vs_app.ingestion.attachments.router."""
 
-from vs_app.modules.ingestion.attachments.router import *  # noqa: F401,F403
+from vs_app.ingestion.attachments.router import *  # noqa: F401,F403

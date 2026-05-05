@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from vs_app.modules.ingestion.chunks.chunk_builder import (
+from vs_app.ingestion.chunks.chunk_builder import (
     extract_attachment_payload,
     prefetch_attachment_bytes,
 )

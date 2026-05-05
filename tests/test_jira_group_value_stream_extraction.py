@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from vs_app.modules.ingestion.jira.mapper import build_ticket_payload
-from vs_app.modules.ingestion.jira.value_stream_labels.helpers import clean_value_stream_name
-from vs_app.modules.ingestion.jira.value_stream_labels.theme_extraction import resolve_value_streams
+from vs_app.ingestion.jira.mapper import build_ticket_payload
+from vs_app.ingestion.jira.value_stream_labels.helpers import clean_value_stream_name
+from vs_app.ingestion.jira.value_stream_labels.theme_extraction import resolve_value_streams
 
 
 def _group_link(key: str, summary: str, status: str = "To Do") -> dict:

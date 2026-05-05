@@ -37,7 +37,7 @@ from vs_app.jobs.jira_batch.runtime.runtime_factory import (
     try_build_embedding_client,
     try_build_llm,
 )
-from vs_app.modules.ingestion.summary.pipeline import ingest_ticket_summary_payload
+from vs_app.ingestion.summary.pipeline import ingest_ticket_summary_payload
 from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 
 
@@ -243,8 +243,8 @@ def ensure_value_stream_labels(ticket_data: dict, *, llm_client: Any = None) -> 
     fields = ticket_data.get("fields") or {}
     issuelinks = fields.get("issuelinks") or []
     try:
-        from vs_app.modules.ingestion.jira.value_stream_labels.link_classification import classify_links
-        from vs_app.modules.ingestion.jira.value_stream_labels.value_stream_mapping import (
+        from vs_app.ingestion.jira.value_stream_labels.link_classification import classify_links
+        from vs_app.ingestion.jira.value_stream_labels.value_stream_mapping import (
             resolve_value_stream_mapping,
         )
     except Exception as exc:

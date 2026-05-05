@@ -378,7 +378,7 @@ There is no theme fallback in the current contract.
 
 Tickets should be ingested/evaluated only after verifying they have value-stream issue links. If a ticket has no resolvable VS issue links, ingestion leaves it unlabeled instead of trying to infer labels from themes.
 
-File: `src/vs_app/modules/ingestion/value_stream_labels/value_stream_mapping.py`
+File: `src/vs_app/ingestion/value_stream_labels/value_stream_mapping.py`
 
 ```text
 No value-stream issue links
@@ -389,7 +389,7 @@ No value-stream issue links
 
 ### Direct/Implied Classifier Requirement
 
-File: `src/vs_app/modules/ingestion/summary/llm_summary_extractor.py`
+File: `src/vs_app/ingestion/summary/llm_summary_extractor.py`
 
 After ingestion has a list of resolved value-stream labels, it asks the LLM to classify those labels as direct or implied.
 

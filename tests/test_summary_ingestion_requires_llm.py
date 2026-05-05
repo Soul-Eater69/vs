@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from vs_app.modules.ingestion.summary.pipeline import ingest_ticket_summary_payload
+from vs_app.ingestion.summary.pipeline import ingest_ticket_summary_payload
 
 
 class JiraClient:

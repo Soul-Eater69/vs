@@ -1,4 +1,4 @@
-"""Canonical ingestion package exports."""
+"""Standalone ingestion package exports."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
-    "IngestionResult": ("vs_app.modules.ingestion.pipeline", "IngestionResult"),
-    "ingest_ticket": ("vs_app.modules.ingestion.pipeline", "ingest_ticket"),
-    "ingest_ticket_payload": ("vs_app.modules.ingestion.pipeline", "ingest_ticket_payload"),
+    "IngestionResult": ("vs_app.ingestion.pipeline", "IngestionResult"),
+    "ingest_ticket": ("vs_app.ingestion.pipeline", "ingest_ticket"),
+    "ingest_ticket_payload": ("vs_app.ingestion.pipeline", "ingest_ticket_payload"),
 }
 
 __all__ = list(_EXPORTS)

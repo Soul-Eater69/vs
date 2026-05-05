@@ -8,7 +8,7 @@ from functools import lru_cache
 from typing import Any
 
 from vs_app.container import TicketSourceFactory
-from vs_app.modules.ingestion.summary.pipeline import ingest_ticket_summary
+from vs_app.ingestion.summary.pipeline import ingest_ticket_summary
 from vs_app.modules.rag.service import ValueStreamRagCommand, ValueStreamRagService
 from vs_app.settings import Settings
 

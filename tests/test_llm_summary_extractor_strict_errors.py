@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from vs_app.modules.ingestion.summary import llm_summary_extractor as extractor
-from vs_app.modules.ingestion.summary.llm_summary_extractor import (
+from vs_app.ingestion.summary import llm_summary_extractor as extractor
+from vs_app.ingestion.summary.llm_summary_extractor import (
     SummaryExtractionError,
     ValueStreamClassificationError,
     classify_ticket_value_streams,

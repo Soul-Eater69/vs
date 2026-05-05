@@ -1,6 +1,6 @@
 # Ingestion
 
-Canonical ingestion code lives in `src/vs_app/modules/ingestion`.
+Canonical ingestion code lives in `src/vs_app/ingestion`.
 Importable batch-job code lives in `src/vs_app/jobs/jira_batch`.
 Root-level operator wrappers live in `jobs/`.
 

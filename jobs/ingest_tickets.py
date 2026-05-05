@@ -44,6 +44,10 @@ from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 logger = logging.getLogger(__name__)
 
 
+def emit(message: str) -> None:
+    print(message, flush=True)
+
+
 def main() -> int:
     args = parse_args()
     logging.basicConfig(
@@ -230,6 +234,7 @@ async def ingest_one_ticket(
         llm_client=llm_client,
         embedding_client=embedding_client,
         cfg=cfg,
+        progress=lambda msg: emit(f"[{ticket_id}] {msg}"),
     )
     summary_doc = result.to_index_doc()
     return summary_doc

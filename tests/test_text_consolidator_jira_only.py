@@ -12,6 +12,10 @@ class Cfg:
     max_prefetch_attachment_size = 60_000_000
 
 
+class SmallCfg(Cfg):
+    max_prefetch_attachment_size = 100
+
+
 class JiraClient:
     def __init__(self) -> None:
         self.downloaded: list[str] = []
@@ -26,7 +30,7 @@ async def test_only_max_documents_downloaded_and_ordered(monkeypatch) -> None:
     monkeypatch.setattr(
         text_consolidator,
         "_extract_bytes_to_text",
-        lambda file_bytes, att, cfg: " ".join(["useful"] * 40),
+        lambda file_bytes, att, cfg, progress=None: " ".join(["useful"] * 40),
     )
     client = JiraClient()
     ticket = {
@@ -64,3 +68,56 @@ def test_description_links_are_not_converted_into_attachments() -> None:
 
     assert payload["attachments"] == [{"id": "1", "filename": "jira.pdf"}]
     assert "description_attachments" not in payload
+
+
+@pytest.mark.anyio
+async def test_attachment_progress_messages(monkeypatch) -> None:
+    monkeypatch.setattr(
+        text_consolidator,
+        "_extract_bytes_to_text",
+        lambda file_bytes, att, cfg, progress=None: " ".join(["useful"] * 40),
+    )
+    client = JiraClient()
+    messages: list[str] = []
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [
+            {"id": "1", "filename": "Idea Card.pptx", "size": 123},
+            {"id": "2", "filename": "image.png", "size": 5},
+        ],
+    }
+
+    await consolidate_ticket_text(ticket, client, Cfg(), progress=messages.append)
+
+    assert "ATTACHMENTS found=2 supported_docs=1 max_documents=2" in messages
+    assert "ATTACHMENT skipped unsupported: image.png" in messages
+    assert "ATTACHMENT selected 1/1: Idea Card.pptx size=123" in messages
+    assert "ATTACHMENT fetching 1/1: Idea Card.pptx" in messages
+    assert "ATTACHMENT fetched 1/1: Idea Card.pptx bytes=5" in messages
+    assert "ATTACHMENT extracting 1/1: Idea Card.pptx" in messages
+    assert "ATTACHMENT extracted 1/1: Idea Card.pptx chars=279" in messages
+
+
+@pytest.mark.anyio
+async def test_attachment_progress_reports_too_large(monkeypatch) -> None:
+    monkeypatch.setattr(
+        text_consolidator,
+        "_extract_bytes_to_text",
+        lambda file_bytes, att, cfg, progress=None: " ".join(["useful"] * 40),
+    )
+    client = JiraClient()
+    messages: list[str] = []
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [
+            {"id": "1", "filename": "LargeDeck.pptx", "size": 101},
+        ],
+    }
+
+    text = await consolidate_ticket_text(ticket, client, SmallCfg(), progress=messages.append)
+
+    assert "ATTACHMENT skipped too_large: LargeDeck.pptx size=101 max=100" in messages
+    assert client.downloaded == []
+    assert "[DOCUMENT: LargeDeck.pptx]" not in text

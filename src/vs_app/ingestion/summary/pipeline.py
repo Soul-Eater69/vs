@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any, Optional
 
 from vs_app.integrations.embeddings.client import embed_batch
@@ -14,6 +15,8 @@ from .text_consolidator import consolidate_ticket_text
 
 logger = logging.getLogger(__name__)
 
+Progress = Callable[[str], None]
+
 
 async def ingest_ticket_summary(
     ticket_key: str,
@@ -21,6 +24,7 @@ async def ingest_ticket_summary(
     llm_client: Optional[Any] = None,
     embedding_client: Optional[Any] = None,
     cfg: Optional[Any] = None,
+    progress: Progress | None = None,
 ) -> TicketSummaryDocument:
     """Full summary-mode pipeline for a single ticket."""
     cfg = _default_cfg(cfg)
@@ -36,6 +40,7 @@ async def ingest_ticket_summary(
         llm_client=llm_client,
         embedding_client=embedding_client,
         cfg=cfg,
+        progress=progress,
     )
 
 
@@ -45,13 +50,19 @@ async def ingest_ticket_summary_payload(
     llm_client: Optional[Any] = None,
     embedding_client: Optional[Any] = None,
     cfg: Optional[Any] = None,
+    progress: Progress | None = None,
 ) -> TicketSummaryDocument:
     """Process an already-fetched ticket payload."""
     cfg = _default_cfg(cfg)
     ticket_key = str(ticket_data.get("key", ""))
     _require_llm_ingestion(ticket_key, llm_client, cfg)
 
-    consolidated_text = await consolidate_ticket_text(ticket_data, jira_client, cfg)
+    consolidated_text = await consolidate_ticket_text(
+        ticket_data,
+        jira_client,
+        cfg,
+        progress=progress,
+    )
     logger.info("Consolidated %d chars for %s", len(consolidated_text), ticket_key)
 
     doc = summarize_ticket(ticket_key, consolidated_text, llm_client, cfg)

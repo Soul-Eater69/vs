@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from .helpers import clean_value_stream_name, nested_str_field, str_field
+from .helpers import clean_value_stream_name, nested_str_field
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +93,7 @@ def _append_theme(
     issue_type = nested_str_field(fields, "issuetype", "name")
     key = str(issue.get("key") or "")
     issue_type_lower = issue_type.lower()
-    if not (
-        key.upper().startswith("GROUP-")
-        or "theme" in issue_type_lower
-        or "group" in issue_type_lower
-    ):
+    if "theme" not in issue_type_lower:
         return
 
     summary_raw = str(fields.get("summary") or "")

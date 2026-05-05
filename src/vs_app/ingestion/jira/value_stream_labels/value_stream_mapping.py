@@ -309,18 +309,25 @@ def resolve_theme_value_stream_mapping(
         summary = str(theme.get("summary") or "")
         raw_summary = str(theme.get("summary_raw") or summary)
         cleaned = clean_value_stream_name(summary) or clean_value_stream_name(raw_summary) or summary or raw_summary
-        resolved = _resolve_approved_name(raw_summary, cleaned) or cleaned
-        if not resolved:
-            unresolved.append({"raw_name": raw_summary, "cleaned_name": cleaned})
+        resolved = _resolve_approved_name(raw_summary, cleaned)
+        if resolved:
+            rows.append(
+                {
+                    "id": str(theme.get("key") or ""),
+                    "name": resolved,
+                    "status": str(theme.get("status") or ""),
+                    "summary_raw": raw_summary,
+                    "source": label_source,
+                }
+            )
             continue
 
-        rows.append(
+        unresolved.append(
             {
-                "id": str(theme.get("key") or ""),
-                "name": resolved,
+                "key": str(theme.get("key") or ""),
+                "raw_name": raw_summary,
+                "cleaned_name": cleaned,
                 "status": str(theme.get("status") or ""),
-                "summary_raw": raw_summary,
-                "source": label_source,
             }
         )
 
@@ -330,12 +337,18 @@ def resolve_theme_value_stream_mapping(
         if resolved:
             rows.append(
                 {
-                    "id": "",
+                    "id": entry["key"],
                     "name": resolved,
-                    "status": "",
+                    "status": entry["status"],
                     "summary_raw": entry["raw_name"],
                     "source": label_source,
                 }
+            )
+        else:
+            logger.warning(
+                "Dropped unresolved GROUP/THEME value-stream name '%s' (source=%s)",
+                entry.get("raw_name") or entry.get("cleaned_name") or "",
+                label_source,
             )
 
     linked_value_streams = _dedupe_linked_value_streams(rows)

@@ -190,7 +190,13 @@ def canonicalize_value_stream_names(
     llm_results = _verify_names_with_llm(unresolved, llm_client=llm_client)
     for entry in unresolved:
         resolved = llm_results.get(_mapping_cache_key(entry["raw_name"]))
-        canonical.append(resolved or entry["cleaned_name"])
+        if resolved:
+            canonical.append(resolved)
+        else:
+            logger.warning(
+                "Dropped unresolved Jira value-stream name '%s' during canonicalization",
+                entry["raw_name"] or entry["cleaned_name"],
+            )
 
     return _dedupe_names(canonical)
 

@@ -50,6 +50,8 @@ def emit(message: str) -> None:
 
 def main() -> int:
     args = parse_args()
+    if args.no_llm:
+        raise SystemExit("--no-llm is no longer supported. Strict ingestion requires an LLM client.")
     logging.basicConfig(
         level=logging.WARNING if args.quiet else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
@@ -104,7 +106,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Reprocess tickets that already exist in summaries.json.",
     )
-    parser.add_argument("--no-llm", action="store_true", help="Use heuristic summaries only.")
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Deprecated. Strict ingestion requires an LLM client.",
+    )
     parser.add_argument("--no-embeddings", action="store_true", help="Do not write summary_embedding.")
     parser.add_argument("--build-faiss", action="store_true", help="Rebuild FAISS after summaries are written.")
     parser.add_argument("--faiss-dir", default="ticket_data/_faiss")
@@ -152,7 +158,9 @@ async def run_batch(
         async def guarded(ticket_id: str) -> tuple[str, dict | None, str | None]:
             async with semaphore:
                 try:
+                    emit(f"[{ticket_id}] START ingest")
                     if not force and ticket_id in summaries_by_ticket:
+                        emit(f"[{ticket_id}] SKIP already exists in {aggregate_path}")
                         logger.info("%s already in %s - skipping (use --force)", ticket_id, aggregate_path)
                         return ticket_id, summaries_by_ticket[ticket_id], None
 
@@ -166,9 +174,11 @@ async def run_batch(
                     async with aggregate_lock:
                         summaries_by_ticket[ticket_id] = summary
                         write_summary_aggregate(aggregate_path, summaries_by_ticket.values())
+                    emit(f"[{ticket_id}] SAVED to {aggregate_path}")
                     logger.info("Appended %s to %s", ticket_id, aggregate_path)
                     return ticket_id, summary, None
                 except Exception as exc:
+                    emit(f"[{ticket_id}] ERROR {exc}")
                     logger.exception("Failed to ingest %s", ticket_id)
                     return ticket_id, None, str(exc)
 
@@ -222,12 +232,25 @@ async def ingest_one_ticket(
     embedding_client: Any,
     cfg: Any,
 ) -> dict:
+    emit(f"[{ticket_id}] FETCHING Jira payload")
     ticket_data = await jira_client.get_ticket_data(
         ticket_id,
         config=cfg,
         llm_client=llm_client,
     )
+    emit(f"[{ticket_id}] FETCHED Jira payload")
     ensure_value_stream_labels(ticket_data, llm_client=llm_client)
+    names = list(ticket_data.get("value_stream_names") or [])
+    ids = list(ticket_data.get("value_stream_ids") or [])
+    if not names and not ids:
+        emit(f"[{ticket_id}] ERROR no official Jira Theme value-stream labels")
+        raise RuntimeError(
+            f"{ticket_id} has no official Jira Theme value-stream labels; refusing to index unlabeled ticket"
+        )
+    emit(f"[{ticket_id}] VS labels: {len(names)} names")
+    for name in names:
+        emit(f"[{ticket_id}]   - {name}")
+    emit(f"[{ticket_id}] SUMMARY/CLASSIFICATION started")
     result = await ingest_ticket_summary_payload(
         ticket_data=ticket_data,
         jira_client=jira_client,
@@ -237,6 +260,16 @@ async def ingest_one_ticket(
         progress=lambda msg: emit(f"[{ticket_id}] {msg}"),
     )
     summary_doc = result.to_index_doc()
+    emit(
+        f"[{ticket_id}] CLASSIFICATION direct={len(summary_doc.get('direct_vs_names') or [])} "
+        f"implied={len(summary_doc.get('implied_vs_names') or [])}"
+    )
+    embedding = list(summary_doc.get("summary_embedding") or [])
+    if embedding:
+        emit(f"[{ticket_id}] EMBEDDING complete dim={len(embedding)}")
+    else:
+        emit(f"[{ticket_id}] EMBEDDING skipped")
+    emit(f"[{ticket_id}] COMPLETE")
     return summary_doc
 
 

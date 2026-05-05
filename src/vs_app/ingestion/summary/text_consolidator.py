@@ -12,7 +12,7 @@ from vs_app.modules.tickets.text_formatting import (
     extract_description_text,
     extract_substantive_comments,
 )
-from vs_app.shared.text_cleaning import clean_extracted_text, text_looks_weak
+from vs_app.shared.text_cleaning import clean_extracted_text
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,6 @@ async def _resolve_jira_documents(
         return []
     all_docs = _document_attachments(api_attachments)
     docs = sorted(all_docs, key=_rank_document_attachment)
-    docs = docs[:budget]
     _emit(
         progress,
         f"ATTACHMENTS found={len(api_attachments)} supported_docs={len(all_docs)} max_documents={budget}",
@@ -96,37 +95,38 @@ async def _resolve_jira_documents(
         if _ext_of(filename) not in _SUPPORTED_EXTENSIONS:
             _emit(progress, f"ATTACHMENT skipped unsupported: {filename}")
 
-    for idx, att in enumerate(docs, start=1):
-        filename = str(att.get("filename") or "attachment")
-        size = int(att.get("size", 0) or 0)
-        _emit(progress, f"ATTACHMENT selected {idx}/{len(docs)}: {filename} size={size}")
-
-    prefetched = await _prefetch_attachment_bytes(
-        jira_client,
-        docs,
-        cfg,
-        progress=progress,
-    )
     max_size = _max_attachment_size(cfg)
     parts: list[str] = []
-    for idx, att in enumerate(docs, start=1):
+    for attempt_idx, att in enumerate(docs, start=1):
+        if len(parts) >= budget:
+            break
         filename = str(att.get("filename") or "attachment")
         size = int(att.get("size", 0) or 0)
-        if size and size > max_size:
+        _emit(progress, f"ATTACHMENT attempting {attempt_idx}/{len(docs)}: {filename} size={size}")
+        if size and size > max_size and not _has_pre_extracted_text(att):
+            _emit(
+                progress,
+                f"ATTACHMENT skipped too_large: {filename} size={size} max={max_size}",
+            )
             continue
         text = await _materialize_attachment_text(
             att,
-            prefetched,
             jira_client,
             cfg,
             progress=progress,
-            index=idx,
-            total=len(docs),
         )
-        word_count = len(text.split()) if text else 0
-        if not text or text_looks_weak(text, min_words=30):
-            _emit(progress, f"ATTACHMENT skipped weak_text: {filename} words={word_count}")
+        skip, word_count, reason = _should_skip_extracted_text(text, min_words=30)
+        if skip:
+            _emit(
+                progress,
+                f"ATTACHMENT skipped weak_text: {filename} reason={reason} words={word_count} chars={len(text or '')}",
+            )
             continue
+        accepted_idx = len(parts) + 1
+        _emit(
+            progress,
+            f"ATTACHMENT accepted {accepted_idx}/{budget}: {filename} words={word_count} chars={len(text)}",
+        )
         parts.append(f"[DOCUMENT: {filename}]\n{text[:_MAX_ATTACHMENT_CHARS]}")
     return parts
 
@@ -138,77 +138,30 @@ def _document_attachments(attachments: list[dict]) -> list[dict]:
 def _rank_document_attachment(att: dict) -> tuple:
     filename = str(att.get("filename") or "").lower()
     ext = _ext_of(filename)
-    name_score = 0
-    if any(
-        token in filename
-        for token in ("idea", "card", "business case", "proposal", "deck", "initiative")
-    ):
-        name_score = 1
+    primary_name_score = 1 if any(token in filename for token in ("idea", "card")) else 0
+    secondary_name_score = 1 if any(
+        token in filename for token in ("business case", "proposal", "deck", "initiative")
+    ) else 0
 
     ext_rank = {
         "pptx": 0,
-        "ppt": 1,
-        "pdf": 2,
-        "docx": 3,
+        "pdf": 1,
+        "docx": 2,
+        "ppt": 3,
         "doc": 4,
     }.get(ext, 9)
 
     size = int(att.get("size", 0) or 0)
-    return (-name_score, ext_rank, size, filename)
-
-
-async def _prefetch_attachment_bytes(
-    jira_client: Any,
-    attachments: list[dict],
-    cfg: Any,
-    progress: Progress | None = None,
-) -> dict[str, bytes]:
-    max_size = int(
-        _max_attachment_size(cfg)
-    )
-    prefetched: dict[str, bytes] = {}
-    total = len(attachments)
-    for idx, att in enumerate(attachments, start=1):
-        filename = str(att.get("filename") or "attachment")
-        if _ext_of(att.get("filename", "")) not in _SUPPORTED_EXTENSIONS:
-            continue
-        size = int(att.get("size", 0) or 0)
-        if size and size > max_size:
-            _emit(
-                progress,
-                f"ATTACHMENT skipped too_large: {filename} size={size} max={max_size}",
-            )
-            continue
-        att_id = _attachment_key(att)
-        if not att_id or att_id in prefetched:
-            continue
-        try:
-            _emit(progress, f"ATTACHMENT fetching {idx}/{total}: {filename}")
-            file_bytes = await jira_client.download_attachment(att)
-        except Exception as exc:
-            _emit(progress, f"ATTACHMENT error downloading {filename}: {exc}")
-            logger.info("Attachment prefetch skipped (%s): %s", att.get("filename"), exc)
-            continue
-        _emit(
-            progress,
-            f"ATTACHMENT fetched {idx}/{total}: {filename} bytes={len(file_bytes or b'')}",
-        )
-        if file_bytes:
-            prefetched[att_id] = file_bytes
-    return prefetched
+    return (-primary_name_score, -secondary_name_score, ext_rank, size, filename)
 
 
 async def _materialize_attachment_text(
     att: dict,
-    prefetched: dict[str, bytes],
     jira_client: Any,
     cfg: Any,
     progress: Progress | None = None,
-    index: int | None = None,
-    total: int | None = None,
 ) -> str:
     filename = str(att.get("filename") or "attachment")
-    ordinal = f"{index}/{total}: " if index is not None and total is not None else ""
     extracted_text = clean_extracted_text(
         str((att.get("extracted") or {}).get("text") or "")
     )
@@ -219,24 +172,19 @@ async def _materialize_attachment_text(
         )
         return extracted_text
 
-    file_bytes = prefetched.get(_attachment_key(att))
-    if file_bytes is None:
-        try:
-            _emit(progress, f"ATTACHMENT fetching {ordinal}{filename}")
-            file_bytes = await jira_client.download_attachment(att)
-        except Exception as exc:
-            _emit(progress, f"ATTACHMENT error downloading {filename}: {exc}")
-            logger.info("Attachment download skipped (%s): %s", att.get("filename"), exc)
-            return ""
-        _emit(
-            progress,
-            f"ATTACHMENT fetched {ordinal}{filename} bytes={len(file_bytes or b'')}",
-        )
+    try:
+        file_bytes = await jira_client.download_attachment(att)
+    except Exception as exc:
+        _emit(progress, f"ATTACHMENT error downloading: {filename} error={exc}")
+        logger.info("Attachment download skipped (%s): %s", att.get("filename"), exc)
+        return ""
 
-    _emit(progress, f"ATTACHMENT extracting {ordinal}{filename}")
-    text = _extract_bytes_to_text(file_bytes or b"", att, cfg, progress=progress)
-    _emit(progress, f"ATTACHMENT extracted {ordinal}{filename} chars={len(text)}")
-    return text
+    try:
+        return _extract_bytes_to_text(file_bytes or b"", att, cfg, progress=progress)
+    except Exception as exc:
+        _emit(progress, f"ATTACHMENT error extracting: {filename} error={exc}")
+        logger.warning("Extraction failed for %s: %s", att.get("filename"), exc)
+        return ""
 
 
 def _extract_bytes_to_text(
@@ -272,7 +220,7 @@ def _extract_bytes_to_text(
         else:
             return ""
     except Exception as exc:
-        _emit(progress, f"ATTACHMENT error extracting {att.get('filename')}: {exc}")
+        _emit(progress, f"ATTACHMENT error extracting: {att.get('filename')} error={exc}")
         logger.warning("Extraction failed for %s: %s", att.get("filename"), exc)
         return ""
 
@@ -285,10 +233,6 @@ def _extract_bytes_to_text(
     return clean_extracted_text(text)
 
 
-def _attachment_key(att: dict) -> str:
-    return str(att.get("id") or att.get("attachment_id") or att.get("filename") or "")
-
-
 def _ext_of(filename: str) -> str:
     name = (filename or "").lower()
     return name.rsplit(".", 1)[-1] if "." in name else ""
@@ -299,6 +243,31 @@ def _max_attachment_size(cfg: Any) -> int:
         getattr(cfg, "max_prefetch_attachment_size", _DEFAULT_MAX_PREFETCH_ATTACHMENT_SIZE)
         or _DEFAULT_MAX_PREFETCH_ATTACHMENT_SIZE
     )
+
+
+def _word_count(text: str) -> int:
+    return len(str(text or "").split())
+
+
+def _should_skip_extracted_text(
+    text: str,
+    *,
+    min_words: int = 30,
+) -> tuple[bool, int, str]:
+    clean = str(text or "").strip()
+    words = _word_count(clean)
+
+    if not clean:
+        return True, words, "empty"
+
+    if words < min_words:
+        return True, words, f"too_few_words<{min_words}"
+
+    return False, words, "ok"
+
+
+def _has_pre_extracted_text(att: dict) -> bool:
+    return bool(clean_extracted_text(str((att.get("extracted") or {}).get("text") or "")))
 
 
 def _emit(progress: Progress | None, message: str) -> None:

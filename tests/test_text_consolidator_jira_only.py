@@ -92,11 +92,8 @@ async def test_attachment_progress_messages(monkeypatch) -> None:
 
     assert "ATTACHMENTS found=2 supported_docs=1 max_documents=2" in messages
     assert "ATTACHMENT skipped unsupported: image.png" in messages
-    assert "ATTACHMENT selected 1/1: Idea Card.pptx size=123" in messages
-    assert "ATTACHMENT fetching 1/1: Idea Card.pptx" in messages
-    assert "ATTACHMENT fetched 1/1: Idea Card.pptx bytes=5" in messages
-    assert "ATTACHMENT extracting 1/1: Idea Card.pptx" in messages
-    assert "ATTACHMENT extracted 1/1: Idea Card.pptx chars=279" in messages
+    assert "ATTACHMENT attempting 1/1: Idea Card.pptx size=123" in messages
+    assert "ATTACHMENT accepted 1/2: Idea Card.pptx words=40 chars=279" in messages
 
 
 @pytest.mark.anyio
@@ -121,3 +118,163 @@ async def test_attachment_progress_reports_too_large(monkeypatch) -> None:
     assert "ATTACHMENT skipped too_large: LargeDeck.pptx size=101 max=100" in messages
     assert client.downloaded == []
     assert "[DOCUMENT: LargeDeck.pptx]" not in text
+
+
+@pytest.mark.anyio
+async def test_five_word_attachment_text_is_skipped(monkeypatch) -> None:
+    monkeypatch.setattr(
+        text_consolidator,
+        "_extract_bytes_to_text",
+        lambda file_bytes, att, cfg, progress=None: "one two three four five",
+    )
+    messages: list[str] = []
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [{"id": "1", "filename": "Idea Card.pdf", "size": 10}],
+    }
+
+    text = await consolidate_ticket_text(ticket, JiraClient(), Cfg(), progress=messages.append)
+
+    assert "ATTACHMENT skipped weak_text: Idea Card.pdf reason=too_few_words<30 words=5 chars=23" in messages
+    assert "[DOCUMENT: Idea Card.pdf]" not in text
+
+
+@pytest.mark.anyio
+async def test_empty_attachment_text_is_skipped(monkeypatch) -> None:
+    monkeypatch.setattr(
+        text_consolidator,
+        "_extract_bytes_to_text",
+        lambda file_bytes, att, cfg, progress=None: "",
+    )
+    messages: list[str] = []
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [{"id": "1", "filename": "Idea Card.pdf", "size": 10}],
+    }
+
+    text = await consolidate_ticket_text(ticket, JiraClient(), Cfg(), progress=messages.append)
+
+    assert "ATTACHMENT skipped weak_text: Idea Card.pdf reason=empty words=0 chars=0" in messages
+    assert "[DOCUMENT: Idea Card.pdf]" not in text
+
+
+@pytest.mark.anyio
+async def test_hundred_word_attachment_text_is_accepted(monkeypatch) -> None:
+    extracted = " ".join(f"word{i}" for i in range(100))
+    monkeypatch.setattr(
+        text_consolidator,
+        "_extract_bytes_to_text",
+        lambda file_bytes, att, cfg, progress=None: extracted,
+    )
+    messages: list[str] = []
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [{"id": "1", "filename": "Idea Card.pdf", "size": 10}],
+    }
+
+    text = await consolidate_ticket_text(ticket, JiraClient(), Cfg(), progress=messages.append)
+
+    assert f"ATTACHMENT accepted 1/2: Idea Card.pdf words=100 chars={len(extracted)}" in messages
+    assert "[DOCUMENT: Idea Card.pdf]" in text
+
+
+@pytest.mark.anyio
+async def test_eight_thousand_word_attachment_text_is_accepted(monkeypatch) -> None:
+    extracted = " ".join(f"word{i}" for i in range(8000))
+    monkeypatch.setattr(
+        text_consolidator,
+        "_extract_bytes_to_text",
+        lambda file_bytes, att, cfg, progress=None: extracted,
+    )
+    messages: list[str] = []
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [{"id": "1", "filename": "Idea Card.pdf", "size": 10}],
+    }
+
+    text = await consolidate_ticket_text(ticket, JiraClient(), Cfg(), progress=messages.append)
+
+    assert f"ATTACHMENT accepted 1/2: Idea Card.pdf words=8000 chars={len(extracted)}" in messages
+    assert "[DOCUMENT: Idea Card.pdf]" in text
+
+
+@pytest.mark.anyio
+async def test_document_budget_counts_accepted_documents_not_attempts(monkeypatch) -> None:
+    def fake_extract(file_bytes, att, cfg, progress=None):
+        if att["filename"] == "Idea Card.pdf":
+            return "too few words"
+        return " ".join(["useful"] * 40)
+
+    monkeypatch.setattr(text_consolidator, "_extract_bytes_to_text", fake_extract)
+    client = JiraClient()
+    messages: list[str] = []
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [
+            {"id": "1", "filename": "Idea Card.pdf", "size": 10},
+            {"id": "2", "filename": "Proposal.docx", "size": 10},
+            {"id": "3", "filename": "Random.pdf", "size": 10},
+        ],
+    }
+
+    text = await consolidate_ticket_text(ticket, client, Cfg(), progress=messages.append)
+
+    assert "[DOCUMENT: Idea Card.pdf]" not in text
+    assert "[DOCUMENT: Proposal.docx]" in text
+    assert "[DOCUMENT: Random.pdf]" in text
+    assert "ATTACHMENT accepted 1/2: Proposal.docx words=40 chars=279" in messages
+    assert "ATTACHMENT accepted 2/2: Random.pdf words=40 chars=279" in messages
+
+
+@pytest.mark.anyio
+async def test_first_document_extraction_error_continues_to_next_document(monkeypatch) -> None:
+    def fake_extract(file_bytes, att, cfg, progress=None):
+        if att["filename"] == "Idea Card.pdf":
+            raise RuntimeError("bad pdf")
+        return " ".join(["useful"] * 40)
+
+    monkeypatch.setattr(text_consolidator, "_extract_bytes_to_text", fake_extract)
+    client = JiraClient()
+    messages: list[str] = []
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [
+            {"id": "1", "filename": "Idea Card.pdf", "size": 10},
+            {"id": "2", "filename": "Business Case.pdf", "size": 20},
+        ],
+    }
+
+    text = await consolidate_ticket_text(ticket, client, Cfg(), progress=messages.append)
+
+    assert "[DOCUMENT: Idea Card.pdf]" not in text
+    assert "[DOCUMENT: Business Case.pdf]" in text
+    assert "ATTACHMENT error extracting: Idea Card.pdf error=bad pdf" in messages
+    assert "ATTACHMENT accepted 1/2: Business Case.pdf words=40 chars=279" in messages
+
+
+@pytest.mark.anyio
+async def test_idea_card_filename_ranks_first(monkeypatch) -> None:
+    monkeypatch.setattr(
+        text_consolidator,
+        "_extract_bytes_to_text",
+        lambda file_bytes, att, cfg, progress=None: " ".join(["useful"] * 40),
+    )
+    client = JiraClient()
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {},
+        "attachments": [
+            {"id": "1", "filename": "Business Case.pptx", "size": 1},
+            {"id": "2", "filename": "Idea Card.docx", "size": 99},
+        ],
+    }
+
+    await consolidate_ticket_text(ticket, client, Cfg())
+
+    assert client.downloaded[:2] == ["Idea Card.docx", "Business Case.pptx"]

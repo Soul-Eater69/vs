@@ -84,6 +84,22 @@ def test_business_objective_group_link_is_not_extracted_as_theme() -> None:
     assert extract_themes(issue_links) == []
 
 
+def test_theme_group_link_is_extracted_as_theme() -> None:
+    issue_links = [
+        _group_link(
+            "GROUP-22226",
+            "CP 2026 Women's and Family Health : Manage Invoice and Payment Receipt",
+            issue_type="Theme",
+        )
+    ]
+
+    themes = extract_themes(issue_links)
+
+    assert len(themes) == 1
+    assert themes[0]["key"] == "GROUP-22226"
+    assert themes[0]["summary"] == "Manage Invoice and Payment Receipt"
+
+
 def test_business_objective_group_link_does_not_populate_value_stream_names() -> None:
     issue = {
         "key": "IDMT-1",

@@ -1,11 +1,16 @@
 from pathlib import Path
 import json
 import shutil
+import sys
+
+import pytest
 
 from jobs.ingest_tickets import (
     ensure_value_stream_labels,
+    ingest_one_ticket,
     load_summary_map,
     load_ticket_ids,
+    main,
     resolve_ticket_ids,
     write_summary_aggregate,
 )
@@ -112,3 +117,82 @@ def test_summary_aggregate_loads_and_replaces_by_ticket_id() -> None:
         assert reloaded["IDMT-2"]["summary_text"] == "keep"
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_no_llm_exits_early(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["ingest_tickets.py", "IDMT-1", "--no-llm"])
+
+    with pytest.raises(SystemExit, match="--no-llm is no longer supported"):
+        main()
+
+
+class _FakeJiraClient:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    async def get_ticket_data(self, ticket_id: str, config=None, llm_client=None):
+        return dict(self.payload)
+
+
+@pytest.mark.anyio
+async def test_ingest_one_ticket_missing_official_labels_raises(capsys) -> None:
+    with pytest.raises(RuntimeError, match="refusing to index unlabeled ticket"):
+        await ingest_one_ticket(
+            ticket_id="IDMT-1",
+            jira_client=_FakeJiraClient({"key": "IDMT-1", "fields": {"issuelinks": []}}),
+            llm_client=object(),
+            embedding_client=None,
+            cfg=object(),
+        )
+
+    captured = capsys.readouterr()
+    assert "[IDMT-1] ERROR no official Jira Theme value-stream labels" in captured.out
+
+
+@pytest.mark.anyio
+async def test_ingest_one_ticket_prints_high_level_progress(monkeypatch, capsys) -> None:
+    class FakeResult:
+        def to_index_doc(self):
+            return {
+                "ticket_id": "IDMT-1",
+                "value_stream_names": ["Issue Payment"],
+                "direct_vs_names": ["Issue Payment"],
+                "implied_vs_names": [],
+                "summary_embedding": [0.1, 0.2, 0.3],
+            }
+
+    async def fake_ingest_ticket_summary_payload(**kwargs):
+        kwargs["progress"]("ATTACHMENT accepted 1/1: Idea Card.pdf words=40 chars=279")
+        return FakeResult()
+
+    monkeypatch.setattr(
+        "jobs.ingest_tickets.ingest_ticket_summary_payload",
+        fake_ingest_ticket_summary_payload,
+    )
+
+    result = await ingest_one_ticket(
+        ticket_id="IDMT-1",
+        jira_client=_FakeJiraClient(
+            {
+                "key": "IDMT-1",
+                "fields": {},
+                "value_stream_names": ["Issue Payment"],
+                "value_stream_ids": ["GROUP-1"],
+            }
+        ),
+        llm_client=object(),
+        embedding_client=object(),
+        cfg=object(),
+    )
+
+    captured = capsys.readouterr()
+    assert result["value_stream_names"] == ["Issue Payment"]
+    assert "[IDMT-1] FETCHING Jira payload" in captured.out
+    assert "[IDMT-1] FETCHED Jira payload" in captured.out
+    assert "[IDMT-1] VS labels: 1 names" in captured.out
+    assert "[IDMT-1]   - Issue Payment" in captured.out
+    assert "[IDMT-1] SUMMARY/CLASSIFICATION started" in captured.out
+    assert "[IDMT-1] ATTACHMENT accepted 1/1: Idea Card.pdf words=40 chars=279" in captured.out
+    assert "[IDMT-1] CLASSIFICATION direct=1 implied=0" in captured.out
+    assert "[IDMT-1] EMBEDDING complete dim=3" in captured.out
+    assert "[IDMT-1] COMPLETE" in captured.out

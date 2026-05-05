@@ -23,6 +23,7 @@ class JiraIngestionConfig:
     max_pages: int = 60
     max_prefetch_attachments: Optional[int] = 8
     max_prefetch_attachment_size: int = 60_000_000
+    max_documents: int = 4
 
     embedding_model: str = "text-embedding-3-large"
     llm_model: str = "gpt-5-mini-idp"
@@ -69,6 +70,7 @@ class JiraIngestionConfig:
     skip_llm_summary: bool = False
     skip_llm_keywords: bool = False
     skip_llm_derived: bool = False
+    strict_value_stream_classification: bool = True
 
     http_timeout_seconds: int = 120
     http_max_retries: int = 3

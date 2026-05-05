@@ -12,7 +12,7 @@ from .helpers import clean_value_stream_name
 # ---------------------------------------------------------------------------
 
 LINK_TYPE_MAP: dict[str, str] = {
-    # Value stream links (ground truth - goes to supervision view)
+    # Value stream links (official Jira labels / silver supervision)
     "value stream": "vs",
     "value-stream": "vs",
     "vs link": "vs",
@@ -25,9 +25,6 @@ LINK_TYPE_MAP: dict[str, str] = {
     "depends on": "dependency",
     "blocks": "dependency",
     "is blocked by": "dependency",
-    "blocks": "dependency",
-    "is blocked by": "dependency",
-    "depends on": "dependency",
     # Hierarchy links
     "epic link": "parent",
     "parent": "parent",
@@ -36,10 +33,7 @@ LINK_TYPE_MAP: dict[str, str] = {
     "is parent of": "parent",
     # Related Ideas
     "relates to": "related",
-    "relates to": "related",
     "duplicates": "related",
-    "duplicates": "related",
-    "clones": "related",
     "clones": "related",
     # Implementation links
     "implements": "implementation",

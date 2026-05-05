@@ -19,7 +19,6 @@ class TicketAttachment:
     mime_type: str = ""
     size: int = 0
     source: str = ""
-    is_description_link: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -54,7 +53,6 @@ class NormalizedTicket:
     description: str = ""
     comments: list[TicketComment] = field(default_factory=list)
     attachments: list[TicketAttachment] = field(default_factory=list)
-    description_attachments: list[TicketAttachment] = field(default_factory=list)
     linked_themes: list[LinkedTheme] = field(default_factory=list)
     value_stream_labels: list[ValueStreamLabel] = field(default_factory=list)
     epics: list[dict[str, Any]] = field(default_factory=list)

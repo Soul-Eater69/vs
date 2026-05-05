@@ -1,1 +1,0 @@
-"""Attachment routing/materialization package."""

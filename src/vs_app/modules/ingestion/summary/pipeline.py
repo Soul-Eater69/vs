@@ -8,7 +8,6 @@ from typing import Any, Optional
 from vs_app.integrations.embeddings.client import embed_batch
 from vs_app.modules.tickets.documents import TicketSummaryDocument
 
-from .heuristic_summary import build_heuristic_summary
 from .llm_summary_extractor import classify_ticket_value_streams, summarize_ticket
 from .mapper import format_structured_summary_text
 from .text_consolidator import consolidate_ticket_text
@@ -22,10 +21,10 @@ async def ingest_ticket_summary(
     llm_client: Optional[Any] = None,
     embedding_client: Optional[Any] = None,
     cfg: Optional[Any] = None,
-    sharepoint_client: Optional[Any] = None,
 ) -> TicketSummaryDocument:
     """Full summary-mode pipeline for a single ticket."""
     cfg = _default_cfg(cfg)
+    _require_llm_ingestion(ticket_key, llm_client, cfg)
     ticket_data = await jira_client.get_ticket_data(
         ticket_key,
         config=cfg,
@@ -37,7 +36,6 @@ async def ingest_ticket_summary(
         llm_client=llm_client,
         embedding_client=embedding_client,
         cfg=cfg,
-        sharepoint_client=sharepoint_client,
     )
 
 
@@ -47,21 +45,16 @@ async def ingest_ticket_summary_payload(
     llm_client: Optional[Any] = None,
     embedding_client: Optional[Any] = None,
     cfg: Optional[Any] = None,
-    sharepoint_client: Optional[Any] = None,
 ) -> TicketSummaryDocument:
     """Process an already-fetched ticket payload."""
     cfg = _default_cfg(cfg)
     ticket_key = str(ticket_data.get("key", ""))
+    _require_llm_ingestion(ticket_key, llm_client, cfg)
 
-    consolidated_text = await consolidate_ticket_text(
-        ticket_data, jira_client, cfg, sharepoint_client=sharepoint_client
-    )
+    consolidated_text = await consolidate_ticket_text(ticket_data, jira_client, cfg)
     logger.info("Consolidated %d chars for %s", len(consolidated_text), ticket_key)
 
-    if llm_client is not None and not getattr(cfg, "skip_llm_summary", False):
-        doc = summarize_ticket(ticket_key, consolidated_text, llm_client, cfg)
-    else:
-        doc = build_heuristic_summary(ticket_key, ticket_data, consolidated_text)
+    doc = summarize_ticket(ticket_key, consolidated_text, llm_client, cfg)
 
     doc.value_stream_ids = list(ticket_data.get("value_stream_ids") or [])
     doc.value_stream_names = list(ticket_data.get("value_stream_names") or [])
@@ -103,10 +96,26 @@ def _embed(text: str, embedding_client: Any, cfg: Any) -> list[float]:
         results = embed_batch(
             [text], embedding_client, model=getattr(cfg, "embedding_model", None)
         )
-        return results[0] if results else []
     except Exception as exc:
-        logger.warning("Embedding failed: %s", exc)
-        return []
+        raise RuntimeError(f"Embedding failed: {exc}") from exc
+
+    if not results or not results[0]:
+        raise RuntimeError("Embedding returned empty result")
+
+    return results[0]
+
+
+def _require_llm_ingestion(ticket_key: str, llm_client: Any | None, cfg: Any) -> None:
+    if llm_client is None:
+        raise RuntimeError(
+            "LLM client is required for summary ingestion; refusing to index "
+            f"weak fallback summary for {ticket_key}"
+        )
+
+    if getattr(cfg, "skip_llm_summary", False):
+        raise RuntimeError(
+            f"skip_llm_summary=True is not allowed for historical RAG indexing: {ticket_key}"
+        )
 
 
 def _default_cfg(cfg: Optional[Any]) -> Any:

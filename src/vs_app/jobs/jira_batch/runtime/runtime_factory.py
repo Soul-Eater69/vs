@@ -23,7 +23,7 @@ def build_ingestion_config(
     *,
     llm_model: str = "gpt-5-mini-idp",
     embedding_model: str = EMBEDDING_MODEL,
-    skip_llm_summary: bool = True,
+    skip_llm_summary: bool = False,
     skip_llm_keywords: bool = False,
     skip_llm_derived: bool = True,
 ) -> JiraIngestionConfig:

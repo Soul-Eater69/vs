@@ -17,7 +17,6 @@ from vs_app.integrations.files.attachment_extraction import (
     fetch_attachment_content,
 )
 from vs_app.modules.tickets.sources import TicketFetcher
-from vs_app.integrations.files.description_links import extract_description_link_attachments
 
 from .mapper import build_ticket_payload
 from .rest_client import JIRARestClient as CoreJIRARestClient
@@ -98,12 +97,10 @@ class JiraTicketClient(TicketFetcher):
         base_url: str,
         token: str,
         verify_ssl: bool = False,
-        sharepoint_client: Optional[Any] = None,
     ) -> None:
         self.base_url = base_url
         self.token = token
         self.verify_ssl = verify_ssl
-        self.sharepoint_client = sharepoint_client
         self.client = JIRARestClient(
             base_url=base_url,
             auth_token=token,
@@ -175,21 +172,11 @@ class JiraTicketClient(TicketFetcher):
     async def download_attachment(self, url_or_att: Any, dest_path: str = "") -> Any:
         if self.client._client is None:
             raise RuntimeError("Call authenticate() before downloading attachments.")
-        return await download_attachment(
-            self.client._client, url_or_att, dest_path,
-            sharepoint_client=self.sharepoint_client,
-        )
+        return await download_attachment(self.client._client, url_or_att, dest_path)
 
     async def fetch_attachment_content(
         self, attachments: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         if self.client._client is None:
             raise RuntimeError("Call authenticate() before fetching attachment content.")
-        return await fetch_attachment_content(
-            self.client._client, attachments,
-            sharepoint_client=self.sharepoint_client,
-        )
-
-    @staticmethod
-    def _extract_description_link_attachments(description: Any) -> List[Dict[str, Any]]:
-        return extract_description_link_attachments(description)
+        return await fetch_attachment_content(self.client._client, attachments)

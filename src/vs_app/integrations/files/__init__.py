@@ -1,5 +1,4 @@
 from .attachment_extraction import download_attachment, fetch_attachment_content
-from .description_links import extract_description_link_attachments
 from .docx_extractor import cheap_peek_docx, extract_docx
 from .idea_card_extractor import extract_idea_card_text, resolve_idea_card_path
 from .markitdown_extractor import extract_image_text, extract_markdown
@@ -13,7 +12,6 @@ __all__ = [
     "cheap_peek_pptx",
     "download_attachment",
     "extract_docx",
-    "extract_description_link_attachments",
     "extract_idea_card_text",
     "extract_image_text",
     "extract_markdown",

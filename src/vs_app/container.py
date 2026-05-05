@@ -1,13 +1,11 @@
 """Composition root.
 
-Owns the TicketSourceFactory and will grow to own IngestionService / RagImpactService
+Owns the TicketSourceFactory and RAG/API wiring.
 wiring as Phases 4-8 land. Construction lives here (not inside a source package)
 so no integration owns another integration's factory.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 from .settings import Settings
 
@@ -37,14 +35,13 @@ class TicketSourceFactory:
         source: str | None = None,
         *,
         verify_ssl: bool | None = None,
-        sharepoint_client: Any = None,
     ):
         resolved = normalize_ticket_source(source, default=self.settings.default_ticket_source)
         verify_ssl = self.settings.verify_ssl if verify_ssl is None else verify_ssl
 
-        return self._build_jira(verify_ssl=verify_ssl, sharepoint_client=sharepoint_client)
+        return self._build_jira(verify_ssl=verify_ssl)
 
-    def _build_jira(self, *, verify_ssl: bool, sharepoint_client: Any):
+    def _build_jira(self, *, verify_ssl: bool):
         # Import here to avoid coupling the container to Jira at module load.
         from vs_app.integrations.jira.client import JiraTicketClient
 
@@ -56,15 +53,13 @@ class TicketSourceFactory:
             base_url=self.settings.jira_base_url,
             token=self.settings.jira_token,
             verify_ssl=verify_ssl,
-            sharepoint_client=sharepoint_client,
         )
 
 def build_ticket_fetcher(
     *,
     source: str | None = None,
     verify_ssl: bool = False,
-    sharepoint_client: Any = None,
 ):
     """Backward-compat wrapper matching the legacy `build_ticket_fetcher` signature."""
     factory = TicketSourceFactory()
-    return factory.build(source=source, verify_ssl=verify_ssl, sharepoint_client=sharepoint_client)
+    return factory.build(source=source, verify_ssl=verify_ssl)

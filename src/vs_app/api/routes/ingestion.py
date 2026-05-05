@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends
 from vs_app.api.dependencies import ApiContainer, get_container
 from vs_app.api.schemas.ingestion_requests import IngestTicketRequest
 from vs_app.api.schemas.ingestion_responses import IngestTicketResponse
-from vs_app.modules.ingestion.service import IngestTicketCommand
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
@@ -16,12 +15,8 @@ async def ingest_ticket(
     request: IngestTicketRequest,
     container: ApiContainer = Depends(get_container),
 ) -> IngestTicketResponse:
-    command = IngestTicketCommand(
+    result = await container.ingestion.ingest_ticket(
         ticket_id=ticket_id,
         source=request.source,
-        mode=request.mode,
-        force=request.force,
-        persist_debug=request.persist_debug,
     )
-    result = await container.ingestion.ingest_ticket(command)
     return IngestTicketResponse.from_result(result)

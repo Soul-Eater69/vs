@@ -24,6 +24,14 @@ _MAX_INPUT_CHARS = 20_000
 _MAX_OUTPUT_TOKENS = 1_200
 
 
+class SummaryExtractionError(RuntimeError):
+    pass
+
+
+class ValueStreamClassificationError(RuntimeError):
+    pass
+
+
 def summarize_ticket(
     ticket_id: str,
     consolidated_text: str,
@@ -32,8 +40,7 @@ def summarize_ticket(
 ) -> TicketSummaryDocument:
     """Call the LLM and return a TicketSummaryDocument."""
     if not consolidated_text.strip():
-        logger.warning("Empty consolidated text for %s - returning minimal summary", ticket_id)
-        return _empty_summary(ticket_id)
+        raise SummaryExtractionError(f"Consolidated text is empty for {ticket_id}")
 
     prompt = build_structured_summary_prompt(
         ticket_id=ticket_id,
@@ -42,7 +49,14 @@ def summarize_ticket(
 
     raw = _call_llm(prompt, llm_client, cfg)
     parsed = parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)
-    output = _validate(SummaryOutput, parsed, ticket_id)
+    output = _validate(SummaryOutput, parsed, ticket_id, SummaryExtractionError)
+
+    if not output.summary_text.strip():
+        raise SummaryExtractionError(f"Missing summary_text for {ticket_id}")
+    if not output.business_problem.strip():
+        raise SummaryExtractionError(f"Missing business_problem for {ticket_id}")
+    if not output.business_capability.strip():
+        raise SummaryExtractionError(f"Missing business_capability for {ticket_id}")
 
     return TicketSummaryDocument(
         ticket_id=ticket_id,
@@ -74,21 +88,39 @@ def classify_ticket_value_streams(
     if not normalized_names:
         return []
 
-    if llm_client is None or not consolidated_text.strip():
-        logger.warning(
-            "%s value-stream direct/implied classification skipped; labels will not be indexed",
-            ticket_id,
+    if llm_client is None:
+        raise ValueStreamClassificationError(
+            f"LLM client required for direct/implied VS classification: {ticket_id}"
         )
-        return []
+
+    if not consolidated_text.strip():
+        raise ValueStreamClassificationError(
+            f"Consolidated text is empty; cannot classify direct/implied VS labels: {ticket_id}"
+        )
 
     prompt = build_value_stream_classification_prompt(
         ticket_id=ticket_id,
         text=consolidated_text[:_MAX_INPUT_CHARS],
         value_streams="\n".join(f"- {name}" for name in normalized_names),
     )
-    raw = _call_llm(prompt, llm_client, cfg)
+    raw = _call_llm(
+        prompt,
+        llm_client,
+        cfg,
+        error_cls=ValueStreamClassificationError,
+    )
     parsed = _parse_json(raw, f"{ticket_id}:value_streams")
-    output = _validate(VsClassificationResult, parsed, f"{ticket_id}:value_streams")
+    output = _validate(
+        VsClassificationResult,
+        parsed,
+        f"{ticket_id}:value_streams",
+        ValueStreamClassificationError,
+    )
+
+    if not output.value_streams:
+        raise ValueStreamClassificationError(
+            f"Direct/implied VS classification returned no rows for labeled ticket {ticket_id}"
+        )
 
     name_to_id = {
         name.lower(): normalized_ids[idx] if idx < len(normalized_ids) else ""
@@ -117,13 +149,27 @@ def classify_ticket_value_streams(
         )
         seen.add(key)
 
+    classified_names = {_normalize_name(row["vs_name"]) for row in matched}
+    expected_names = {_normalize_name(name) for name in normalized_names}
+    missing = expected_names - classified_names
+
+    if missing and getattr(cfg, "strict_value_stream_classification", True):
+        raise ValueStreamClassificationError(
+            f"Direct/implied classification missed labels for {ticket_id}: {sorted(missing)}"
+        )
+
     return matched
 
 
-def _call_llm(prompt: str, llm_client: Any, cfg: Any) -> str:
+def _call_llm(
+    prompt: str,
+    llm_client: Any,
+    cfg: Any,
+    error_cls: type[RuntimeError] = SummaryExtractionError,
+) -> str:
     model = getattr(cfg, "llm_model", None) or "gpt-4o"
     try:
-        return complete_text(
+        raw = complete_text(
             prompt,
             llm_client,
             model=model,
@@ -131,21 +177,29 @@ def _call_llm(prompt: str, llm_client: Any, cfg: Any) -> str:
             temperature=0.2,
         )
     except Exception as exc:
-        logger.warning("LLM call failed: %s", exc)
-        return ""
+        raise error_cls(f"LLM call failed: {exc}") from exc
 
+    if not str(raw or "").strip():
+        raise error_cls("LLM returned empty response")
+    return raw
 
 def _parse_json(raw: str, ticket_id: str) -> dict:
     return parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)
 
 
-def _validate(model_cls, payload: dict, context_id: str):
-    """Validate a parsed dict against a Pydantic model; on failure, return defaults."""
+def _validate(
+    model_cls,
+    payload: dict,
+    context_id: str,
+    error_cls: type[RuntimeError],
+):
+    """Validate a parsed dict against a Pydantic model."""
     try:
         return model_cls.model_validate(payload)
     except ValidationError as exc:
-        logger.warning("%s output failed schema validation for %s: %s", model_cls.__name__, context_id, exc)
-        return model_cls()
+        raise error_cls(
+            f"{model_cls.__name__} validation failed for {context_id}: {exc}"
+        ) from exc
 
 
 def _match_known_value_stream(candidate: str, known_names: list[str]) -> str:
@@ -162,14 +216,9 @@ def _normalize_name(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
 
 
-def _empty_summary(ticket_id: str) -> TicketSummaryDocument:
-    return TicketSummaryDocument(
-        ticket_id=ticket_id,
-        summary_text="",
-        business_problem="",
-        business_capability="",
-        key_terms=[],
-    )
-
-
-__all__ = ["classify_ticket_value_streams", "summarize_ticket"]
+__all__ = [
+    "SummaryExtractionError",
+    "ValueStreamClassificationError",
+    "classify_ticket_value_streams",
+    "summarize_ticket",
+]

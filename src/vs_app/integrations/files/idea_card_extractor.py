@@ -11,7 +11,7 @@ def resolve_idea_card_path(
     input_path: str | Path | None = None,
     *,
     doc_id: str | None = None,
-    idea_cards_dir: str | Path = "idea_cards",
+    local_card_dir: str | Path = "local_cards",
 ) -> Path:
     """
     Resolve an idea-card file either from an explicit path or by doc_id lookup.
@@ -22,7 +22,7 @@ def resolve_idea_card_path(
     if input_path is not None:
         path = Path(input_path)
     elif doc_id:
-        base_dir = Path(idea_cards_dir)
+        base_dir = Path(local_card_dir)
         matches = sorted(base_dir.glob(f"{doc_id}.*"))
         if not matches:
             raise FileNotFoundError(
@@ -41,7 +41,7 @@ def extract_idea_card_text(
     input_path: str | Path | None = None,
     *,
     doc_id: str | None = None,
-    idea_cards_dir: str | Path = "idea_cards",
+    local_card_dir: str | Path = "local_cards",
     max_chars: Optional[int] = None,
 ) -> str:
     """
@@ -54,7 +54,7 @@ def extract_idea_card_text(
     path = resolve_idea_card_path(
         input_path,
         doc_id=doc_id,
-        idea_cards_dir=idea_cards_dir,
+        local_card_dir=local_card_dir,
     )
 
     suffix = path.suffix.lower()

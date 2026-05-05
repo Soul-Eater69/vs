@@ -116,7 +116,6 @@ async def _extract_ticket(
 async def _fetch_tickets_from_source(
     ticket_ids: List[str],
     ticket_source: str,
-    sharepoint_client: Any = None,
     extract_attachments: bool = True,
 ) -> List[RawTicket]:
     resolved_source = normalize_ticket_source(ticket_source)
@@ -129,7 +128,6 @@ async def _fetch_tickets_from_source(
     async with build_ticket_fetcher(
         source=resolved_source,
         verify_ssl=False,
-        sharepoint_client=sharepoint_client,
     ) as ticket_client:
         for ticket_id in ticket_ids:
             ticket = await _extract_ticket(
@@ -146,7 +144,6 @@ async def _fetch_tickets_from_source(
 def fetch_tickets(
     ticket_ids: List[str],
     ticket_source: str = "jira",
-    sharepoint_client: Any = None,
     extract_attachments: bool = True,
 ) -> List[RawTicket]:
     if not ticket_ids:
@@ -157,7 +154,6 @@ def fetch_tickets(
         _fetch_tickets_from_source(
             normalized_ids,
             ticket_source=ticket_source,
-            sharepoint_client=sharepoint_client,
             extract_attachments=extract_attachments,
         )
     )
@@ -165,12 +161,10 @@ def fetch_tickets(
 
 def fetch_tickets_from_jira(
     ticket_ids: List[str],
-    sharepoint_client: Any = None,
     extract_attachments: bool = True,
 ) -> List[RawTicket]:
     return fetch_tickets(
         ticket_ids=ticket_ids,
         ticket_source="jira",
-        sharepoint_client=sharepoint_client,
         extract_attachments=extract_attachments,
     )

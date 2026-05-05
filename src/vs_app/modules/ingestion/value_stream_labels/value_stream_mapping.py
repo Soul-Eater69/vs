@@ -270,23 +270,24 @@ def resolve_value_stream_mapping(
         verified_links.append(entry["link"])
         per_link_names.append(resolved)
 
-    vs_links = verified_links
-    vs_names = _dedupe_names(per_link_names)
-    vs_ids = [str(link.get("key") or "") for link in vs_links if str(link.get("key") or "")]
-    vs_statuses = [str(link.get("status") or "") for link in vs_links]
-
-    linked_value_streams = [
-        {
-            "id": str(link.get("key") or ""),
-            "name": per_link_names[idx],
-            "status": str(link.get("status") or ""),
-            "summary_raw": str(link.get("summary_raw") or link.get("summary") or ""),
-        }
-        for idx, link in enumerate(vs_links)
-    ]
+    linked_value_streams = _dedupe_linked_value_streams(
+        [
+            {
+                "id": str(link.get("key") or ""),
+                "name": per_link_names[idx],
+                "status": str(link.get("status") or ""),
+                "summary_raw": str(link.get("summary_raw") or link.get("summary") or ""),
+                "source": label_source,
+            }
+            for idx, link in enumerate(verified_links)
+        ]
+    )
+    vs_names = [row["name"] for row in linked_value_streams]
+    vs_ids = [row["id"] for row in linked_value_streams]
+    vs_statuses = [row["status"] for row in linked_value_streams]
 
     return {
-        "vs_links": vs_links,
+        "vs_links": verified_links,
         "vs_ids": vs_ids,
         "vs_names": vs_names,
         "vs_statuses": vs_statuses,
@@ -295,68 +296,82 @@ def resolve_value_stream_mapping(
     }
 
 
-def resolve_value_stream_epics_mapping(
-    ticket_data: dict,
-    classified_links: dict,
+def resolve_theme_value_stream_mapping(
+    themes: list[dict],
     llm_client: Any | None = None,
 ) -> dict[str, Any]:
-    """Extract value streams and their associated epics from ticket data."""
-    vs_mapping = resolve_value_stream_mapping(ticket_data, classified_links, llm_client=llm_client)
-    linked_value_streams = vs_mapping.get("linked_value_streams", [])
+    """Resolve value-stream labels from implemented-by GROUP/THEME Jira links."""
+    label_source = "jira_implemented_by_group_links"
+    rows: list[dict[str, str]] = []
+    unresolved: list[dict[str, str]] = []
 
-    epics_raw = list((ticket_data or {}).get("epics") or [])
-
-    epics_normalized: list[dict] = []
-    seen_epic_keys: set[str] = set()
-
-    for epic in epics_raw:
-        key = str(epic.get("key") or "").strip()
-        if not key or key in seen_epic_keys:
+    for theme in _dedupe_rows(themes or []):
+        summary = str(theme.get("summary") or "")
+        raw_summary = str(theme.get("summary_raw") or summary)
+        cleaned = clean_value_stream_name(summary) or clean_value_stream_name(raw_summary) or summary or raw_summary
+        resolved = _resolve_approved_name(raw_summary, cleaned) or cleaned
+        if not resolved:
+            unresolved.append({"raw_name": raw_summary, "cleaned_name": cleaned})
             continue
 
-        summary_raw = str(epic.get("summary_raw") or epic.get("summary") or "").strip()
-        summary = _normalize_theme_summary(summary_raw) if summary_raw else ""
+        rows.append(
+            {
+                "id": str(theme.get("key") or ""),
+                "name": resolved,
+                "status": str(theme.get("status") or ""),
+                "summary_raw": raw_summary,
+                "source": label_source,
+            }
+        )
 
-        epics_normalized.append({
-            "id": key,
-            "key": key,
-            "name": summary,
-            "summary": summary,
-            "summary_raw": summary_raw,
-            "status": str(epic.get("status") or "").strip(),
-            "type": str(epic.get("type") or "epic").strip(),
-        })
-        seen_epic_keys.add(key)
+    llm_results = _verify_names_with_llm(unresolved, llm_client=llm_client)
+    for entry in unresolved:
+        resolved = llm_results.get(_mapping_cache_key(entry["raw_name"]))
+        if resolved:
+            rows.append(
+                {
+                    "id": "",
+                    "name": resolved,
+                    "status": "",
+                    "summary_raw": entry["raw_name"],
+                    "source": label_source,
+                }
+            )
 
-    epics_deduped = _dedupe_rows([
-        {
-            "key": e.get("key"),
-            "name": e.get("name"),
-            "summary_raw": e.get("summary_raw"),
-            "status": e.get("status"),
-        }
-        for e in epics_normalized
-    ])
-
-    vs_with_epics: list[dict] = []
-    for vs in linked_value_streams:
-        vs_with_epics.append({
-            "value_stream": vs,
-            "epics": epics_normalized,
-            "epic_ids": [e["id"] for e in epics_normalized],
-            "epic_count": len(epics_normalized),
-        })
+    linked_value_streams = _dedupe_linked_value_streams(rows)
+    value_stream_names = [row["name"] for row in linked_value_streams]
+    value_stream_ids = [row["id"] for row in linked_value_streams]
+    value_stream_statuses = [row["status"] for row in linked_value_streams]
 
     return {
-        "value_streams": linked_value_streams,
-        "epics_normalized": epics_normalized,
-        "epics_deduped": epics_deduped,
-        "vs_with_epics": vs_with_epics,
-        "all_epic_ids": [e.get("id") for e in epics_normalized],
-        "all_epic_names": [e.get("name") for e in epics_normalized if e.get("name")],
-        "summary": {
-            "num_value_streams": len(linked_value_streams),
-            "num_unique_epics": len({e.get("id") for e in epics_normalized}),
-            "num_vs_with_epics": len([vs for vs in vs_with_epics if vs.get("epic_ids")]),
-        },
+        "value_stream_ids": value_stream_ids,
+        "value_stream_names": value_stream_names,
+        "value_stream_statuses": value_stream_statuses,
+        "linked_value_streams": linked_value_streams,
+        "value_stream_label_source": label_source,
+        "vs_ids": value_stream_ids,
+        "vs_names": value_stream_names,
+        "vs_statuses": value_stream_statuses,
+        "label_source": label_source,
     }
+
+
+def _dedupe_linked_value_streams(rows: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    out: list[dict] = []
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        key = _norm_vs(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "id": str(row.get("id") or ""),
+                "name": name,
+                "status": str(row.get("status") or ""),
+                "summary_raw": str(row.get("summary_raw") or ""),
+                "source": str(row.get("source") or ""),
+            }
+        )
+    return out

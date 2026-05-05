@@ -1,8 +1,4 @@
-"""Attachment download and text extraction via MarkItDown.
-
-Supports direct Jira downloads with automatic SharePoint fallback
-for attachments hosted on SharePoint (detected by URL).
-"""
+"""Attachment download and text extraction via MarkItDown."""
 
 from __future__ import annotations
 
@@ -20,9 +16,6 @@ from .mime import (
 )
 
 logger = logging.getLogger(__name__)
-
-_SHAREPOINT_URL_MARKER = "sharepoint.com"
-
 
 # ---------------------------------------------------------------------------
 # Retry helper
@@ -90,7 +83,6 @@ async def download_attachment(
     http_client: httpx.AsyncClient,
     url_or_att: Any,
     dest_path: str = "",
-    sharepoint_client: Optional[Any] = None,
 ) -> Any:
     """Download a single attachment.
 
@@ -98,8 +90,6 @@ async def download_attachment(
       - download_attachment(client, url_or_att=url, dest_path=...) -> saves to disk
       - download_attachment(client, url_or_att=att_dict) -> returns raw bytes
 
-    When a direct Jira download fails and the URL points to SharePoint,
-    falls back to ``sharepoint_client.get_file_content_by_url(url)`` if provided.
     """
     if isinstance(url_or_att, dict):
         url = url_or_att.get("content", "")
@@ -111,12 +101,9 @@ async def download_attachment(
     if not url:
         raise ValueError("No download URL found in attachment")
 
-    try:
-        response = await get_with_retry(http_client, url)
-        response.raise_for_status()
-        raw_bytes = response.content
-    except Exception as exc:
-        raw_bytes = _try_sharepoint_fallback(url, filename, sharepoint_client, exc)
+    response = await get_with_retry(http_client, url)
+    response.raise_for_status()
+    raw_bytes = response.content
 
     if dest_path:
         with open(dest_path, "wb") as f:
@@ -125,31 +112,6 @@ async def download_attachment(
 
     return raw_bytes
 
-
-def _try_sharepoint_fallback(
-    url: str,
-    filename: str,
-    sharepoint_client: Optional[Any],
-    original_exc: Exception,
-) -> bytes:
-    """Attempt SharePoint download when Jira download fails. Re-raises on failure."""
-    if not sharepoint_client or _SHAREPOINT_URL_MARKER not in url:
-        raise original_exc
-
-    try:
-        sp_bytes = sharepoint_client.get_file_content_by_url(url)
-    except Exception as sp_exc:
-        logger.warning("SharePoint fallback failed for %s: %s", filename or url, sp_exc)
-        raise original_exc from sp_exc
-
-    if not sp_bytes:
-        logger.warning("SharePoint fallback returned empty for %s", filename or url)
-        raise original_exc
-
-    logger.info("SharePoint fallback succeeded for %s", filename or url)
-    return sp_bytes
-
-
 # ---------------------------------------------------------------------------
 # Batch text extraction
 # ---------------------------------------------------------------------------
@@ -157,12 +119,8 @@ def _try_sharepoint_fallback(
 async def fetch_attachment_content(
     http_client: httpx.AsyncClient,
     attachments: List[Dict[str, Any]],
-    sharepoint_client: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """Download each attachment and extract text via MarkItDown.
-
-    Falls back to SharePoint for URLs containing ``sharepoint.com``
-    when the direct Jira download fails and *sharepoint_client* is provided.
 
     Returns a list of dicts with keys: filename, mime_type, text_content, error.
     """
@@ -188,7 +146,7 @@ async def fetch_attachment_content(
             continue
 
         try:
-            raw_content = await download_attachment(http_client, att, sharepoint_client=sharepoint_client)
+            raw_content = await download_attachment(http_client, att)
 
             ext = f".{filename.rsplit('.', 1)[-1]}" if "." in filename else ""
             stream_info = build_stream_info(mime_type=mime_type, ext=ext, filename=filename)

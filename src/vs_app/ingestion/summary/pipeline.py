@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any, Optional
@@ -65,7 +66,13 @@ async def ingest_ticket_summary_payload(
     )
     logger.info("Consolidated %d chars for %s", len(consolidated_text), ticket_key)
 
-    doc = summarize_ticket(ticket_key, consolidated_text, llm_client, cfg)
+    doc = await asyncio.to_thread(
+        summarize_ticket,
+        ticket_key,
+        consolidated_text,
+        llm_client,
+        cfg,
+    )
 
     doc.value_stream_ids = list(ticket_data.get("value_stream_ids") or [])
     doc.value_stream_names = list(ticket_data.get("value_stream_names") or [])
@@ -74,7 +81,8 @@ async def ingest_ticket_summary_payload(
         or ticket_data.get("label_source")
         or "jira_issuelinks"
     )
-    doc.value_streams = classify_ticket_value_streams(
+    doc.value_streams = await asyncio.to_thread(
+        classify_ticket_value_streams,
         ticket_id=ticket_key,
         consolidated_text=consolidated_text,
         value_stream_ids=doc.value_stream_ids,
@@ -95,8 +103,11 @@ async def ingest_ticket_summary_payload(
     ]
 
     if embedding_client is not None:
-        doc.summary_embedding = _embed(
-            format_structured_summary_text(doc), embedding_client, cfg
+        doc.summary_embedding = await asyncio.to_thread(
+            _embed,
+            format_structured_summary_text(doc),
+            embedding_client,
+            cfg,
         )
 
     return doc

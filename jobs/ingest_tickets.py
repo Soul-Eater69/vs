@@ -32,11 +32,9 @@ if str(SRC) not in sys.path:
 
 
 from vs_app.container import build_ticket_fetcher
-from vs_app.jobs.jira_batch.runtime.runtime_factory import (
-    build_ingestion_config,
-    try_build_embedding_client,
-    try_build_llm,
-)
+from vs_app.integrations.clients.embedding import EmbeddingClient
+from vs_app.integrations.clients.llm import IDPChatOpenAI
+from vs_app.jobs.jira_batch.runtime.runtime_factory import build_ingestion_config
 from vs_app.ingestion.summary.pipeline import ingest_ticket_summary_payload
 from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 
@@ -73,7 +71,6 @@ def main() -> int:
             concurrency=args.concurrency,
             force=args.force,
             aggregate_name=args.aggregate_name,
-            enable_llm=not args.no_llm,
             enable_embeddings=not args.no_embeddings,
             build_faiss=args.build_faiss,
             faiss_dir=Path(args.faiss_dir),
@@ -126,7 +123,6 @@ async def run_batch(
     concurrency: int,
     force: bool,
     aggregate_name: str,
-    enable_llm: bool,
     enable_embeddings: bool,
     build_faiss: bool,
     faiss_dir: Path,
@@ -139,15 +135,15 @@ async def run_batch(
     cfg = build_ingestion_config(
         llm_model="gpt-5-mini-idp",
         embedding_model=EMBEDDING_MODEL,
-        skip_llm_summary=not enable_llm,
-        skip_llm_keywords=not enable_llm,
-        skip_llm_derived=not enable_llm,
+        skip_llm_summary=False,
+        skip_llm_keywords=False,
+        skip_llm_derived=False,
     )
-    llm_client = try_build_llm(enable=enable_llm, model="gpt-5-mini-idp")
-    embedding_client = try_build_embedding_client(
-        enable=enable_embeddings,
-        model=EMBEDDING_MODEL,
-        dimension=EMBEDDING_DIMENSION,
+    llm_client = IDPChatOpenAI(model="gpt-5-mini-idp")
+    embedding_client = (
+        EmbeddingClient(model=EMBEDDING_MODEL, dimension=EMBEDDING_DIMENSION)
+        if enable_embeddings
+        else None
     )
 
     semaphore = asyncio.Semaphore(max(1, concurrency))

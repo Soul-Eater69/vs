@@ -1,18 +1,9 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from ..config import JiraIngestionConfig
-from vs_app.integrations.clients.embedding import EmbeddingClient
-from vs_app.integrations.clients.llm import IDPChatOpenAI
-from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
-
-logger = logging.getLogger(__name__)
-
-# Backward-compatible aliases (legacy name, direct implementation)
-OpenAICompatibleLLM = IDPChatOpenAI
-OpenAICompatibleEmbeddingClient = EmbeddingClient
+from vs_app.settings import EMBEDDING_MODEL
 
 def _set_if_present(cfg: JiraIngestionConfig, name: str, value: Any) -> None:
     if hasattr(cfg, name):
@@ -45,29 +36,3 @@ def build_ingestion_config(
 
     return cfg
 
-
-def try_build_llm(*, enable: bool = True, model: str = "gpt-5-mini-idp") -> IDPChatOpenAI | None:
-    if not enable:
-        logger.info("LLM disabled")
-        return None
-    try:
-        return IDPChatOpenAI(model=model)
-    except Exception as exc:
-        logger.warning("LLM unavailable (%s) - continuing without LLM", exc)
-        return None
-
-
-def try_build_embedding_client(
-    *,
-    enable: bool = True,
-    model: str = EMBEDDING_MODEL,
-    dimension: int = EMBEDDING_DIMENSION,
-) -> EmbeddingClient | None:
-    if not enable:
-        logger.info("Embeddings disabled")
-        return None
-    try:
-        return EmbeddingClient(model=model, dimension=dimension)
-    except Exception as exc:
-        logger.warning("Embedding client unavailable (%s) - continuing without embeddings", exc)
-        return None

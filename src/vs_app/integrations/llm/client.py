@@ -19,7 +19,7 @@ class LLMClientAdapter:
         prompt: str,
         *,
         model: str | None = None,
-        max_output_tokens: int = 1200,
+        max_output_tokens: int | None = 1200,
         temperature: float = 0.2,
         system_prompt: str | None = None,
     ) -> str:
@@ -38,7 +38,7 @@ def complete_text(
     llm_client: Any,
     *,
     model: str | None = None,
-    max_output_tokens: int = 1200,
+    max_output_tokens: int | None = 1200,
     temperature: float = 0.2,
     system_prompt: str | None = None,
 ) -> str:
@@ -66,12 +66,14 @@ def complete_text(
         return str(content or "").strip()
 
     if hasattr(llm_client, "chat") and hasattr(llm_client.chat, "completions"):
-        response = llm_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_output_tokens,
-            temperature=temperature,
-        )
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if max_output_tokens is not None:
+            kwargs["max_tokens"] = max_output_tokens
+        response = llm_client.chat.completions.create(**kwargs)
         choice = response.choices[0].message
         return str(getattr(choice, "content", "") or "")
 

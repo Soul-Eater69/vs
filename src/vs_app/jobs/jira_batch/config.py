@@ -27,7 +27,7 @@ class JiraIngestionConfig:
 
     embedding_model: str = "text-embedding-3-large"
     llm_model: str = "gpt-5-mini-idp"
-    llm_max_output_tokens: int = 1200
+    llm_max_output_tokens: int | None = None
     summary_input_char_limit: int = 20_000
     classification_input_char_limit: int = 20_000
 

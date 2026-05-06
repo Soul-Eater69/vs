@@ -200,8 +200,10 @@ def _input_char_limit(cfg: Any, attr: str) -> int:
     return max(1_000, limit)
 
 
-def _output_token_limit(cfg: Any) -> int:
+def _output_token_limit(cfg: Any) -> int | None:
     value = getattr(cfg, "llm_max_output_tokens", _MAX_OUTPUT_TOKENS)
+    if value is None:
+        return None
     try:
         limit = int(value)
     except (TypeError, ValueError):

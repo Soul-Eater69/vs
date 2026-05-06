@@ -25,6 +25,7 @@ import json
 import logging
 from pathlib import Path
 import sys
+import traceback
 from typing import Any
 
 
@@ -51,7 +52,7 @@ class LlmRuntimeConfig:
 
     llm_model: str = "gpt-5-mini-idp"
     llm_reasoning_effort: str | None = "medium"
-    llm_max_output_tokens: int = 1200
+    llm_max_output_tokens: int | None = None
     summary_input_chars: int = 20_000
     classification_input_chars: int = 20_000
 
@@ -69,7 +70,7 @@ class IngestTicketsRuntimeConfig:
     fallback: LlmRuntimeConfig = LlmRuntimeConfig(
         llm_model="gpt-5-idp",
         llm_reasoning_effort="low",
-        llm_max_output_tokens=800,
+        llm_max_output_tokens=None,
         summary_input_chars=8_000,
         classification_input_chars=6_000,
     )
@@ -234,11 +235,11 @@ async def run_batch(
     )
 
     semaphore = asyncio.Semaphore(max(1, concurrency))
-    results: list[tuple[str, dict | None, str | None]] = []
+    results: list[tuple[str, dict | None, dict[str, Any] | None]] = []
 
     async with build_ticket_fetcher(source=source, verify_ssl=False) as jira_client:
 
-        async def guarded(ticket_id: str) -> tuple[str, dict | None, str | None]:
+        async def guarded(ticket_id: str) -> tuple[str, dict | None, dict[str, Any] | None]:
             async with semaphore:
                 try:
                     emit(f"[{ticket_id}] START ingest")
@@ -258,7 +259,11 @@ async def run_batch(
                     if fallback_runtime is None:
                         emit(f"[{ticket_id}] ERROR {exc}")
                         logger.exception("Failed to ingest %s", ticket_id)
-                        return ticket_id, None, str(exc)
+                        return ticket_id, None, build_error_payload(
+                            ticket_id=ticket_id,
+                            primary_profile=runtime_config.primary,
+                            primary_exc=exc,
+                        )
 
                     emit(
                         f"[{ticket_id}] RETRY fallback model={runtime_config.fallback.llm_model} "
@@ -277,7 +282,13 @@ async def run_batch(
                         error = f"primary failed: {exc}; fallback failed: {fallback_exc}"
                         emit(f"[{ticket_id}] ERROR {error}")
                         logger.exception("Failed to ingest %s with fallback", ticket_id)
-                        return ticket_id, None, error
+                        return ticket_id, None, build_error_payload(
+                            ticket_id=ticket_id,
+                            primary_profile=runtime_config.primary,
+                            primary_exc=exc,
+                            fallback_profile=runtime_config.fallback,
+                            fallback_exc=fallback_exc,
+                        )
 
                     emit(f"[{ticket_id}] RETRY succeeded with {runtime_config.fallback.llm_model}")
 
@@ -291,16 +302,21 @@ async def run_batch(
                 except Exception as exc:
                     emit(f"[{ticket_id}] ERROR {exc}")
                     logger.exception("Failed to ingest %s", ticket_id)
-                    return ticket_id, None, str(exc)
+                    return ticket_id, None, build_error_payload(
+                        ticket_id=ticket_id,
+                        primary_profile=runtime_config.primary,
+                        primary_exc=exc,
+                        stage="save_summary",
+                    )
 
         results = await asyncio.gather(*(guarded(ticket_id) for ticket_id in ticket_ids))
 
     summaries: list[dict] = []
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, Any]] = []
     for ticket_id, summary, error in results:
         if error:
-            errors.append({"ticket_id": ticket_id, "error": error})
-            write_json(output_dir / f"ERROR_{ticket_id}.json", {"ticket_id": ticket_id, "error": error})
+            errors.append(error)
+            write_json(output_dir / f"ERROR_{ticket_id}.json", error)
             continue
         if summary is not None:
             summaries.append(summary)
@@ -356,7 +372,7 @@ async def run_batch(
             print(f"  azure deleted:   {azure_result['deleted_doc_count']}")
     for ticket_id, summary, error in results:
         if error:
-            print(f"  [{ticket_id}] ERROR: {error}")
+            print(f"  [{ticket_id}] ERROR: {error.get('message') or error}")
         else:
             names = list((summary or {}).get("value_stream_names") or [])
             print(f"  [{ticket_id}] summaries.json value_streams={names}")
@@ -373,12 +389,61 @@ def build_llm_runtime(profile: LlmRuntimeConfig) -> tuple[Any, Any]:
         skip_llm_keywords=False,
         skip_llm_derived=False,
     )
-    llm_client = IDPChatOpenAI(
-        model=profile.llm_model,
-        max_tokens=profile.llm_max_output_tokens,
-        extra_body=build_extra_body(reasoning_effort=profile.llm_reasoning_effort),
-    )
+    llm_kwargs: dict[str, Any] = {
+        "model": profile.llm_model,
+        "extra_body": build_extra_body(reasoning_effort=profile.llm_reasoning_effort),
+    }
+    if profile.llm_max_output_tokens is not None:
+        llm_kwargs["max_tokens"] = profile.llm_max_output_tokens
+    llm_client = IDPChatOpenAI(**llm_kwargs)
     return cfg, llm_client
+
+
+def build_error_payload(
+    *,
+    ticket_id: str,
+    primary_profile: LlmRuntimeConfig,
+    primary_exc: Exception,
+    fallback_profile: LlmRuntimeConfig | None = None,
+    fallback_exc: Exception | None = None,
+    stage: str = "ingest",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ticket_id": ticket_id,
+        "stage": stage,
+        "message": str(primary_exc),
+        "primary": {
+            "model": primary_profile.llm_model,
+            "reasoning_effort": primary_profile.llm_reasoning_effort,
+            "summary_input_chars": primary_profile.summary_input_chars,
+            "classification_input_chars": primary_profile.classification_input_chars,
+            "llm_max_output_tokens": primary_profile.llm_max_output_tokens,
+            "exception_type": type(primary_exc).__name__,
+            "error": str(primary_exc),
+            "traceback": "".join(
+                traceback.format_exception(type(primary_exc), primary_exc, primary_exc.__traceback__)
+            ),
+        },
+    }
+    if fallback_profile is not None and fallback_exc is not None:
+        payload["message"] = f"primary failed: {primary_exc}; fallback failed: {fallback_exc}"
+        payload["fallback"] = {
+            "model": fallback_profile.llm_model,
+            "reasoning_effort": fallback_profile.llm_reasoning_effort,
+            "summary_input_chars": fallback_profile.summary_input_chars,
+            "classification_input_chars": fallback_profile.classification_input_chars,
+            "llm_max_output_tokens": fallback_profile.llm_max_output_tokens,
+            "exception_type": type(fallback_exc).__name__,
+            "error": str(fallback_exc),
+            "traceback": "".join(
+                traceback.format_exception(
+                    type(fallback_exc),
+                    fallback_exc,
+                    fallback_exc.__traceback__,
+                )
+            ),
+        }
+    return payload
 
 
 async def ingest_one_ticket(

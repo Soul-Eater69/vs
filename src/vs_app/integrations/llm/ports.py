@@ -13,7 +13,7 @@ class LLMClient(Protocol):
         prompt: str,
         *,
         model: str | None = None,
-        max_output_tokens: int = 1200,
+        max_output_tokens: int | None = 1200,
         temperature: float = 0.2,
         system_prompt: str | None = None,
     ) -> str: ...

@@ -14,7 +14,7 @@ def build_ingestion_config(
     *,
     llm_model: str = "gpt-5-mini-idp",
     embedding_model: str = EMBEDDING_MODEL,
-    llm_max_output_tokens: int = 1200,
+    llm_max_output_tokens: int | None = None,
     summary_input_char_limit: int = 20_000,
     classification_input_char_limit: int = 20_000,
     skip_llm_summary: bool = False,

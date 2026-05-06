@@ -253,6 +253,10 @@ class AzureDirectSearchClient:
         """Upload documents to the configured Azure AI Search index."""
         return self._search_client.upload_documents(documents=documents)
 
+    def merge_or_upload_documents(self, documents: List[Dict[str, Any]]) -> Any:
+        """Merge existing documents or upload them when they do not exist."""
+        return self._search_client.merge_or_upload_documents(documents=documents)
+
     def delete_documents(self, documents: List[Dict[str, Any]]) -> Any:
         """Delete documents from the configured Azure AI Search index."""
         return self._search_client.delete_documents(documents=documents)

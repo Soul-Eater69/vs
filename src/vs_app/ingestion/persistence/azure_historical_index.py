@@ -30,6 +30,7 @@ HISTORICAL_SELECT_FIELDS = [
 
 def upload_historical_summary_index(
     *,
+    summaries: list[dict] | None = None,
     output_dir: str | Path = "ticket_data",
     index_name: str = config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
     embedding: EmbeddingClient | None = None,
@@ -39,11 +40,11 @@ def upload_historical_summary_index(
     batch_size: int = 1000,
 ) -> dict[str, Any]:
     """Upload ingested historical ticket summaries to Azure AI Search."""
-    summaries = load_summary_artifacts(Path(output_dir))
+    summary_rows = list(summaries) if summaries is not None else load_summary_artifacts(Path(output_dir))
     embedding_client = embedding or EmbeddingClient()
 
     docs, skipped = build_historical_azure_documents(
-        summaries,
+        summary_rows,
         embedding=embedding_client,
     )
     if create_index:
@@ -73,7 +74,7 @@ def upload_historical_summary_index(
     )
     return {
         "index_name": index_name,
-        "source_summary_count": len(summaries),
+        "source_summary_count": len(summary_rows),
         "summary_doc_count": len(docs),
         "deleted_doc_count": deleted_count,
         "document_action": document_action,
@@ -92,21 +93,64 @@ def send_historical_documents(
     batch_size: int = 1000,
 ) -> dict[str, Any]:
     """Send historical documents through the IDP AI Search documents gateway."""
-    client = _make_documents_client()
     normalized = action.strip().lower()
-    if normalized == "upload":
-        return client.upload_documents(
+    try:
+        client = _make_documents_client()
+        if normalized == "upload":
+            return client.upload_documents(
+                index_name=index_name,
+                documents=documents,
+                batch_size=batch_size,
+            )
+        if normalized == "update":
+            return client.update_documents(
+                index_name=index_name,
+                documents=documents,
+                batch_size=batch_size,
+            )
+        raise ValueError("document_action must be 'upload' or 'update'")
+    except Exception as exc:
+        if normalized not in {"upload", "update"}:
+            raise
+        logger.warning(
+            "AI Search documents gateway failed; falling back to direct Azure client: %s",
+            exc,
+        )
+        return _send_historical_documents_direct(
             index_name=index_name,
             documents=documents,
-            batch_size=batch_size,
+            action=normalized,
+            gateway_error=exc,
         )
-    if normalized == "update":
-        return client.update_documents(
-            index_name=index_name,
-            documents=documents,
-            batch_size=batch_size,
-        )
-    raise ValueError("document_action must be 'upload' or 'update'")
+
+
+def _send_historical_documents_direct(
+    *,
+    index_name: str,
+    documents: list[dict],
+    action: str,
+    gateway_error: Exception,
+) -> dict[str, Any]:
+    """Fallback upload through the direct Azure Search SDK client."""
+    client = _make_search_client(index_name=index_name)
+    if action == "update" and hasattr(client, "merge_or_upload_documents"):
+        raw_result = client.merge_or_upload_documents(documents)
+        fallback_action = "merge_or_upload_documents"
+    else:
+        raw_result = client.upload_documents(documents)
+        fallback_action = "upload_documents"
+
+    result_count, failed_count = _indexing_result_counts(raw_result)
+    return {
+        "success": failed_count == 0,
+        "fallback_used": True,
+        "fallback_client": "AzureDirectSearchClient",
+        "fallback_action": fallback_action,
+        "gateway_error": str(gateway_error),
+        "document_count": len(documents),
+        "result_count": result_count,
+        "failed_count": failed_count,
+    }
 
 
 def clear_historical_summary_index(
@@ -168,7 +212,7 @@ def build_historical_azure_documents(
                 "id": _safe_key(ticket_id),
                 "ticket_id": ticket_id,
                 "content": content,
-                "content_vector": embedding.embed(content),
+                "content_vector": _summary_vector(row) or embedding.embed(content),
                 "summary_text": str(row.get("summary_text") or ""),
                 "business_problem": str(row.get("business_problem") or ""),
                 "business_capability": str(row.get("business_capability") or ""),
@@ -222,7 +266,8 @@ def ensure_historical_summary_index(
     index_name: str = config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
     vector_dimensions: int = config.EMBEDDING_DIMENSION,
 ) -> None:
-    """Create the Azure AI Search index for historical summaries if missing."""
+    """Create or extend the Azure AI Search index for historical summaries."""
+    from azure.core.exceptions import ResourceNotFoundError
     from azure.identity import ClientSecretCredential
     from azure.search.documents.indexes import SearchIndexClient
     from azure.search.documents.indexes.models import (
@@ -242,17 +287,12 @@ def ensure_historical_summary_index(
         client_secret=config.AZURE_CLIENT_SECRET,
     )
     index_client = SearchIndexClient(endpoint=config.AZURE_SEARCH_ENDPOINT, credential=credential)
-    if index_name in {index.name for index in index_client.list_indexes()}:
-        return
 
     collection_string = SearchFieldDataType.Collection(SearchFieldDataType.String)
     fields = [
         SimpleField(name="id", type=SearchFieldDataType.String, key=True),
         SimpleField(name="ticket_id", type=SearchFieldDataType.String, filterable=True, sortable=True),
         SearchableField(name="content", type=SearchFieldDataType.String),
-        SearchableField(name="summary_text", type=SearchFieldDataType.String),
-        SearchableField(name="business_problem", type=SearchFieldDataType.String),
-        SearchableField(name="business_capability", type=SearchFieldDataType.String),
         SearchField(
             name="content_vector",
             type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
@@ -260,6 +300,9 @@ def ensure_historical_summary_index(
             vector_search_dimensions=vector_dimensions,
             vector_search_profile_name="historical-vector-profile",
         ),
+        SearchableField(name="summary_text", type=SearchFieldDataType.String),
+        SearchableField(name="business_problem", type=SearchFieldDataType.String),
+        SearchableField(name="business_capability", type=SearchFieldDataType.String),
         SearchField(name="key_terms", type=collection_string, filterable=True),
         SearchField(name="stakeholders", type=collection_string, filterable=True),
         SearchField(name="systems_and_products", type=collection_string, filterable=True),
@@ -278,9 +321,22 @@ def ensure_historical_summary_index(
             )
         ],
     )
-    index_client.create_index(
-        SearchIndex(name=index_name, fields=fields, vector_search=vector_search)
-    )
+    try:
+        existing = index_client.get_index(index_name)
+    except ResourceNotFoundError:
+        index_client.create_index(
+            SearchIndex(name=index_name, fields=fields, vector_search=vector_search)
+        )
+        return
+
+    existing_field_names = {field.name for field in existing.fields}
+    missing_fields = [field for field in fields if field.name not in existing_field_names]
+    if not missing_fields:
+        return
+    existing.fields.extend(missing_fields)
+    if existing.vector_search is None:
+        existing.vector_search = vector_search
+    index_client.create_or_update_index(existing)
 
 
 def _azure_row_to_ticket_hit(row: dict) -> dict:
@@ -322,6 +378,37 @@ def _text_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _summary_vector(row: dict) -> list[float]:
+    values = row.get("summary_embedding")
+    if not isinstance(values, list) or not values:
+        return []
+    out: list[float] = []
+    for value in values:
+        try:
+            out.append(float(value))
+        except (TypeError, ValueError):
+            return []
+    return out
+
+
+def _indexing_result_counts(raw_result: Any) -> tuple[int, int]:
+    if raw_result is None:
+        return 0, 0
+    try:
+        rows = list(raw_result)
+    except TypeError:
+        rows = [raw_result]
+
+    failed = 0
+    for row in rows:
+        succeeded = getattr(row, "succeeded", None)
+        if succeeded is None and isinstance(row, dict):
+            succeeded = row.get("succeeded")
+        if succeeded is False:
+            failed += 1
+    return len(rows), failed
 
 
 __all__ = [

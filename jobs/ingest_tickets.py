@@ -56,6 +56,8 @@ def main() -> int:
         level=logging.WARNING if args.quiet else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     ticket_ids = resolve_ticket_ids(
         positional=args.ticket_ids,
@@ -258,6 +260,7 @@ async def run_batch(
         )
 
         azure_result = upload_historical_summary_index(
+            summaries=summaries,
             output_dir=output_dir,
             index_name=azure_index_name or config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
             embedding=embedding_client,

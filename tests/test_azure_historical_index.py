@@ -5,13 +5,18 @@ from vs_app.ingestion.persistence.azure_historical_index import (
     clear_historical_summary_index,
     search_historical_summaries,
     send_historical_documents,
+    upload_historical_summary_index,
 )
 
 
 class FakeEmbedding:
     dimension = 3
 
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
     def embed(self, text: str) -> list[float]:
+        self.calls.append(text)
         return [1.0, 2.0, 3.0]
 
 
@@ -39,6 +44,65 @@ def test_build_historical_azure_documents_maps_summary_fields() -> None:
     assert docs[0]["value_stream_names"] == ["Issue Payment"]
     assert docs[0]["direct_vs_names"] == ["Issue Payment"]
     assert docs[0]["label_source"] == "jira_implemented_by_group_links"
+
+
+def test_build_historical_azure_documents_reuses_existing_summary_embedding() -> None:
+    embedding = FakeEmbedding()
+
+    docs, skipped = build_historical_azure_documents(
+        [
+            {
+                "ticket_id": "IDMT-1",
+                "summary_text": "summary",
+                "business_problem": "problem",
+                "business_capability": "capability",
+                "summary_embedding": [0.1, "0.2", 0.3],
+            }
+        ],
+        embedding=embedding,
+    )
+
+    assert skipped == []
+    assert docs[0]["content_vector"] == [0.1, 0.2, 0.3]
+    assert embedding.calls == []
+
+
+def test_upload_historical_summary_index_uses_provided_summaries(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_send(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "uploaded_count": len(kwargs["documents"])}
+
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index.send_historical_documents",
+        fake_send,
+    )
+
+    result = upload_historical_summary_index(
+        summaries=[
+            {
+                "ticket_id": "IDMT-1",
+                "summary_text": "summary",
+                "business_problem": "problem",
+                "business_capability": "capability",
+                "summary_embedding": [0.1, 0.2, 0.3],
+            }
+        ],
+        output_dir="does-not-matter",
+        index_name="hist",
+        embedding=FakeEmbedding(),
+        document_action="upload",
+        batch_size=7,
+    )
+
+    assert result["source_summary_count"] == 1
+    assert result["summary_doc_count"] == 1
+    assert captured["index_name"] == "hist"
+    assert captured["documents"][0]["ticket_id"] == "IDMT-1"
+    assert captured["documents"][0]["content_vector"] == [0.1, 0.2, 0.3]
+    assert captured["action"] == "upload"
+    assert captured["batch_size"] == 7
 
 
 def test_search_historical_summaries_maps_azure_rows(monkeypatch) -> None:
@@ -177,3 +241,84 @@ def test_send_historical_documents_uses_gateway_update(monkeypatch) -> None:
             },
         )
     ]
+
+
+def test_send_historical_documents_falls_back_to_direct_upload(monkeypatch) -> None:
+    class BrokenDocumentsClient:
+        def upload_documents(self, **kwargs):
+            raise RuntimeError("gateway down")
+
+        def update_documents(self, **kwargs):
+            raise AssertionError("should not update")
+
+    class FakeSearchClient:
+        def __init__(self) -> None:
+            self.uploaded: list[dict] = []
+
+        def upload_documents(self, documents):
+            self.uploaded.extend(documents)
+            return [{"succeeded": True}]
+
+    search_client = FakeSearchClient()
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index._make_documents_client",
+        lambda: BrokenDocumentsClient(),
+    )
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index._make_search_client",
+        lambda **kwargs: search_client,
+    )
+
+    result = send_historical_documents(
+        index_name="hist",
+        documents=[{"id": "one"}],
+        action="upload",
+    )
+
+    assert search_client.uploaded == [{"id": "one"}]
+    assert result["success"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback_action"] == "upload_documents"
+    assert result["gateway_error"] == "gateway down"
+
+
+def test_send_historical_documents_falls_back_to_direct_merge_or_upload(monkeypatch) -> None:
+    class BrokenDocumentsClient:
+        def upload_documents(self, **kwargs):
+            raise AssertionError("should not upload")
+
+        def update_documents(self, **kwargs):
+            raise RuntimeError("gateway update down")
+
+    class FakeSearchClient:
+        def __init__(self) -> None:
+            self.merged: list[dict] = []
+
+        def merge_or_upload_documents(self, documents):
+            self.merged.extend(documents)
+            return [{"succeeded": True}]
+
+        def upload_documents(self, documents):
+            raise AssertionError("update fallback should merge_or_upload")
+
+    search_client = FakeSearchClient()
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index._make_documents_client",
+        lambda: BrokenDocumentsClient(),
+    )
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index._make_search_client",
+        lambda **kwargs: search_client,
+    )
+
+    result = send_historical_documents(
+        index_name="hist",
+        documents=[{"id": "one"}],
+        action="update",
+    )
+
+    assert search_client.merged == [{"id": "one"}]
+    assert result["success"] is True
+    assert result["fallback_used"] is True
+    assert result["fallback_action"] == "merge_or_upload_documents"
+    assert result["gateway_error"] == "gateway update down"

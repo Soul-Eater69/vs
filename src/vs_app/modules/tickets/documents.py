@@ -21,6 +21,7 @@ class TicketSummaryDocument:
 
     value_stream_ids: list[str] = field(default_factory=list)
     value_stream_names: list[str] = field(default_factory=list)
+    jira_group_ids: list[str] = field(default_factory=list)
     label_source: str = "jira_issuelinks"
     direct_vs_names: list[str] = field(default_factory=list)
     implied_vs_names: list[str] = field(default_factory=list)
@@ -39,6 +40,7 @@ class TicketSummaryDocument:
             "key_terms": self.key_terms,
             "value_stream_ids": self.value_stream_ids,
             "value_stream_names": self.value_stream_names,
+            "jira_group_ids": self.jira_group_ids,
             "label_source": self.label_source,
             "direct_vs_names": self.direct_vs_names,
             "implied_vs_names": self.implied_vs_names,
@@ -58,10 +60,10 @@ class TicketSummaryDocument:
             systems_and_products=doc.get("systems_and_products", []),
             value_stream_ids=doc.get("value_stream_ids", []),
             value_stream_names=doc.get("value_stream_names", []),
+            jira_group_ids=doc.get("jira_group_ids", []),
             label_source=doc.get("label_source", "jira_issuelinks"),
             direct_vs_names=doc.get("direct_vs_names", []),
             implied_vs_names=doc.get("implied_vs_names", []),
             value_streams=doc.get("value_streams", []),
             summary_embedding=doc.get("summary_embedding", []),
         )
-

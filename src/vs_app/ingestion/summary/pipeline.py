@@ -76,6 +76,7 @@ async def ingest_ticket_summary_payload(
 
     doc.value_stream_ids = list(ticket_data.get("value_stream_ids") or [])
     doc.value_stream_names = list(ticket_data.get("value_stream_names") or [])
+    doc.jira_group_ids = list(ticket_data.get("jira_group_ids") or [])
     doc.label_source = str(
         ticket_data.get("value_stream_label_source")
         or ticket_data.get("label_source")
@@ -87,6 +88,7 @@ async def ingest_ticket_summary_payload(
         consolidated_text=consolidated_text,
         value_stream_ids=doc.value_stream_ids,
         value_stream_names=doc.value_stream_names,
+        jira_group_ids=doc.jira_group_ids,
         label_source=doc.label_source,
         llm_client=llm_client,
         cfg=cfg,

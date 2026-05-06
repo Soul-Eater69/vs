@@ -67,7 +67,8 @@ def test_implemented_by_group_link_populates_value_stream_names() -> None:
     payload = build_ticket_payload(issue, ticket_id="IDMT-1")
 
     assert payload["value_stream_names"] == ["Establish Product Offering"]
-    assert payload["value_stream_ids"] == ["GROUP-19626"]
+    assert payload["value_stream_ids"] == ["VSR00074590"]
+    assert payload["jira_group_ids"] == ["GROUP-19626"]
     assert payload["value_stream_statuses"] == ["In Progress"]
     assert payload["value_stream_label_source"] == "jira_implemented_by_group_links"
 
@@ -135,7 +136,8 @@ def test_theme_group_link_still_resolves_to_approved_value_stream() -> None:
     result = resolve_value_streams(themes, issue_links)
 
     assert result["value_stream_names"] == ["Manage Invoice and Payment Receipt"]
-    assert result["value_stream_ids"] == ["GROUP-22226"]
+    assert result["value_stream_ids"] == ["VSR00074598"]
+    assert result["jira_group_ids"] == ["GROUP-22226"]
     assert result["value_stream_statuses"] == ["Active"]
 
 
@@ -158,7 +160,8 @@ def test_multiple_group_links_dedupe_without_alignment_mismatch() -> None:
     result = resolve_value_streams(themes, issue_links)
 
     assert result["value_stream_names"] == ["Manage Member Care", "Issue Payment"]
-    assert result["value_stream_ids"] == ["GROUP-1", "GROUP-3"]
+    assert result["value_stream_ids"] == ["VSR00074600", "VSR00074596"]
+    assert result["jira_group_ids"] == ["GROUP-1", "GROUP-3"]
     assert result["value_stream_statuses"] == ["To Do", "In Progress"]
     assert len(result["linked_value_streams"]) == 2
 
@@ -203,5 +206,6 @@ def test_explicit_value_stream_link_fallback_still_works() -> None:
     result = resolve_value_streams([], issue_links)
 
     assert result["value_stream_names"] == ["Manage Member Care"]
-    assert result["value_stream_ids"] == ["VS-1"]
+    assert result["value_stream_ids"] == ["VSR00074600"]
+    assert result["jira_group_ids"] == ["VS-1"]
     assert result["value_stream_label_source"] == "jira_issuelinks"

@@ -16,6 +16,7 @@ from vs_app.modules.prompts.loader import (
 from vs_app.modules.prompts.schemas import VsVerifierResult
 from .approved_registry import (
     APPROVED_VALUE_STREAM_SET,
+    approved_value_stream_id,
     approved_value_streams_text,
     canonicalize_approved_value_stream,
 )
@@ -226,6 +227,7 @@ def resolve_value_stream_mapping(
             "vs_links": [],
             "vs_ids": [],
             "vs_names": [],
+            "jira_group_ids": [],
             "vs_statuses": [],
             "linked_value_streams": [],
             "label_source": label_source,
@@ -279,7 +281,8 @@ def resolve_value_stream_mapping(
     linked_value_streams = _dedupe_linked_value_streams(
         [
             {
-                "id": str(link.get("key") or ""),
+                "id": approved_value_stream_id(per_link_names[idx]),
+                "jira_group_id": str(link.get("key") or ""),
                 "name": per_link_names[idx],
                 "status": str(link.get("status") or ""),
                 "summary_raw": str(link.get("summary_raw") or link.get("summary") or ""),
@@ -290,12 +293,14 @@ def resolve_value_stream_mapping(
     )
     vs_names = [row["name"] for row in linked_value_streams]
     vs_ids = [row["id"] for row in linked_value_streams]
+    jira_group_ids = [row["jira_group_id"] for row in linked_value_streams]
     vs_statuses = [row["status"] for row in linked_value_streams]
 
     return {
         "vs_links": verified_links,
         "vs_ids": vs_ids,
         "vs_names": vs_names,
+        "jira_group_ids": jira_group_ids,
         "vs_statuses": vs_statuses,
         "linked_value_streams": linked_value_streams,
         "label_source": label_source,
@@ -320,6 +325,8 @@ def resolve_theme_value_stream_mapping(
             rows.append(
                 {
                     "id": str(theme.get("key") or ""),
+                    "jira_group_id": str(theme.get("key") or ""),
+                    "vs_id": approved_value_stream_id(resolved),
                     "name": resolved,
                     "status": str(theme.get("status") or ""),
                     "summary_raw": raw_summary,
@@ -344,6 +351,8 @@ def resolve_theme_value_stream_mapping(
             rows.append(
                 {
                     "id": entry["key"],
+                    "jira_group_id": entry["key"],
+                    "vs_id": approved_value_stream_id(resolved),
                     "name": resolved,
                     "status": entry["status"],
                     "summary_raw": entry["raw_name"],
@@ -360,16 +369,19 @@ def resolve_theme_value_stream_mapping(
     linked_value_streams = _dedupe_linked_value_streams(rows)
     value_stream_names = [row["name"] for row in linked_value_streams]
     value_stream_ids = [row["id"] for row in linked_value_streams]
+    jira_group_ids = [row["jira_group_id"] for row in linked_value_streams]
     value_stream_statuses = [row["status"] for row in linked_value_streams]
 
     return {
         "value_stream_ids": value_stream_ids,
         "value_stream_names": value_stream_names,
+        "jira_group_ids": jira_group_ids,
         "value_stream_statuses": value_stream_statuses,
         "linked_value_streams": linked_value_streams,
         "value_stream_label_source": label_source,
         "vs_ids": value_stream_ids,
         "vs_names": value_stream_names,
+        "jira_group_ids": jira_group_ids,
         "vs_statuses": value_stream_statuses,
         "label_source": label_source,
     }
@@ -386,7 +398,8 @@ def _dedupe_linked_value_streams(rows: list[dict]) -> list[dict]:
         seen.add(key)
         out.append(
             {
-                "id": str(row.get("id") or ""),
+                "id": str(row.get("vs_id") or row.get("id") or ""),
+                "jira_group_id": str(row.get("jira_group_id") or row.get("id") or ""),
                 "name": name,
                 "status": str(row.get("status") or ""),
                 "summary_raw": str(row.get("summary_raw") or ""),

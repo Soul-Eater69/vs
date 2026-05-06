@@ -77,6 +77,7 @@ def classify_ticket_value_streams(
     label_source: str,
     llm_client: Any | None,
     cfg: Any,
+    jira_group_ids: list[str] | None = None,
 ) -> list[dict[str, str]]:
     """Classify supplied value-stream labels as direct or implied.
 
@@ -85,6 +86,7 @@ def classify_ticket_value_streams(
     """
     normalized_names = [str(name).strip() for name in value_stream_names if str(name).strip()]
     normalized_ids = [str(vs_id).strip() for vs_id in value_stream_ids]
+    normalized_group_ids = [str(group_id).strip() for group_id in (jira_group_ids or [])]
     if not normalized_names:
         return []
 
@@ -126,6 +128,10 @@ def classify_ticket_value_streams(
         name.lower(): normalized_ids[idx] if idx < len(normalized_ids) else ""
         for idx, name in enumerate(normalized_names)
     }
+    name_to_group_id = {
+        name.lower(): normalized_group_ids[idx] if idx < len(normalized_group_ids) else ""
+        for idx, name in enumerate(normalized_names)
+    }
     matched: list[dict[str, str]] = []
     seen: set[str] = set()
 
@@ -143,6 +149,7 @@ def classify_ticket_value_streams(
             {
                 "vs_id": name_to_id.get(key, ""),
                 "vs_name": matched_name,
+                "jira_group_id": name_to_group_id.get(key, ""),
                 "inference_type": item.inference_type,
                 "reason": reason,
             }

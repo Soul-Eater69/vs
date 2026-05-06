@@ -22,8 +22,10 @@ HISTORICAL_SELECT_FIELDS = [
     "business_capability",
     "value_stream_names",
     "value_stream_ids",
+    "jira_group_ids",
     "direct_vs_names",
     "implied_vs_names",
+    "value_streams_json",
     "label_source",
 ]
 
@@ -228,8 +230,10 @@ def build_historical_azure_documents(
                 "systems_and_products": _text_list(row.get("systems_and_products")),
                 "value_stream_names": _text_list(row.get("value_stream_names")),
                 "value_stream_ids": _text_list(row.get("value_stream_ids")),
+                "jira_group_ids": _text_list(row.get("jira_group_ids")),
                 "direct_vs_names": _text_list(row.get("direct_vs_names")),
                 "implied_vs_names": _text_list(row.get("implied_vs_names")),
+                "value_streams_json": _value_streams_json(row),
                 "label_source": str(row.get("label_source") or ""),
             }
         )
@@ -315,8 +319,10 @@ def ensure_historical_summary_index(
         SearchField(name="systems_and_products", type=collection_string, filterable=True),
         SearchField(name="value_stream_names", type=collection_string, filterable=True),
         SearchField(name="value_stream_ids", type=collection_string, filterable=True),
+        SearchField(name="jira_group_ids", type=collection_string, filterable=True),
         SearchField(name="direct_vs_names", type=collection_string, filterable=True),
         SearchField(name="implied_vs_names", type=collection_string, filterable=True),
+        SearchableField(name="value_streams_json", type=SearchFieldDataType.String),
         SimpleField(name="label_source", type=SearchFieldDataType.String, filterable=True),
     ]
     vector_search = VectorSearch(
@@ -397,8 +403,10 @@ def recreate_historical_summary_index(
         SearchField(name="systems_and_products", type=collection_string, filterable=True),
         SearchField(name="value_stream_names", type=collection_string, filterable=True),
         SearchField(name="value_stream_ids", type=collection_string, filterable=True),
+        SearchField(name="jira_group_ids", type=collection_string, filterable=True),
         SearchField(name="direct_vs_names", type=collection_string, filterable=True),
         SearchField(name="implied_vs_names", type=collection_string, filterable=True),
+        SearchableField(name="value_streams_json", type=SearchFieldDataType.String),
         SimpleField(name="label_source", type=SearchFieldDataType.String, filterable=True),
     ]
     vector_search = VectorSearch(
@@ -423,8 +431,10 @@ def _azure_row_to_ticket_hit(row: dict) -> dict:
         "summary_preview": str(row.get("content") or "")[:320],
         "value_stream_names": _text_list(row.get("value_stream_names")),
         "value_stream_ids": _text_list(row.get("value_stream_ids")),
+        "jira_group_ids": _text_list(row.get("jira_group_ids")),
         "direct_vs_names": _text_list(row.get("direct_vs_names")),
         "implied_vs_names": _text_list(row.get("implied_vs_names")),
+        "value_streams_json": str(row.get("value_streams_json") or ""),
         "label_source": str(row.get("label_source") or ""),
     }
 
@@ -467,6 +477,26 @@ def _summary_vector(row: dict) -> list[float]:
         except (TypeError, ValueError):
             return []
     return out
+
+
+def _value_streams_json(row: dict) -> str:
+    value_streams = row.get("value_streams")
+    if isinstance(value_streams, list):
+        rows = [
+            {
+                "vs_id": str(item.get("vs_id") or "").strip(),
+                "vs_name": str(item.get("vs_name") or "").strip(),
+                "jira_group_id": str(item.get("jira_group_id") or "").strip(),
+                "inference_type": str(item.get("inference_type") or "").strip(),
+                "reason": str(item.get("reason") or "").strip(),
+            }
+            for item in value_streams
+            if isinstance(item, dict) and str(item.get("vs_name") or "").strip()
+        ]
+        if rows:
+            return json.dumps(rows, ensure_ascii=False)
+
+    return str(row.get("value_streams_json") or "")
 
 
 def _indexing_result_counts(raw_result: Any) -> tuple[int, int]:

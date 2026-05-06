@@ -83,7 +83,8 @@ def test_theme_summary_that_resolves_to_registry_is_kept() -> None:
     )
 
     assert result["value_stream_names"] == ["Issue Payment"]
-    assert result["value_stream_ids"] == ["GROUP-1"]
+    assert result["value_stream_ids"] == ["VSR00074596"]
+    assert result["jira_group_ids"] == ["GROUP-1"]
     assert result["value_stream_statuses"] == ["Active"]
 
 
@@ -116,7 +117,8 @@ def test_theme_summary_that_verifier_maps_is_kept(monkeypatch) -> None:
     )
 
     assert result["value_stream_names"] == ["Issue Payment"]
-    assert result["value_stream_ids"] == ["GROUP-1"]
+    assert result["value_stream_ids"] == ["VSR00074596"]
+    assert result["jira_group_ids"] == ["GROUP-1"]
     assert result["value_stream_statuses"] == ["Active"]
 
 

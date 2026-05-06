@@ -65,6 +65,7 @@ def resolve_value_streams(
         return {
             "value_stream_names": list(fallback.get("vs_names") or []),
             "value_stream_ids": list(fallback.get("vs_ids") or []),
+            "jira_group_ids": list(fallback.get("jira_group_ids") or []),
             "value_stream_statuses": list(fallback.get("vs_statuses") or []),
             "linked_value_streams": list(fallback.get("linked_value_streams") or []),
             "value_stream_label_source": str(fallback.get("label_source") or "jira_issuelinks"),
@@ -74,6 +75,7 @@ def resolve_value_streams(
         return {
             "value_stream_names": [],
             "value_stream_ids": [],
+            "jira_group_ids": [],
             "value_stream_statuses": [],
             "linked_value_streams": [],
             "value_stream_label_source": "jira_resolution_failed",

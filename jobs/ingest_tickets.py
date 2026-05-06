@@ -383,6 +383,7 @@ def ensure_value_stream_labels(ticket_data: dict, *, llm_client: Any = None) -> 
 
     ticket_data["value_stream_names"] = names
     ticket_data["value_stream_ids"] = ids
+    ticket_data["jira_group_ids"] = list(mapping.get("jira_group_ids") or [])
     ticket_data["value_stream_statuses"] = list(mapping.get("vs_statuses") or [])
     ticket_data["linked_value_streams"] = list(mapping.get("linked_value_streams") or [])
     ticket_data["value_stream_label_source"] = str(

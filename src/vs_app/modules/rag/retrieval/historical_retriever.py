@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 import re
 from typing import Dict, Iterable, List, Optional
@@ -77,6 +78,7 @@ def retrieve_historical_support(
             "value_stream_ids": meta.get("value_stream_ids", []),
             "direct_vs_names": meta.get("direct_vs_names", []),
             "implied_vs_names": meta.get("implied_vs_names", []),
+            "value_streams_json": meta.get("value_streams_json", ""),
             "label_source": meta.get("label_source", ""),
             "direct_functions_canonical": meta.get("direct_functions_canonical", []),
             "implied_functions_canonical": meta.get("implied_functions_canonical", []),
@@ -167,6 +169,7 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
             inference_type = item["inference_type"]
             per_ticket_weight = float(item["per_ticket_weight"])
             label_source = item["label_source"]
+            classifier_reason = str(item.get("reason") or "").strip()
 
             entry = support_by_name.setdefault(
                 vs_name,
@@ -209,6 +212,8 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
                 parts: List[str] = []
                 if summary_preview:
                     parts.append(summary_preview)
+                if classifier_reason:
+                    parts.append(classifier_reason)
                 if funcs:
                     parts.append(f"functions: {', '.join(funcs[:3])}")
                 if parts:
@@ -242,6 +247,10 @@ def _extract_hit_value_stream_support(hit: dict) -> List[dict]:
     Current summaries must contain direct_vs_names and implied_vs_names. If those
     fields are absent or empty, the hit contributes no value-stream support.
     """
+    structured_rows = _extract_structured_value_stream_support(hit)
+    if structured_rows:
+        return structured_rows
+
     label_source = str(hit.get("label_source") or "").strip()
     all_names = _dedupe_text_list(
         list(hit.get("direct_vs_names") or []) + list(hit.get("implied_vs_names") or [])
@@ -272,8 +281,10 @@ def _extract_hit_value_stream_support(hit: dict) -> List[dict]:
             {
                 "entity_name": name,
                 "entity_id": id_by_name.get(name, ""),
+                "jira_group_id": "",
                 "inference_type": "direct",
                 "label_source": label_source,
+                "reason": "",
                 "per_ticket_weight": per_ticket_weight,
             }
         )
@@ -282,8 +293,48 @@ def _extract_hit_value_stream_support(hit: dict) -> List[dict]:
             {
                 "entity_name": name,
                 "entity_id": id_by_name.get(name, ""),
+                "jira_group_id": "",
                 "inference_type": "implied",
                 "label_source": label_source,
+                "reason": "",
+                "per_ticket_weight": per_ticket_weight,
+            }
+        )
+    return rows
+
+
+def _extract_structured_value_stream_support(hit: dict) -> List[dict]:
+    raw = str(hit.get("value_streams_json") or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+
+    rows: List[dict] = []
+    seen: set[tuple[str, str]] = set()
+    valid_items = [item for item in parsed if isinstance(item, dict) and str(item.get("vs_name") or "").strip()]
+    per_ticket_weight = 1.0 / max(len(valid_items), 1)
+    for item in valid_items:
+        name = str(item.get("vs_name") or "").strip()
+        inference_type = str(item.get("inference_type") or "direct").strip().lower()
+        if inference_type not in {"direct", "implied"}:
+            inference_type = "direct"
+        key = (name.lower(), inference_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "entity_name": name,
+                "entity_id": str(item.get("vs_id") or "").strip(),
+                "jira_group_id": str(item.get("jira_group_id") or "").strip(),
+                "inference_type": inference_type,
+                "label_source": str(hit.get("label_source") or "").strip(),
+                "reason": str(item.get("reason") or "").strip(),
                 "per_ticket_weight": per_ticket_weight,
             }
         )

@@ -64,7 +64,8 @@ def test_ensure_value_stream_labels_uses_issue_link_mapping() -> None:
 
     ensure_value_stream_labels(ticket_data)
 
-    assert ticket_data["value_stream_ids"] == ["GROUP-1"]
+    assert ticket_data["value_stream_ids"] == ["VSR00074596"]
+    assert ticket_data["jira_group_ids"] == ["GROUP-1"]
     assert ticket_data["value_stream_names"] == ["Issue Payment"]
     assert ticket_data["value_stream_label_source"] == "jira_issuelinks"
 

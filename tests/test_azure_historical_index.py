@@ -29,9 +29,19 @@ def test_build_historical_azure_documents_maps_summary_fields() -> None:
                 "business_problem": "problem",
                 "business_capability": "capability",
                 "value_stream_names": ["Issue Payment"],
-                "value_stream_ids": ["GROUP-1"],
+                "value_stream_ids": ["VSR00074596"],
+                "jira_group_ids": ["GROUP-1"],
                 "direct_vs_names": ["Issue Payment"],
                 "implied_vs_names": [],
+                "value_streams": [
+                    {
+                        "vs_id": "VSR00074596",
+                        "vs_name": "Issue Payment",
+                        "jira_group_id": "GROUP-1",
+                        "inference_type": "direct",
+                        "reason": "Payment workflow is explicit.",
+                    }
+                ],
                 "label_source": "jira_implemented_by_group_links",
             }
         ],
@@ -42,7 +52,10 @@ def test_build_historical_azure_documents_maps_summary_fields() -> None:
     assert docs[0]["ticket_id"] == "IDMT-1"
     assert docs[0]["content_vector"] == [1.0, 2.0, 3.0]
     assert docs[0]["value_stream_names"] == ["Issue Payment"]
+    assert docs[0]["value_stream_ids"] == ["VSR00074596"]
+    assert docs[0]["jira_group_ids"] == ["GROUP-1"]
     assert docs[0]["direct_vs_names"] == ["Issue Payment"]
+    assert "Payment workflow is explicit." in docs[0]["value_streams_json"]
     assert docs[0]["label_source"] == "jira_implemented_by_group_links"
 
 
@@ -163,9 +176,15 @@ def test_search_historical_summaries_maps_azure_rows(monkeypatch) -> None:
                     "ticket_id": "IDMT-1",
                     "content": "historical summary",
                     "value_stream_names": ["Issue Payment"],
-                    "value_stream_ids": ["GROUP-1"],
+                    "value_stream_ids": ["VSR00074596"],
+                    "jira_group_ids": ["GROUP-1"],
                     "direct_vs_names": ["Issue Payment"],
                     "implied_vs_names": [],
+                    "value_streams_json": (
+                        '[{"vs_id": "VSR00074596", "vs_name": "Issue Payment", '
+                        '"jira_group_id": "GROUP-1", "inference_type": "direct", '
+                        '"reason": "Payment workflow is explicit."}]'
+                    ),
                     "label_source": "summary",
                 }
             ]
@@ -184,9 +203,15 @@ def test_search_historical_summaries_maps_azure_rows(monkeypatch) -> None:
             "title": "IDMT-1",
             "summary_preview": "historical summary",
             "value_stream_names": ["Issue Payment"],
-            "value_stream_ids": ["GROUP-1"],
+            "value_stream_ids": ["VSR00074596"],
+            "jira_group_ids": ["GROUP-1"],
             "direct_vs_names": ["Issue Payment"],
             "implied_vs_names": [],
+            "value_streams_json": (
+                '[{"vs_id": "VSR00074596", "vs_name": "Issue Payment", '
+                '"jira_group_id": "GROUP-1", "inference_type": "direct", '
+                '"reason": "Payment workflow is explicit."}]'
+            ),
             "label_source": "summary",
         }
     ]

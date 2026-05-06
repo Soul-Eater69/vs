@@ -67,6 +67,58 @@ APPROVED_VALUE_STREAMS: tuple[str, ...] = (
 )
 
 APPROVED_VALUE_STREAM_SET = frozenset(APPROVED_VALUE_STREAMS)
+APPROVED_VALUE_STREAM_IDS: dict[str, str] = {
+    "Acquire Asset": "VSR00074583",
+    "Adjudicate Claim": "VSR00074584",
+    "Align and Execute IT Strategy": "VSR00074585",
+    "Configure, Price, and Quote": "VSR00074586",
+    "Detect and Correct IT Issues": "VSR00074587",
+    "Develop Human Resource Career": "VSR00074588",
+    "Ensure Compliance": "VSR00074589",
+    "Establish Product Offering": "VSR00074590",
+    "Establish Provider Network": "VSR00074591",
+    "Establish Provider Program": "VSR00074592",
+    "File Regulatory Reports": "VSR00074593",
+    "Fulfill Request for IT Support": "VSR00074594",
+    "Fulfill Value-Based Care Arrangement": "VSR00074595",
+    "Issue Payment": "VSR00074596",
+    "Manage Claim Inventory": "VSR00074597",
+    "Manage Invoice and Payment Receipt": "VSR00074598",
+    "Manage Leads and Opportunities": "VSR00074599",
+    "Manage Member Care": "VSR00074600",
+    "Manage Producer Operations": "VSR00074601",
+    "Onboard Human Resource": "VSR00074602",
+    "Onboard Partner": "VSR00074603",
+    "Optimize Reserves": "VSR00074604",
+    "Order to Cash for Group Coverage": "VSR00074605",
+    "Participate in Health Management Program": "VSR00074606",
+    "Promote Community Health": "VSR00074607",
+    "Receive Care": "VSR00074608",
+    "Resolve Request-Inquiry": "VSR00074609",
+    "Sell and Enroll Individual Coverage": "VSR00074610",
+    "Support External Audit": "VSR00074611",
+    "Ensure Payment Integrity": "VSR00167984",
+    "Discover Business Insights": "VSR00168101",
+    "Appeal Decision": "VSR00168121",
+    "Perform Engagement": "VSR00168122",
+    "Reconcile Data": "VSR00168123",
+    "Reconcile Account": "VSR00168124",
+    "Administer Quality Management Program": "VSR00168128",
+    "Administer Utilization Management Program": "VSR00168129",
+    "Manage Utilization Management Program": "VSR00168130",
+    "Fill and Manage Prescriptions": "VSR00168131",
+    "Realize Risk Adjustment": "VSR00168132",
+    "Enroll Group Medicare Coverage": "VSR00168134",
+    "Enroll Medicaid Member": "VSR00168135",
+    "Manage Workforce": "VSR00168137",
+    "Record Financial Transaction": "VSR01261891",
+    "Recover Overpayment": "VSR01261892",
+    "Pay Employee": "VSR01261893",
+    "Conduct Audit": "VSR01261894",
+    "Manage Enterprise Risk": "VSR01261895",
+    "Resolve Privacy Incident": "VSR01261896",
+    "Develop Mission, Vision, and Strategy": "VSR01261897",
+}
 _FUZZ_MATCH_THRESHOLD = 90.0
 _FUZZ_AMBIGUITY_MARGIN = 2.0
 _MIN_SUFFIX_TOKENS = 2
@@ -121,6 +173,13 @@ for _name in APPROVED_VALUE_STREAMS:
 def approved_value_streams_text() -> str:
     """Stable numbered list for prompt context."""
     return "\n".join(f"{idx}. {name}" for idx, name in enumerate(APPROVED_VALUE_STREAMS, start=1))
+
+
+def approved_value_stream_id(value: str) -> str:
+    canonical = canonicalize_approved_value_stream(value)
+    if not canonical:
+        return ""
+    return APPROVED_VALUE_STREAM_IDS.get(canonical, "")
 
 
 def _extract_matches(lookup_key: str, *, limit: int = 3) -> list[tuple[str, float, int | None]]:

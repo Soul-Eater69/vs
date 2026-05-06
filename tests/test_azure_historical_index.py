@@ -105,6 +105,50 @@ def test_upload_historical_summary_index_uses_provided_summaries(monkeypatch) ->
     assert captured["batch_size"] == 7
 
 
+def test_upload_historical_summary_index_can_recreate_index(monkeypatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index.recreate_historical_summary_index",
+        lambda **kwargs: calls.append(("recreate", kwargs)),
+    )
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index.ensure_historical_summary_index",
+        lambda **kwargs: calls.append(("ensure", kwargs)),
+    )
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index.send_historical_documents",
+        lambda **kwargs: {"success": True},
+    )
+
+    result = upload_historical_summary_index(
+        summaries=[
+            {
+                "ticket_id": "IDMT-1",
+                "summary_text": "summary",
+                "business_problem": "problem",
+                "business_capability": "capability",
+                "summary_embedding": [0.1, 0.2, 0.3],
+            }
+        ],
+        index_name="hist",
+        embedding=FakeEmbedding(),
+        recreate_index=True,
+        create_index=True,
+    )
+
+    assert result["recreated_index"] is True
+    assert calls == [
+        (
+            "recreate",
+            {
+                "index_name": "hist",
+                "vector_dimensions": 3,
+            },
+        )
+    ]
+
+
 def test_search_historical_summaries_maps_azure_rows(monkeypatch) -> None:
     class FakeClient:
         def __init__(self, index_name: str) -> None:

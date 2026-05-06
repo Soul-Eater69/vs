@@ -35,6 +35,7 @@ def upload_historical_summary_index(
     index_name: str = config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
     embedding: EmbeddingClient | None = None,
     create_index: bool = False,
+    recreate_index: bool = False,
     reset_index: bool = False,
     document_action: str = "upload",
     batch_size: int = 1000,
@@ -47,7 +48,12 @@ def upload_historical_summary_index(
         summary_rows,
         embedding=embedding_client,
     )
-    if create_index:
+    if recreate_index:
+        recreate_historical_summary_index(
+            index_name=index_name,
+            vector_dimensions=getattr(embedding_client, "dimension", config.EMBEDDING_DIMENSION),
+        )
+    elif create_index:
         ensure_historical_summary_index(
             index_name=index_name,
             vector_dimensions=getattr(embedding_client, "dimension", config.EMBEDDING_DIMENSION),
@@ -76,6 +82,7 @@ def upload_historical_summary_index(
         "index_name": index_name,
         "source_summary_count": len(summary_rows),
         "summary_doc_count": len(docs),
+        "recreated_index": recreate_index,
         "deleted_doc_count": deleted_count,
         "document_action": document_action,
         "gateway_response": gateway_response,
@@ -339,6 +346,75 @@ def ensure_historical_summary_index(
     index_client.create_or_update_index(existing)
 
 
+def recreate_historical_summary_index(
+    *,
+    index_name: str = config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
+    vector_dimensions: int = config.EMBEDDING_DIMENSION,
+) -> None:
+    """Delete and recreate the historical summary index with only our schema."""
+    from azure.core.exceptions import ResourceNotFoundError
+    from azure.identity import ClientSecretCredential
+    from azure.search.documents.indexes import SearchIndexClient
+    from azure.search.documents.indexes.models import (
+        HnswAlgorithmConfiguration,
+        SearchField,
+        SearchFieldDataType,
+        SearchIndex,
+        SearchableField,
+        SimpleField,
+        VectorSearch,
+        VectorSearchProfile,
+    )
+
+    credential = ClientSecretCredential(
+        tenant_id=config.AZURE_TENANT_ID,
+        client_id=config.AZURE_CLIENT_ID,
+        client_secret=config.AZURE_CLIENT_SECRET,
+    )
+    index_client = SearchIndexClient(endpoint=config.AZURE_SEARCH_ENDPOINT, credential=credential)
+    try:
+        index_client.delete_index(index_name)
+    except ResourceNotFoundError:
+        pass
+
+    collection_string = SearchFieldDataType.Collection(SearchFieldDataType.String)
+    fields = [
+        SimpleField(name="id", type=SearchFieldDataType.String, key=True),
+        SimpleField(name="ticket_id", type=SearchFieldDataType.String, filterable=True, sortable=True),
+        SearchableField(name="content", type=SearchFieldDataType.String),
+        SearchField(
+            name="content_vector",
+            type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+            searchable=True,
+            vector_search_dimensions=vector_dimensions,
+            vector_search_profile_name="historical-vector-profile",
+        ),
+        SearchableField(name="summary_text", type=SearchFieldDataType.String),
+        SearchableField(name="business_problem", type=SearchFieldDataType.String),
+        SearchableField(name="business_capability", type=SearchFieldDataType.String),
+        SearchField(name="key_terms", type=collection_string, filterable=True),
+        SearchField(name="stakeholders", type=collection_string, filterable=True),
+        SearchField(name="systems_and_products", type=collection_string, filterable=True),
+        SearchField(name="value_stream_names", type=collection_string, filterable=True),
+        SearchField(name="value_stream_ids", type=collection_string, filterable=True),
+        SearchField(name="direct_vs_names", type=collection_string, filterable=True),
+        SearchField(name="implied_vs_names", type=collection_string, filterable=True),
+        SimpleField(name="label_source", type=SearchFieldDataType.String, filterable=True),
+    ]
+    vector_search = VectorSearch(
+        algorithms=[HnswAlgorithmConfiguration(name="historical-hnsw")],
+        profiles=[
+            VectorSearchProfile(
+                name="historical-vector-profile",
+                algorithm_configuration_name="historical-hnsw",
+            )
+        ],
+    )
+    index_client.create_index(
+        SearchIndex(name=index_name, fields=fields, vector_search=vector_search)
+    )
+
+
 def _azure_row_to_ticket_hit(row: dict) -> dict:
     return {
         "ticket_id": str(row.get("ticket_id") or ""),
@@ -417,6 +493,7 @@ __all__ = [
     "clear_historical_summary_index",
     "ensure_historical_summary_index",
     "load_summary_artifacts",
+    "recreate_historical_summary_index",
     "search_historical_summaries",
     "send_historical_documents",
     "upload_historical_summary_index",

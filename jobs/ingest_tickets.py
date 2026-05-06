@@ -80,6 +80,7 @@ def main() -> int:
             faiss_dir=Path(args.faiss_dir),
             upload_azure=args.upload_azure,
             create_azure_index=args.create_azure_index,
+            recreate_azure_index=args.recreate_azure_index,
             reset_azure_index=args.reset_azure_index,
             azure_index_name=args.azure_index_name,
             azure_document_action=args.azure_document_action,
@@ -132,6 +133,11 @@ def parse_args() -> argparse.Namespace:
         help="Create the Azure AI Search historical index before upload if it is missing.",
     )
     parser.add_argument(
+        "--recreate-azure-index",
+        action="store_true",
+        help="Delete and recreate the Azure AI Search index with the historical-summary schema.",
+    )
+    parser.add_argument(
         "--reset-azure-index",
         action="store_true",
         help="Delete existing documents from the Azure historical index before upload.",
@@ -170,6 +176,7 @@ async def run_batch(
     faiss_dir: Path,
     upload_azure: bool,
     create_azure_index: bool,
+    recreate_azure_index: bool,
     reset_azure_index: bool,
     azure_index_name: str | None,
     azure_document_action: str,
@@ -265,6 +272,7 @@ async def run_batch(
             index_name=azure_index_name or config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
             embedding=embedding_client,
             create_index=create_azure_index,
+            recreate_index=recreate_azure_index,
             reset_index=reset_azure_index,
             document_action=azure_document_action,
             batch_size=azure_batch_size,
@@ -282,6 +290,8 @@ async def run_batch(
         print(f"  azure index:     {azure_result['index_name']}")
         print(f"  azure summaries: {azure_result['summary_doc_count']}")
         print(f"  azure action:    {azure_result['document_action']}")
+        if azure_result.get("recreated_index"):
+            print("  azure recreated: true")
         if azure_result.get("deleted_doc_count"):
             print(f"  azure deleted:   {azure_result['deleted_doc_count']}")
     for ticket_id, summary, error in results:

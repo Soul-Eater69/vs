@@ -10,6 +10,8 @@ def select_value_streams(
     *,
     fetch_count: int = 12,
     historical_faiss_dir: str = "ticket_data/_faiss",
+    historical_search_backend: str | None = None,
+    historical_azure_index_name: str | None = None,
     allowed_value_stream_names: Optional[List[str]] = None,
     exclude_ticket_ids: Optional[List[str]] = None,
 ) -> dict:
@@ -38,6 +40,8 @@ def select_value_streams(
             retrieve_historical_support,
             retrieval_query,
             historical_faiss_dir=historical_faiss_dir,
+            historical_search_backend=historical_search_backend,
+            historical_azure_index_name=historical_azure_index_name,
             max_ticket_hits=min(max(12, fetch_count), 40),
             exclude_ticket_ids=exclude_ticket_ids,
         )
@@ -114,6 +118,8 @@ def _retrieve_historical_support_compat(
     query: str,
     *,
     historical_faiss_dir: str,
+    historical_search_backend: str | None = None,
+    historical_azure_index_name: str | None = None,
     max_ticket_hits: int,
     exclude_ticket_ids: Optional[List[str]] = None,
 ) -> dict:
@@ -121,6 +127,10 @@ def _retrieve_historical_support_compat(
         "historical_faiss_dir": historical_faiss_dir,
         "max_ticket_hits": max_ticket_hits,
     }
+    if "historical_search_backend" in inspect.signature(retrieve_historical_support).parameters:
+        kwargs["historical_search_backend"] = historical_search_backend
+    if "historical_azure_index_name" in inspect.signature(retrieve_historical_support).parameters:
+        kwargs["historical_azure_index_name"] = historical_azure_index_name
     if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
         kwargs["exclude_ticket_ids"] = exclude_ticket_ids
     return retrieve_historical_support(query, **kwargs)
@@ -132,11 +142,15 @@ def run_historical_rag_pipeline(
     allowed_value_stream_names: Optional[List[str]] = None,
     fetch_count: int = 12,
     historical_faiss_dir: str = "ticket_data/_faiss",
+    historical_search_backend: str | None = None,
+    historical_azure_index_name: str | None = None,
 ) -> Dict[str, Any]:
     result = select_value_streams(
         ppt_text,
         fetch_count=fetch_count,
         historical_faiss_dir=historical_faiss_dir,
+        historical_search_backend=historical_search_backend,
+        historical_azure_index_name=historical_azure_index_name,
         allowed_value_stream_names=allowed_value_stream_names,
     )
     return {

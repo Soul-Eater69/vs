@@ -17,6 +17,11 @@ from vs_app.modules.rag.service import ValueStreamRagCommand
 router = APIRouter(prefix="/rag", tags=["rag"])
 
 _FAISS_DIR = Path(os.environ.get("HISTORICAL_FAISS_DIR", "ticket_data/_faiss"))
+_HISTORICAL_BACKEND = os.environ.get("HISTORICAL_SEARCH_BACKEND", "faiss")
+_HISTORICAL_AZURE_INDEX = os.environ.get(
+    "HISTORICAL_AZURE_SEARCH_INDEX_NAME",
+    "historical-ticket-summaries",
+)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -94,6 +99,8 @@ async def predict_value_streams_stream(
             exclude_ids = _source_ticket_exclusions(request)
             historical_kwargs = {
                 "historical_faiss_dir": faiss_dir,
+                "historical_search_backend": _HISTORICAL_BACKEND,
+                "historical_azure_index_name": _HISTORICAL_AZURE_INDEX,
                 "max_ticket_hits": min(max(12, top_k), 40),
             }
             if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
@@ -216,6 +223,8 @@ async def predict_value_streams(
         fetch_count=max(request.top_k_historical, request.top_k_value_streams),
         top_k_historical=request.top_k_historical,
         top_k_value_streams=request.top_k_value_streams,
+        historical_search_backend=_HISTORICAL_BACKEND,
+        historical_azure_index_name=_HISTORICAL_AZURE_INDEX,
         use_llm_finalizer=request.use_llm_finalizer,
         exclude_source_ticket_from_historical=request.exclude_source_ticket_from_historical,
     )

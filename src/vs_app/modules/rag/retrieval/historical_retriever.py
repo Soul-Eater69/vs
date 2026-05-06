@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 from typing import Dict, Iterable, List, Optional
 
+from vs_app import settings as config
+
 from ..query.views import clean_ppt_text
 logger = logging.getLogger(__name__)
 
@@ -13,11 +15,11 @@ def retrieve_historical_support(
     query: str,
     *,
     historical_faiss_dir: str | Path = "ticket_data/_faiss",
+    historical_search_backend: str | None = None,
+    historical_azure_index_name: str | None = None,
     max_ticket_hits: int = 12,
     exclude_ticket_ids: Optional[Iterable[str]] = None,
 ) -> dict:
-    from vs_app.integrations.sinks.faiss_store import faiss_index_exists, search_local_faiss
-
     cleaned = clean_ppt_text(query)
 
     excluded = {
@@ -25,6 +27,17 @@ def retrieve_historical_support(
         for tid in (exclude_ticket_ids or [])
         if _normalize_ticket_id(tid)
     }
+    backend = str(historical_search_backend or config.HISTORICAL_SEARCH_BACKEND or "faiss").strip().lower()
+
+    if backend == "azure":
+        return _retrieve_historical_support_azure(
+            cleaned,
+            index_name=historical_azure_index_name or config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
+            max_ticket_hits=max_ticket_hits,
+            exclude_ticket_ids=excluded,
+        )
+
+    from vs_app.integrations.sinks.faiss_store import faiss_index_exists, search_local_faiss
 
     if not faiss_index_exists(index_dir=historical_faiss_dir, kind="summaries"):
         logger.warning("No FAISS index at %s - no historical support available", historical_faiss_dir)
@@ -76,6 +89,38 @@ def retrieve_historical_support(
         "historical_ticket_hits": filtered_hits,
         "historical_value_stream_support": vs_support,
         "historical_source": "summary_faiss",
+    }
+
+
+def _retrieve_historical_support_azure(
+    cleaned_query: str,
+    *,
+    index_name: str,
+    max_ticket_hits: int,
+    exclude_ticket_ids: Iterable[str],
+) -> dict:
+    from vs_app.ingestion.persistence.azure_historical_index import search_historical_summaries
+
+    try:
+        ticket_hits = search_historical_summaries(
+            cleaned_query,
+            index_name=index_name,
+            top_k=max_ticket_hits,
+            exclude_ticket_ids=exclude_ticket_ids,
+        )
+    except Exception as exc:
+        logger.warning("Azure historical search unavailable (%s) - no historical support available", exc)
+        return {
+            "historical_ticket_hits": [],
+            "historical_value_stream_support": [],
+            "historical_source": "none",
+        }
+
+    filtered_hits = filter_ticket_hits(ticket_hits, exclude_ticket_ids)
+    return {
+        "historical_ticket_hits": filtered_hits,
+        "historical_value_stream_support": _build_support_from_faiss_hits(filtered_hits),
+        "historical_source": "summary_azure_ai_search",
     }
 
 

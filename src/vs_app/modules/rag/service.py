@@ -15,6 +15,8 @@ class ValueStreamRagCommand:
     source: Literal["jira"] | None = None
     fetch_count: int = 12
     historical_faiss_dir: str = "ticket_data/_faiss"
+    historical_search_backend: str | None = None
+    historical_azure_index_name: str | None = None
     allowed_value_stream_names: list[str] | None = None
     use_llm_finalizer: bool = True
     top_k_historical: int | None = None
@@ -102,6 +104,8 @@ class ValueStreamRagService:
             query,
             fetch_count=self._resolve_fetch_count(command),
             historical_faiss_dir=command.historical_faiss_dir,
+            historical_search_backend=command.historical_search_backend,
+            historical_azure_index_name=command.historical_azure_index_name,
             allowed_value_stream_names=command.allowed_value_stream_names,
             exclude_ticket_ids=exclude_ids,
         )

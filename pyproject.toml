@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "VS application: ingestion, RAG, and impact-analysis modules."
 requires-python = ">=3.11"
 dependencies = [
+    "azure-identity",
+    "azure-search-documents",
     "fastapi",
     "uvicorn",
     "pydantic>=2",

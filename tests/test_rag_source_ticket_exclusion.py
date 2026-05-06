@@ -154,3 +154,40 @@ def test_source_ticket_exclusion_fetches_one_extra_summary_hit(monkeypatch) -> N
 
     assert captured["top_k"] == 31
     assert [hit["ticket_id"] for hit in result["historical_ticket_hits"]] == ["IDMT-12167"]
+
+
+def test_azure_historical_backend_returns_support(monkeypatch) -> None:
+    def fake_search(query: str, *, index_name: str, top_k: int, exclude_ticket_ids):
+        assert query == "query"
+        assert index_name == "historical-index"
+        assert top_k == 10
+        assert set(exclude_ticket_ids) == {"IDMT-1"}
+        return [
+            {
+                "ticket_id": "IDMT-2",
+                "best_score": 0.91,
+                "summary_preview": "neighbor",
+                "direct_vs_names": ["Issue Payment"],
+                "implied_vs_names": [],
+                "label_source": "summary_azure_ai_search",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index.search_historical_summaries",
+        fake_search,
+    )
+
+    result = retrieve_historical_support(
+        "query",
+        historical_search_backend="azure",
+        historical_azure_index_name="historical-index",
+        max_ticket_hits=10,
+        exclude_ticket_ids=["IDMT-1"],
+    )
+
+    assert result["historical_source"] == "summary_azure_ai_search"
+    assert [hit["ticket_id"] for hit in result["historical_ticket_hits"]] == ["IDMT-2"]
+    assert [row["entity_name"] for row in result["historical_value_stream_support"]] == [
+        "Issue Payment"
+    ]

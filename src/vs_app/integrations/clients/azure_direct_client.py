@@ -249,6 +249,28 @@ class AzureDirectSearchClient:
             for doc in raw
         ]
 
+    def upload_documents(self, documents: List[Dict[str, Any]]) -> Any:
+        """Upload documents to the configured Azure AI Search index."""
+        return self._search_client.upload_documents(documents=documents)
+
+    def delete_documents(self, documents: List[Dict[str, Any]]) -> Any:
+        """Delete documents from the configured Azure AI Search index."""
+        return self._search_client.delete_documents(documents=documents)
+
+    def search_all(
+        self,
+        search_text: str = "*",
+        filter_expression: Optional[str] = None,
+        select: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all matching documents for administrative operations."""
+        results = self._search_client.search(
+            search_text=search_text,
+            filter=filter_expression,
+            select=select or _DEFAULT_SELECT_FIELDS,
+        )
+        return self._collect(results)
+
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------

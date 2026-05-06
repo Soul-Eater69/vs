@@ -8,9 +8,11 @@ It writes:
 Optionally it also rebuilds:
 
   ticket_data/_faiss/
+  Azure AI Search historical summary index
 
 Usage:
   py -3 jobs/ingest_tickets.py IDMT-4491 --build-faiss
+  py -3 jobs/ingest_tickets.py IDMT-4491 --upload-azure
   py -3 jobs/ingest_tickets.py --input-ticket-ids ticket_ids.txt --concurrency 4
 """
 
@@ -74,6 +76,12 @@ def main() -> int:
             enable_embeddings=not args.no_embeddings,
             build_faiss=args.build_faiss,
             faiss_dir=Path(args.faiss_dir),
+            upload_azure=args.upload_azure,
+            create_azure_index=args.create_azure_index,
+            reset_azure_index=args.reset_azure_index,
+            azure_index_name=args.azure_index_name,
+            azure_document_action=args.azure_document_action,
+            azure_batch_size=args.azure_batch_size,
         )
     )
     return 0
@@ -111,6 +119,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-embeddings", action="store_true", help="Do not write summary_embedding.")
     parser.add_argument("--build-faiss", action="store_true", help="Rebuild FAISS after summaries are written.")
     parser.add_argument("--faiss-dir", default="ticket_data/_faiss")
+    parser.add_argument(
+        "--upload-azure",
+        action="store_true",
+        help="Upload summaries to the Azure AI Search historical summary index.",
+    )
+    parser.add_argument(
+        "--create-azure-index",
+        action="store_true",
+        help="Create the Azure AI Search historical index before upload if it is missing.",
+    )
+    parser.add_argument(
+        "--reset-azure-index",
+        action="store_true",
+        help="Delete existing documents from the Azure historical index before upload.",
+    )
+    parser.add_argument(
+        "--azure-index-name",
+        default=None,
+        help="Azure AI Search historical summary index name. Defaults to HISTORICAL_AZURE_SEARCH_INDEX_NAME.",
+    )
+    parser.add_argument(
+        "--azure-document-action",
+        choices=["upload", "update"],
+        default="upload",
+        help="Use POST upload for first run or PUT update for existing documents.",
+    )
+    parser.add_argument(
+        "--azure-batch-size",
+        type=int,
+        default=1000,
+        help="Batch size passed to the AI Search documents gateway.",
+    )
     parser.add_argument("--quiet", action="store_true")
     return parser.parse_args()
 
@@ -126,6 +166,12 @@ async def run_batch(
     enable_embeddings: bool,
     build_faiss: bool,
     faiss_dir: Path,
+    upload_azure: bool,
+    create_azure_index: bool,
+    reset_azure_index: bool,
+    azure_index_name: str | None,
+    azure_document_action: str,
+    azure_batch_size: int,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     aggregate_path = output_dir / aggregate_name
@@ -204,6 +250,23 @@ async def run_batch(
             index_dir=faiss_dir,
         )
 
+    azure_result: dict[str, Any] | None = None
+    if upload_azure:
+        from vs_app import settings as config
+        from vs_app.ingestion.persistence.azure_historical_index import (
+            upload_historical_summary_index,
+        )
+
+        azure_result = upload_historical_summary_index(
+            output_dir=output_dir,
+            index_name=azure_index_name or config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
+            embedding=embedding_client,
+            create_index=create_azure_index,
+            reset_index=reset_azure_index,
+            document_action=azure_document_action,
+            batch_size=azure_batch_size,
+        )
+
     print("")
     print("Batch ingest complete")
     print(f"  processed:       {len(summaries)} / {len(ticket_ids)}")
@@ -212,6 +275,12 @@ async def run_batch(
     if faiss_result:
         print(f"  faiss:           {faiss_result['index_dir']}")
         print(f"  faiss summaries: {faiss_result['summary_doc_count']}")
+    if azure_result:
+        print(f"  azure index:     {azure_result['index_name']}")
+        print(f"  azure summaries: {azure_result['summary_doc_count']}")
+        print(f"  azure action:    {azure_result['document_action']}")
+        if azure_result.get("deleted_doc_count"):
+            print(f"  azure deleted:   {azure_result['deleted_doc_count']}")
     for ticket_id, summary, error in results:
         if error:
             print(f"  [{ticket_id}] ERROR: {error}")

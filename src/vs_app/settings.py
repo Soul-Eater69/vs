@@ -41,6 +41,11 @@ CHAT_COMPLETION_PATH: str = os.environ.get("CHAT_COMPLETION_PATH", "/chat/comple
 # ---------------------------------------------------------------------------
 AZURE_SEARCH_ENDPOINT: str = os.environ.get("AZURE_SEARCH_ENDPOINT", "")
 AZURE_SEARCH_INDEX_NAME: str = os.environ.get("AZURE_SEARCH_INDEX_NAME", "value-streams")
+HISTORICAL_AZURE_SEARCH_INDEX_NAME: str = os.environ.get(
+    "HISTORICAL_AZURE_SEARCH_INDEX_NAME",
+    "historical-ticket-summaries",
+)
+HISTORICAL_SEARCH_BACKEND: str = os.environ.get("HISTORICAL_SEARCH_BACKEND", "faiss")
 AZURE_SEARCH_API_KEY: str = os.environ.get("AZURE_SEARCH_API_KEY", "")
 AZURE_SEARCH_SEMANTIC_CONFIG: str = os.environ.get("AZURE_SEARCH_SEMANTIC_CONFIG", "default")
 AZURE_TENANT_ID: str = os.environ.get("AZURE_TENANT_ID", "")
@@ -53,6 +58,10 @@ AZURE_CLIENT_SECRET: str = os.environ.get("AZURE_CLIENT_SECRET", "")
 AISEARCH_BASE_URL: str = os.environ.get("AISEARCH_BASE_URL", "")
 AISEARCH_APP_ID: str = os.environ.get("AISEARCH_APP_ID", "")
 AISEARCH_API_PATH: str = "/api/v1/aisearch/search"
+AISEARCH_DOCUMENTS_API_PATH: str = os.environ.get(
+    "AISEARCH_DOCUMENTS_API_PATH",
+    "/api/v1/aisearch/documents",
+)
 
 JIRA_TOKEN: str = os.environ.get("JIRA_TOKEN", "")
 JIRA_BASE_URL: str = os.environ.get("JIRA_BASE_URL", "").rstrip("/")

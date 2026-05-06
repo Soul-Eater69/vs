@@ -44,7 +44,7 @@ def summarize_ticket(
 
     prompt = build_structured_summary_prompt(
         ticket_id=ticket_id,
-        text=consolidated_text[:_MAX_INPUT_CHARS],
+        text=consolidated_text[:_input_char_limit(cfg, "summary_input_char_limit")],
     )
 
     raw = _call_llm(prompt, llm_client, cfg)
@@ -102,7 +102,7 @@ def classify_ticket_value_streams(
 
     prompt = build_value_stream_classification_prompt(
         ticket_id=ticket_id,
-        text=consolidated_text[:_MAX_INPUT_CHARS],
+        text=consolidated_text[:_input_char_limit(cfg, "classification_input_char_limit")],
         value_streams="\n".join(f"- {name}" for name in normalized_names),
     )
     raw = _call_llm(
@@ -180,7 +180,7 @@ def _call_llm(
             prompt,
             llm_client,
             model=model,
-            max_output_tokens=_MAX_OUTPUT_TOKENS,
+            max_output_tokens=_output_token_limit(cfg),
             temperature=0.2,
         )
     except Exception as exc:
@@ -189,6 +189,24 @@ def _call_llm(
     if not str(raw or "").strip():
         raise error_cls("LLM returned empty response")
     return raw
+
+
+def _input_char_limit(cfg: Any, attr: str) -> int:
+    value = getattr(cfg, attr, _MAX_INPUT_CHARS)
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        limit = _MAX_INPUT_CHARS
+    return max(1_000, limit)
+
+
+def _output_token_limit(cfg: Any) -> int:
+    value = getattr(cfg, "llm_max_output_tokens", _MAX_OUTPUT_TOKENS)
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        limit = _MAX_OUTPUT_TOKENS
+    return max(200, limit)
 
 def _parse_json(raw: str, ticket_id: str) -> dict:
     return parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)

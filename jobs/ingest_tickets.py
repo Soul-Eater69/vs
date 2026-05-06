@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
@@ -35,13 +36,46 @@ if str(SRC) not in sys.path:
 
 from vs_app.container import build_ticket_fetcher
 from vs_app.integrations.clients.embedding import EmbeddingClient
-from vs_app.integrations.clients.llm import IDPChatOpenAI
+from vs_app.integrations.clients.llm import IDPChatOpenAI, build_extra_body
 from vs_app.jobs.jira_batch.runtime.runtime_factory import build_ingestion_config
 from vs_app.ingestion.summary.pipeline import ingest_ticket_summary_payload
 from vs_app.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LlmRuntimeConfig:
+    """Operator-editable LLM profile for this batch ingestion wrapper."""
+
+    llm_model: str = "gpt-5-mini-idp"
+    llm_reasoning_effort: str | None = "medium"
+    llm_max_output_tokens: int = 1200
+    summary_input_chars: int = 20_000
+    classification_input_chars: int = 20_000
+
+
+@dataclass(frozen=True)
+class IngestTicketsRuntimeConfig:
+    """Operator-editable defaults for this batch ingestion wrapper."""
+
+    # Default: cheap/stable batch pass on mini with medium reasoning.
+    primary: LlmRuntimeConfig = LlmRuntimeConfig()
+
+    # Retry failed tickets once with full GPT-5. Keep this conservative because
+    # the gateway appears to have a short timeout for long-running chat calls.
+    retry_failed_with_fallback: bool = True
+    fallback: LlmRuntimeConfig = LlmRuntimeConfig(
+        llm_model="gpt-5-idp",
+        llm_reasoning_effort="low",
+        llm_max_output_tokens=800,
+        summary_input_chars=8_000,
+        classification_input_chars=6_000,
+    )
+
+
+RUNTIME_CONFIG = IngestTicketsRuntimeConfig()
 
 
 def emit(message: str) -> None:
@@ -74,6 +108,7 @@ def main() -> int:
             source=args.source,
             concurrency=args.concurrency,
             force=args.force,
+            runtime_config=RUNTIME_CONFIG,
             aggregate_name=args.aggregate_name,
             enable_embeddings=not args.no_embeddings,
             build_faiss=args.build_faiss,
@@ -170,6 +205,7 @@ async def run_batch(
     source: str,
     concurrency: int,
     force: bool,
+    runtime_config: IngestTicketsRuntimeConfig,
     aggregate_name: str,
     enable_embeddings: bool,
     build_faiss: bool,
@@ -187,14 +223,10 @@ async def run_batch(
     summaries_by_ticket = load_summary_map(aggregate_path)
     aggregate_lock = asyncio.Lock()
 
-    cfg = build_ingestion_config(
-        llm_model="gpt-5-mini-idp",
-        embedding_model=EMBEDDING_MODEL,
-        skip_llm_summary=False,
-        skip_llm_keywords=False,
-        skip_llm_derived=False,
-    )
-    llm_client = IDPChatOpenAI(model="gpt-5-mini-idp")
+    cfg, llm_client = build_llm_runtime(runtime_config.primary)
+    fallback_runtime: tuple[Any, Any] | None = None
+    if runtime_config.retry_failed_with_fallback:
+        fallback_runtime = build_llm_runtime(runtime_config.fallback)
     embedding_client = (
         EmbeddingClient(model=EMBEDDING_MODEL, dimension=EMBEDDING_DIMENSION)
         if enable_embeddings
@@ -222,6 +254,34 @@ async def run_batch(
                         embedding_client=embedding_client,
                         cfg=cfg,
                     )
+                except Exception as exc:
+                    if fallback_runtime is None:
+                        emit(f"[{ticket_id}] ERROR {exc}")
+                        logger.exception("Failed to ingest %s", ticket_id)
+                        return ticket_id, None, str(exc)
+
+                    emit(
+                        f"[{ticket_id}] RETRY fallback model={runtime_config.fallback.llm_model} "
+                        f"after error: {exc}"
+                    )
+                    fallback_cfg, fallback_llm_client = fallback_runtime
+                    try:
+                        summary = await ingest_one_ticket(
+                            ticket_id=ticket_id,
+                            jira_client=jira_client,
+                            llm_client=fallback_llm_client,
+                            embedding_client=embedding_client,
+                            cfg=fallback_cfg,
+                        )
+                    except Exception as fallback_exc:
+                        error = f"primary failed: {exc}; fallback failed: {fallback_exc}"
+                        emit(f"[{ticket_id}] ERROR {error}")
+                        logger.exception("Failed to ingest %s with fallback", ticket_id)
+                        return ticket_id, None, error
+
+                    emit(f"[{ticket_id}] RETRY succeeded with {runtime_config.fallback.llm_model}")
+
+                try:
                     async with aggregate_lock:
                         summaries_by_ticket[ticket_id] = summary
                         write_summary_aggregate(aggregate_path, summaries_by_ticket.values())
@@ -300,6 +360,25 @@ async def run_batch(
         else:
             names = list((summary or {}).get("value_stream_names") or [])
             print(f"  [{ticket_id}] summaries.json value_streams={names}")
+
+
+def build_llm_runtime(profile: LlmRuntimeConfig) -> tuple[Any, Any]:
+    cfg = build_ingestion_config(
+        llm_model=profile.llm_model,
+        embedding_model=EMBEDDING_MODEL,
+        llm_max_output_tokens=profile.llm_max_output_tokens,
+        summary_input_char_limit=profile.summary_input_chars,
+        classification_input_char_limit=profile.classification_input_chars,
+        skip_llm_summary=False,
+        skip_llm_keywords=False,
+        skip_llm_derived=False,
+    )
+    llm_client = IDPChatOpenAI(
+        model=profile.llm_model,
+        max_tokens=profile.llm_max_output_tokens,
+        extra_body=build_extra_body(reasoning_effort=profile.llm_reasoning_effort),
+    )
+    return cfg, llm_client
 
 
 async def ingest_one_ticket(

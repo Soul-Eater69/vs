@@ -58,4 +58,4 @@ template: |
 
   ## Context
 
-  The input is capped at 20,000 characters and may include up to four extracted documents. The output is capped at 1,200 tokens. The JSON is embedded for vector retrieval and stored for human inspection, so it should be concise, readable, source-grounded, dense in the summary, and precise in facet arrays.
+  The input may be truncated by the ingestion job and may include up to four extracted documents. The JSON is embedded for vector retrieval and stored for human inspection, so it should be concise, readable, source-grounded, dense in the summary, and precise in facet arrays.

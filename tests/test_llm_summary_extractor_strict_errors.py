@@ -13,6 +13,9 @@ from vs_app.ingestion.summary.llm_summary_extractor import (
 
 class Cfg:
     llm_model = "test-model"
+    llm_max_output_tokens = 1200
+    summary_input_char_limit = 20_000
+    classification_input_char_limit = 20_000
     strict_value_stream_classification = True
 
 
@@ -69,3 +72,25 @@ def test_labeled_ticket_missing_coverage_raises(monkeypatch) -> None:
             llm_client=object(),
             cfg=Cfg(),
         )
+
+
+def test_summary_input_char_limit_comes_from_cfg(monkeypatch) -> None:
+    captured = {}
+
+    class SmallCfg(Cfg):
+        summary_input_char_limit = 1000
+
+    def fake_complete_text(prompt, *args, **kwargs):
+        captured["prompt"] = prompt
+        return (
+            '{"summary_text":"summary","business_problem":"problem",'
+            '"business_capability":"capability","stakeholders":[],'
+            '"systems_and_products":[],"key_terms":[]}'
+        )
+
+    monkeypatch.setattr(extractor, "complete_text", fake_complete_text)
+
+    summarize_ticket("IDMT-1", "x" * 1500, object(), SmallCfg())
+
+    assert "x" * 1000 in captured["prompt"]
+    assert "x" * 1001 not in captured["prompt"]

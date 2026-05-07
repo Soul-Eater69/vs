@@ -18,6 +18,7 @@ from vs_app.modules.rag.service import ValueStreamRagCommand
 router = APIRouter(prefix="/rag", tags=["rag"])
 
 _FAISS_DIR = Path(os.environ.get("HISTORICAL_FAISS_DIR", "ticket_data/_faiss"))
+_IDEA_CARDS_DIR = Path(os.environ.get("IDEA_CARDS_DIR", "idea_cards"))
 _HISTORICAL_BACKEND = os.environ.get("HISTORICAL_SEARCH_BACKEND", "azure")
 _HISTORICAL_AZURE_INDEX = os.environ.get(
     "HISTORICAL_AZURE_SEARCH_INDEX_NAME",
@@ -115,7 +116,11 @@ async def predict_value_streams_stream(
                 raw_text = request.idea_card_text
             elif request.ticket_id:
                 from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
-                raw_text = await asyncio.to_thread(extract_idea_card_text, doc_id=request.ticket_id)
+                raw_text = await asyncio.to_thread(
+                    extract_idea_card_text,
+                    doc_id=request.ticket_id,
+                    local_card_dir=_IDEA_CARDS_DIR,
+                )
             else:
                 raise ValueError("No idea card text or ticket ID provided")
 

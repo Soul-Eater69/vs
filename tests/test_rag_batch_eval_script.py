@@ -7,7 +7,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from evaluate_rag_batch import compute_metrics, discover_items, summarize
+from evaluate_rag_batch import compute_metrics, discover_items, load_ground_truth_from_azure, summarize
 
 
 def test_compute_metrics_reports_ticket_level_precision_recall() -> None:
@@ -143,3 +143,20 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
     assert summary["micro_precision"] == 0.6667
     assert summary["micro_recall"] == 0.6667
     assert summary["avg_elapsed_seconds"] == 2.0
+
+
+def test_load_ground_truth_from_azure_uses_value_stream_names(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index.load_historical_summary_rows",
+        lambda **kwargs: [
+            {"ticket_id": "idmt-1", "value_stream_names": ["Issue Payment", "Issue Payment"]},
+            {"ticket_id": "IDMT-2", "direct_vs_names": ["Manage Member Care"]},
+        ],
+    )
+
+    rows = load_ground_truth_from_azure(azure_index_name="hist")
+
+    assert rows == {
+        "IDMT-1": ["Issue Payment"],
+        "IDMT-2": ["Manage Member Care"],
+    }

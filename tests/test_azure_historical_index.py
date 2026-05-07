@@ -3,6 +3,7 @@ from __future__ import annotations
 from vs_app.ingestion.persistence.azure_historical_index import (
     build_historical_azure_documents,
     clear_historical_summary_index,
+    load_historical_summary_rows,
     search_historical_summaries,
     send_historical_documents,
     upload_historical_summary_index,
@@ -236,6 +237,19 @@ def test_clear_historical_summary_index_deletes_existing_ids() -> None:
 
     assert deleted_count == 2
     assert client.deleted == [{"id": "one"}, {"id": "two"}]
+
+
+def test_load_historical_summary_rows_selects_historical_fields() -> None:
+    class FakeClient:
+        def search_all(self, search_text: str = "*", select=None):
+            assert search_text == "*"
+            assert "ticket_id" in select
+            assert "value_stream_names" in select
+            return [{"ticket_id": "IDMT-1", "value_stream_names": ["Issue Payment"]}]
+
+    rows = load_historical_summary_rows(index_name="hist", client=FakeClient())
+
+    assert rows == [{"ticket_id": "IDMT-1", "value_stream_names": ["Issue Payment"]}]
 
 
 def test_send_historical_documents_uses_gateway_upload(monkeypatch) -> None:

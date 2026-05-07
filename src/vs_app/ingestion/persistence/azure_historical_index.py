@@ -176,6 +176,20 @@ def clear_historical_summary_index(
     return len(delete_docs)
 
 
+def load_historical_summary_rows(
+    *,
+    index_name: str = config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
+    client: Any | None = None,
+) -> list[dict]:
+    """Load historical summary rows from Azure AI Search for offline evaluation."""
+    search_client = client or _make_search_client(index_name=index_name)
+    rows = search_client.search_all(
+        search_text="*",
+        select=HISTORICAL_SELECT_FIELDS,
+    )
+    return [dict(row) for row in rows]
+
+
 def load_summary_artifacts(output_dir: Path) -> list[dict]:
     """Load summary artifacts produced by jobs/ingest_tickets.py."""
     for aggregate_path in (output_dir / "summaries.json", output_dir / "_all_summaries.json"):
@@ -522,6 +536,7 @@ __all__ = [
     "build_historical_azure_documents",
     "clear_historical_summary_index",
     "ensure_historical_summary_index",
+    "load_historical_summary_rows",
     "load_summary_artifacts",
     "recreate_historical_summary_index",
     "search_historical_summaries",

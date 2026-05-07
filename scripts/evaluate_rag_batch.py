@@ -3,9 +3,9 @@
 Example:
   py -3 scripts/evaluate_rag_batch.py --limit 100 --concurrency 4
 
-The script expects local idea cards under ``idea_cards/`` by default and ground
-truth labels in the historical FAISS ``summary_docs.json`` file. Historical RAG
-hits default to the Azure historical summary index.
+The script expects local idea cards under ``idea_cards/`` by default. Ground
+truth labels and historical RAG hits default to the Azure historical summary
+index.
 """
 
 from __future__ import annotations
@@ -83,7 +83,11 @@ def main() -> int:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ground_truth_by_ticket = load_ground_truth(faiss_dir)
+    ground_truth_by_ticket = load_ground_truth(
+        source=args.ground_truth_source,
+        faiss_dir=faiss_dir,
+        azure_index_name=args.historical_azure_index_name,
+    )
     items = discover_items(
         idea_cards_dir=idea_cards_dir,
         ground_truth_by_ticket=ground_truth_by_ticket,
@@ -129,6 +133,7 @@ def main() -> int:
         "historical_faiss_dir": str(faiss_dir),
         "historical_search_backend": args.historical_search_backend,
         "historical_azure_index_name": args.historical_azure_index_name,
+        "ground_truth_source": args.ground_truth_source,
         "limit": args.limit,
         "concurrency": args.concurrency,
         "fetch_count": args.fetch_count,
@@ -165,6 +170,12 @@ def parse_args() -> argparse.Namespace:
         "--historical-azure-index-name",
         default=None,
         help="Azure AI Search historical summary index name. Defaults to HISTORICAL_AZURE_SEARCH_INDEX_NAME.",
+    )
+    parser.add_argument(
+        "--ground-truth-source",
+        choices=["azure", "faiss"],
+        default="azure",
+        help="Source for eval ground-truth labels.",
     )
     parser.add_argument("--output-dir", default="output/rag_eval")
     parser.add_argument("--json-name", default="rag_batch_eval.json")
@@ -208,7 +219,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_ground_truth(faiss_dir: Path) -> dict[str, list[str]]:
+def load_ground_truth(
+    *,
+    source: str,
+    faiss_dir: Path,
+    azure_index_name: str | None = None,
+) -> dict[str, list[str]]:
+    if str(source or "").strip().lower() == "azure":
+        return load_ground_truth_from_azure(azure_index_name=azure_index_name)
+    return load_ground_truth_from_faiss(faiss_dir)
+
+
+def load_ground_truth_from_faiss(faiss_dir: Path) -> dict[str, list[str]]:
     docs_path = faiss_dir / "summary_docs.json"
     if not docs_path.exists():
         raise SystemExit(
@@ -227,6 +249,28 @@ def load_ground_truth(faiss_dir: Path) -> dict[str, list[str]]:
     for row in docs:
         if not isinstance(row, dict):
             continue
+        ticket_id = str(row.get("ticket_id") or row.get("key") or "").strip()
+        if not ticket_id:
+            continue
+        labels = first_non_empty_list(
+            row,
+            "value_stream_names",
+            "direct_vs_names",
+            "value_stream_labels",
+        )
+        out[normalize_ticket_id(ticket_id)] = clean_name_list(labels)
+    return out
+
+
+def load_ground_truth_from_azure(azure_index_name: str | None = None) -> dict[str, list[str]]:
+    from vs_app import settings as config
+    from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
+
+    rows = load_historical_summary_rows(
+        index_name=azure_index_name or config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
+    )
+    out: dict[str, list[str]] = {}
+    for row in rows:
         ticket_id = str(row.get("ticket_id") or row.get("key") or "").strip()
         if not ticket_id:
             continue

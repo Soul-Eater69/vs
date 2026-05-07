@@ -4,7 +4,8 @@ Example:
   py -3 scripts/evaluate_rag_batch.py --limit 100 --concurrency 4
 
 The script expects local idea cards under ``idea_cards/`` by default and ground
-truth labels in the historical FAISS ``summary_docs.json`` file.
+truth labels in the historical FAISS ``summary_docs.json`` file. Historical RAG
+hits default to the Azure historical summary index.
 """
 
 from __future__ import annotations
@@ -107,7 +108,8 @@ def main() -> int:
     print(
         f"Evaluating {len(items)} tickets with concurrency={args.concurrency}, "
         f"top_k={args.fetch_count}, exclude_source={not args.include_source_ticket}, "
-        f"min_truth_streams={args.min_ground_truth_streams}"
+        f"min_truth_streams={args.min_ground_truth_streams}, "
+        f"historical_backend={args.historical_search_backend}"
     )
 
     results = run_batch(
@@ -115,6 +117,8 @@ def main() -> int:
         concurrency=args.concurrency,
         fetch_count=args.fetch_count,
         historical_faiss_dir=str(faiss_dir),
+        historical_search_backend=args.historical_search_backend,
+        historical_azure_index_name=args.historical_azure_index_name,
         exclude_source_ticket=not args.include_source_ticket,
     )
 
@@ -123,6 +127,8 @@ def main() -> int:
         "created_at": started.isoformat(),
         "idea_cards_dir": str(idea_cards_dir),
         "historical_faiss_dir": str(faiss_dir),
+        "historical_search_backend": args.historical_search_backend,
+        "historical_azure_index_name": args.historical_azure_index_name,
         "limit": args.limit,
         "concurrency": args.concurrency,
         "fetch_count": args.fetch_count,
@@ -149,6 +155,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--idea-cards-dir", default="idea_cards")
     parser.add_argument("--historical-faiss-dir", default="ticket_data/_faiss")
+    parser.add_argument(
+        "--historical-search-backend",
+        choices=["faiss", "azure"],
+        default="azure",
+        help="Backend for historical ticket hits during RAG evaluation.",
+    )
+    parser.add_argument(
+        "--historical-azure-index-name",
+        default=None,
+        help="Azure AI Search historical summary index name. Defaults to HISTORICAL_AZURE_SEARCH_INDEX_NAME.",
+    )
     parser.add_argument("--output-dir", default="output/rag_eval")
     parser.add_argument("--json-name", default="rag_batch_eval.json")
     parser.add_argument("--csv-name", default="rag_batch_eval.csv")
@@ -272,6 +289,8 @@ def run_batch(
     concurrency: int,
     fetch_count: int,
     historical_faiss_dir: str,
+    historical_search_backend: str | None,
+    historical_azure_index_name: str | None,
     exclude_source_ticket: bool,
 ) -> list[TicketMetrics]:
     max_workers = max(1, concurrency)
@@ -284,6 +303,8 @@ def run_batch(
                 item,
                 fetch_count=fetch_count,
                 historical_faiss_dir=historical_faiss_dir,
+                historical_search_backend=historical_search_backend,
+                historical_azure_index_name=historical_azure_index_name,
                 exclude_source_ticket=exclude_source_ticket,
             ): item
             for item in items
@@ -316,6 +337,8 @@ def evaluate_one(
     *,
     fetch_count: int,
     historical_faiss_dir: str,
+    historical_search_backend: str | None,
+    historical_azure_index_name: str | None,
     exclude_source_ticket: bool,
 ) -> TicketMetrics:
     from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
@@ -329,6 +352,8 @@ def evaluate_one(
         text,
         fetch_count=fetch_count,
         historical_faiss_dir=historical_faiss_dir,
+        historical_search_backend=historical_search_backend,
+        historical_azure_index_name=historical_azure_index_name,
         exclude_ticket_ids=exclude_ids,
     )
     elapsed = time.perf_counter() - start

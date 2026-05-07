@@ -45,7 +45,7 @@ HISTORICAL_AZURE_SEARCH_INDEX_NAME: str = os.environ.get(
     "HISTORICAL_AZURE_SEARCH_INDEX_NAME",
     "historical-ticket-summaries",
 )
-HISTORICAL_SEARCH_BACKEND: str = os.environ.get("HISTORICAL_SEARCH_BACKEND", "faiss")
+HISTORICAL_SEARCH_BACKEND: str = os.environ.get("HISTORICAL_SEARCH_BACKEND", "azure")
 AZURE_SEARCH_API_KEY: str = os.environ.get("AZURE_SEARCH_API_KEY", "")
 AZURE_SEARCH_SEMANTIC_CONFIG: str = os.environ.get("AZURE_SEARCH_SEMANTIC_CONFIG", "default")
 AZURE_TENANT_ID: str = os.environ.get("AZURE_TENANT_ID", "")

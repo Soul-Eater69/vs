@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
+from vs_app.api.routes import rag
 from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.main import create_app
 
@@ -27,3 +28,18 @@ def test_rag_public_schema_requires_query_input() -> None:
         raise AssertionError("Expected validation error")
     except ValidationError:
         pass
+
+
+def test_rag_api_defaults_historical_backend_and_truth_to_azure(monkeypatch) -> None:
+    assert rag._HISTORICAL_BACKEND == "azure"
+
+    monkeypatch.setattr(rag, "_GROUND_TRUTH_SOURCE", "azure")
+    monkeypatch.setattr(
+        rag,
+        "load_historical_summary_rows",
+        lambda **kwargs: [
+            {"ticket_id": "IDMT-123", "value_stream_names": ["Issue Payment"]},
+        ],
+    )
+
+    assert rag._ground_truth_for_ticket("IDMT-123") == ["Issue Payment"]

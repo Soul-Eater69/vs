@@ -28,7 +28,7 @@ def retrieve_historical_support(
         for tid in (exclude_ticket_ids or [])
         if _normalize_ticket_id(tid)
     }
-    backend = str(historical_search_backend or config.HISTORICAL_SEARCH_BACKEND or "faiss").strip().lower()
+    backend = str(historical_search_backend or config.HISTORICAL_SEARCH_BACKEND or "azure").strip().lower()
 
     if backend == "azure":
         return _retrieve_historical_support_azure(

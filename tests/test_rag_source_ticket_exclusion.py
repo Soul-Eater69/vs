@@ -148,6 +148,7 @@ def test_source_ticket_exclusion_fetches_one_extra_summary_hit(monkeypatch) -> N
     result = retrieve_historical_support(
         "query",
         historical_faiss_dir="unused",
+        historical_search_backend="faiss",
         max_ticket_hits=30,
         exclude_ticket_ids=["IDMT-19761"],
     )

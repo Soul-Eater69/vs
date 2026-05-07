@@ -12,16 +12,18 @@ from fastapi.responses import StreamingResponse
 from vs_app.api.dependencies import ApiContainer, get_container
 from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
+from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
 from vs_app.modules.rag.service import ValueStreamRagCommand
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
 _FAISS_DIR = Path(os.environ.get("HISTORICAL_FAISS_DIR", "ticket_data/_faiss"))
-_HISTORICAL_BACKEND = os.environ.get("HISTORICAL_SEARCH_BACKEND", "faiss")
+_HISTORICAL_BACKEND = os.environ.get("HISTORICAL_SEARCH_BACKEND", "azure")
 _HISTORICAL_AZURE_INDEX = os.environ.get(
     "HISTORICAL_AZURE_SEARCH_INDEX_NAME",
     "historical-ticket-summaries",
 )
+_GROUND_TRUTH_SOURCE = os.environ.get("RAG_GROUND_TRUTH_SOURCE", "azure")
 
 
 def _sse(event: str, data: dict) -> str:
@@ -49,6 +51,35 @@ def _ground_truth_from_faiss(ticket_id: str) -> list[str]:
     except Exception:
         pass
     return []
+
+
+def _ground_truth_from_azure(ticket_id: str) -> list[str]:
+    key = ticket_id.strip().lower()
+    if not key:
+        return []
+    try:
+        for row in load_historical_summary_rows(index_name=_HISTORICAL_AZURE_INDEX):
+            if str(row.get("ticket_id") or "").strip().lower() != key:
+                continue
+            names = (
+                row.get("value_stream_names")
+                or row.get("direct_vs_names")
+                or row.get("value_stream_labels")
+                or []
+            )
+            return [str(n).strip() for n in names if str(n).strip()]
+    except Exception:
+        return []
+    return []
+
+
+def _ground_truth_for_ticket(ticket_id: str | None) -> list[str]:
+    if not ticket_id:
+        return []
+    source = str(_GROUND_TRUTH_SOURCE or "").strip().lower()
+    if source == "faiss":
+        return _ground_truth_from_faiss(ticket_id)
+    return _ground_truth_from_azure(ticket_id)
 
 
 def _source_ticket_exclusions(request: ValueStreamRagRequest) -> list[str] | None:
@@ -197,7 +228,7 @@ async def predict_value_streams_stream(
                 "evidence": historical.get("historical_value_stream_support", []),
                 "debug": debug,
                 "historical_excluded_ticket_ids": exclude_ids or [],
-                "ground_truth": _ground_truth_from_faiss(request.ticket_id) if request.ticket_id else [],
+                "ground_truth": _ground_truth_for_ticket(request.ticket_id),
             }
             yield _sse("result", result_payload)
 
@@ -231,5 +262,5 @@ async def predict_value_streams(
     result = await container.rag.analyze(command)
     response = ValueStreamRagResponse.from_result(result)
     if request.ticket_id:
-        response.ground_truth = _ground_truth_from_faiss(request.ticket_id)
+        response.ground_truth = _ground_truth_for_ticket(request.ticket_id)
     return response

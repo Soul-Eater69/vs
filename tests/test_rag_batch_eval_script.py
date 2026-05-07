@@ -7,7 +7,14 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from evaluate_rag_batch import compute_metrics, discover_items, load_ground_truth_from_azure, summarize
+from evaluate_rag_batch import (
+    apply_eval_llm_defaults,
+    compute_metrics,
+    discover_items,
+    is_transient_gateway_error,
+    load_ground_truth_from_azure,
+    summarize,
+)
 
 
 def test_compute_metrics_reports_ticket_level_precision_recall() -> None:
@@ -160,3 +167,17 @@ def test_load_ground_truth_from_azure_uses_value_stream_names(monkeypatch) -> No
         "IDMT-1": ["Issue Payment"],
         "IDMT-2": ["Manage Member Care"],
     }
+
+
+def test_eval_defaults_and_transient_detector(monkeypatch) -> None:
+    monkeypatch.delenv("CONDENSE_LLM_MODEL", raising=False)
+    monkeypatch.delenv("GENERATION_LLM_REASONING_EFFORT", raising=False)
+
+    apply_eval_llm_defaults()
+
+    import os
+
+    assert os.environ["CONDENSE_LLM_MODEL"] == "gpt-5-mini-idp"
+    assert os.environ["GENERATION_LLM_REASONING_EFFORT"] == "medium"
+    assert is_transient_gateway_error(RuntimeError("504 Gateway Time-out"))
+    assert not is_transient_gateway_error(ValueError("bad local file"))

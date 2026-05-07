@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import random
 import sys
@@ -38,6 +39,15 @@ SUPPORTED_EXTENSIONS = {
     ".txt",
     ".md",
     ".markdown",
+}
+
+EVAL_LLM_ENV_DEFAULTS = {
+    # Batch eval fans out many RAG calls, so default to the faster model/reasoning
+    # profile unless the operator explicitly overrides these env vars.
+    "CONDENSE_LLM_MODEL": "gpt-5-mini-idp",
+    "CONDENSE_LLM_REASONING_EFFORT": "low",
+    "GENERATION_LLM_MODEL": "gpt-5-mini-idp",
+    "GENERATION_LLM_REASONING_EFFORT": "medium",
 }
 
 
@@ -77,6 +87,7 @@ class TicketMetrics:
 
 def main() -> int:
     args = parse_args()
+    apply_eval_llm_defaults()
 
     idea_cards_dir = Path(args.idea_cards_dir)
     faiss_dir = Path(args.historical_faiss_dir)
@@ -124,6 +135,8 @@ def main() -> int:
         historical_search_backend=args.historical_search_backend,
         historical_azure_index_name=args.historical_azure_index_name,
         exclude_source_ticket=not args.include_source_ticket,
+        retries=args.retries,
+        retry_backoff_seconds=args.retry_backoff_seconds,
     )
 
     summary = summarize(results)
@@ -137,6 +150,8 @@ def main() -> int:
         "limit": args.limit,
         "concurrency": args.concurrency,
         "fetch_count": args.fetch_count,
+        "retries": args.retries,
+        "retry_backoff_seconds": args.retry_backoff_seconds,
         "min_ground_truth_streams": args.min_ground_truth_streams,
         "exclude_source_ticket": not args.include_source_ticket,
         "summary": summary,
@@ -187,7 +202,19 @@ def parse_args() -> argparse.Namespace:
         default=75,
         help="Print a warning when fewer than this many cards are available.",
     )
-    parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=2,
+        help="Retry each ticket this many times after transient gateway failures.",
+    )
+    parser.add_argument(
+        "--retry-backoff-seconds",
+        type=float,
+        default=5.0,
+        help="Initial per-ticket retry backoff for transient gateway failures.",
+    )
     parser.add_argument("--fetch-count", type=int, default=30)
     parser.add_argument(
         "--min-ground-truth-streams",
@@ -217,6 +244,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional explicit ticket IDs to evaluate. File stems must match these IDs.",
     )
     return parser.parse_args()
+
+
+def apply_eval_llm_defaults() -> None:
+    for key, value in EVAL_LLM_ENV_DEFAULTS.items():
+        os.environ.setdefault(key, value)
 
 
 def load_ground_truth(
@@ -336,6 +368,8 @@ def run_batch(
     historical_search_backend: str | None,
     historical_azure_index_name: str | None,
     exclude_source_ticket: bool,
+    retries: int,
+    retry_backoff_seconds: float,
 ) -> list[TicketMetrics]:
     max_workers = max(1, concurrency)
     results: list[TicketMetrics] = []
@@ -343,13 +377,15 @@ def run_batch(
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_by_item = {
             executor.submit(
-                evaluate_one,
+                evaluate_one_with_retries,
                 item,
                 fetch_count=fetch_count,
                 historical_faiss_dir=historical_faiss_dir,
                 historical_search_backend=historical_search_backend,
                 historical_azure_index_name=historical_azure_index_name,
                 exclude_source_ticket=exclude_source_ticket,
+                retries=retries,
+                retry_backoff_seconds=retry_backoff_seconds,
             ): item
             for item in items
         }
@@ -374,6 +410,43 @@ def run_batch(
                 print(f"[{completed}/{total}] {result.ticket_id} error {result.error}")
 
     return sorted(results, key=lambda row: row.ticket_id)
+
+
+def evaluate_one_with_retries(
+    item: EvaluationItem,
+    *,
+    fetch_count: int,
+    historical_faiss_dir: str,
+    historical_search_backend: str | None,
+    historical_azure_index_name: str | None,
+    exclude_source_ticket: bool,
+    retries: int,
+    retry_backoff_seconds: float,
+) -> TicketMetrics:
+    attempts = max(1, int(retries) + 1)
+    last_exc: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return evaluate_one(
+                item,
+                fetch_count=fetch_count,
+                historical_faiss_dir=historical_faiss_dir,
+                historical_search_backend=historical_search_backend,
+                historical_azure_index_name=historical_azure_index_name,
+                exclude_source_ticket=exclude_source_ticket,
+            )
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts or not is_transient_gateway_error(exc):
+                raise
+            delay = max(0.0, float(retry_backoff_seconds)) * (2 ** (attempt - 1))
+            print(
+                f"[{item.ticket_id}] transient gateway error; retry "
+                f"{attempt}/{attempts - 1} in {delay:.1f}s: {exc}"
+            )
+            time.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
 
 
 def evaluate_one(
@@ -428,6 +501,25 @@ def evaluate_one(
         merged_candidate_count=len(payload.get("merged_candidate_value_streams", []) or []),
         historical_hit_count=len(payload.get("historical_ticket_hits", []) or []),
         excluded_ticket_ids=list(payload.get("historical_excluded_ticket_ids", []) or []),
+    )
+
+
+def is_transient_gateway_error(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "504",
+            "gateway time-out",
+            "gateway timeout",
+            "timed out",
+            "timeout",
+            "temporarily unavailable",
+            "502",
+            "503",
+            "429",
+            "500",
+        )
     )
 
 

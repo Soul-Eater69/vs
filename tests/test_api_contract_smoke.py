@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from pathlib import Path
 from pydantic import ValidationError
+import asyncio
 import shutil
 
 from vs_app.api.routes import rag
@@ -74,3 +75,16 @@ def test_idea_cards_list_and_text_extract(monkeypatch) -> None:
         assert extract_response.json()["text"] == "uploaded idea card"
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_condense_fallback_returns_cleaned_text_on_timeout(monkeypatch) -> None:
+    async def run() -> tuple[str, list[str]]:
+        def slow_condense(_raw: str) -> str:
+            raise TimeoutError("slow")
+
+        return await rag._condense_or_fallback(slow_condense, "raw", "cleaned query")
+
+    condensed, warnings = asyncio.run(run())
+
+    assert condensed == "cleaned query"
+    assert "using cleaned idea-card text" in warnings[0]

@@ -25,6 +25,7 @@ _HISTORICAL_AZURE_INDEX = os.environ.get(
     "historical-ticket-summaries",
 )
 _GROUND_TRUTH_SOURCE = os.environ.get("RAG_GROUND_TRUTH_SOURCE", "azure")
+_CONDENSE_TIMEOUT_SECONDS = float(os.environ.get("RAG_CONDENSE_TIMEOUT_SECONDS", "45"))
 
 
 def _sse(event: str, data: dict) -> str:
@@ -89,6 +90,23 @@ def _source_ticket_exclusions(request: ValueStreamRagRequest) -> list[str] | Non
     return [request.ticket_id]
 
 
+async def _condense_or_fallback(condense_idea_card, raw_text: str, cleaned_query: str) -> tuple[str, list[str]]:
+    warnings: list[str] = []
+    try:
+        condensed = await asyncio.wait_for(
+            asyncio.to_thread(condense_idea_card, raw_text),
+            timeout=max(1.0, _CONDENSE_TIMEOUT_SECONDS),
+        )
+        return condensed, warnings
+    except asyncio.TimeoutError:
+        warnings.append(
+            f"Condense step timed out after {_CONDENSE_TIMEOUT_SECONDS:.0f}s; using cleaned idea-card text."
+        )
+    except Exception as exc:
+        warnings.append(f"Condense step failed ({exc}); using cleaned idea-card text.")
+    return cleaned_query[:3500], warnings
+
+
 @router.post("/value-streams/stream")
 async def predict_value_streams_stream(
     request: ValueStreamRagRequest,
@@ -127,7 +145,11 @@ async def predict_value_streams_stream(
             # Step 2: Condense once. The same condensed query feeds semantic VS and historical retrieval.
             yield _sse("step", {"step": "condense", "label": "Condensing idea card for retrieval..."})
             cleaned_query = await asyncio.to_thread(clean_ppt_text, raw_text)
-            query_for_prompt = await asyncio.to_thread(condense_idea_card, raw_text)
+            query_for_prompt, warnings = await _condense_or_fallback(
+                condense_idea_card,
+                raw_text,
+                cleaned_query,
+            )
             retrieval_query = query_for_prompt or cleaned_query
 
             # Step 3: Semantic VS + historical FAISS both use the condensed query.
@@ -229,7 +251,7 @@ async def predict_value_streams_stream(
                     "cleaned_query": cleaned_query,
                     "query_for_prompt": query_for_prompt,
                 },
-                "warnings": [],
+                "warnings": warnings,
                 "evidence": historical.get("historical_value_stream_support", []),
                 "debug": debug,
                 "historical_excluded_ticket_ids": exclude_ids or [],

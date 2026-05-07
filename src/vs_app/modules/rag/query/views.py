@@ -36,9 +36,9 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
 
     cleaned = clean_opt_text(raw_text)
     prompt = build_structured_summary_prompt(ticket_id="QUERY", text=cleaned[:8000])
-    model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-idp")
+    model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-mini-idp")
     kwargs = {"model": model}
-    reasoning_effort = os.environ.get("CONDENSE_LLM_REASONING_EFFORT", "high")
+    reasoning_effort = os.environ.get("CONDENSE_LLM_REASONING_EFFORT", "low")
     if reasoning_effort:
         kwargs["extra_body"] = build_extra_body(reasoning_effort=reasoning_effort)
     reply = IDPChatOpenAI(**kwargs).invoke(input=prompt)

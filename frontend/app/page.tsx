@@ -759,9 +759,112 @@ function textValue(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+function numberValue(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function llmRowName(row: Record<string, unknown>) {
+  return textValue(row.entity_name ?? row.value_stream_name ?? row.name, 'Unnamed value stream');
+}
+
+function LlmPassRow({
+  row,
+  tone,
+  showConfidence = false,
+}: {
+  row: Record<string, unknown>;
+  tone: 'neutral' | 'sky' | 'green' | 'amber' | 'red';
+  showConfidence?: boolean;
+}) {
+  const name = llmRowName(row);
+  const confidence = numberValue(row.confidence);
+  const rankingScore = numberValue(row.ranking_score);
+  const semanticScore = numberValue(row.semantic_score);
+  const historicalStrength = numberValue(row.historical_strength);
+  const historicalBest = numberValue(row.best_support_score);
+  const supportCount = numberValue(row.support_count ?? row._support_count);
+  const lane = textValue(row.candidate_lane);
+  const statusReason = textValue(row.candidate_status_reason);
+  const bucket = textValue(row.bucket ?? row.candidate_source);
+  const historicalReasons = Array.isArray(row.historical_reasons) ? row.historical_reasons : [];
+  const note = textValue(row.reason)
+    || textValue(row.description)
+    || (historicalReasons.length ? textValue(historicalReasons[0]) : '');
+
+  return (
+    <div className={`rounded border px-3 py-2 ${
+      tone === 'green'
+        ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30'
+        : tone === 'red'
+          ? 'border-rose-200 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/25'
+          : 'border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900'
+    }`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 text-sm font-medium text-zinc-800 dark:text-zinc-100">{name}</div>
+        {showConfidence && confidence > 0 && (
+          <span className="shrink-0 text-xs font-semibold text-emerald-600 dark:text-emerald-300">{Math.round(confidence * 100)}%</span>
+        )}
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {bucket && <Pill tone={bucketTone(bucket)}>{bucket === 'semantic_plus_historical' ? 'merged' : bucket.replace(/_/g, ' ')}</Pill>}
+        {lane && <Pill tone={lane === 'historical_recall' ? 'amber' : lane === 'confirmed_direct' ? 'green' : 'sky'}>{lane.replace(/_/g, ' ')}</Pill>}
+        {statusReason && <Pill tone="neutral">{statusReasonLabel(statusReason) ?? statusReason}</Pill>}
+        {rankingScore > 0 && <Pill tone="green">rank {rankingScore.toFixed(3)}</Pill>}
+        {semanticScore > 0 && <Pill tone="sky">semantic {semanticScore.toFixed(3)}</Pill>}
+        {historicalStrength > 0 && <Pill tone="amber">hist strength {historicalStrength.toFixed(3)}</Pill>}
+        {historicalBest > 0 && <Pill tone="amber">historic {historicalBest.toFixed(3)}</Pill>}
+        {supportCount > 0 && <Pill tone="amber">{supportCount} hits</Pill>}
+      </div>
+      {note && <div className="mt-1.5 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{note}</div>}
+    </div>
+  );
+}
+
+function LlmPassSection({
+  title,
+  rows,
+  emptyText,
+  tone,
+  showConfidence = false,
+}: {
+  title: string;
+  rows: Record<string, unknown>[];
+  emptyText: string;
+  tone: 'neutral' | 'sky' | 'green' | 'amber' | 'red';
+  showConfidence?: boolean;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+        <span>{title}</span>
+        <Pill tone={tone}>{rows.length}</Pill>
+      </div>
+      {rows.length ? (
+        <div className="idp-scroll max-h-[420px] space-y-1.5 overflow-auto pr-1">
+          {rows.map((row, index) => (
+            <LlmPassRow
+              key={`${llmRowName(row)}-${index}`}
+              row={row}
+              tone={tone}
+              showConfidence={showConfidence}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="rounded border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">{emptyText}</div>
+      )}
+    </div>
+  );
+}
+
 function LlmPassCard({ title, subtitle, raw }: { title: string; subtitle: string; raw: unknown }) {
+  const passed = rowsFromPass(raw, ['candidates_passed', 'passed_candidates', 'candidates_used', 'candidates']);
   const selected = rowsFromPass(raw, ['selected_value_streams', 'selected', 'value_streams']);
   const rejected = rowsFromPass(raw, ['rejected_candidates', 'rejected']);
+  const limits = asRecord(asRecord(raw)?.selection_limits);
+  const minSelect = numberValue(limits?.min_select);
+  const maxSelect = numberValue(limits?.max_select);
 
   return (
     <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3.5 dark:border-zinc-800 dark:bg-zinc-950/40">
@@ -770,9 +873,11 @@ function LlmPassCard({ title, subtitle, raw }: { title: string; subtitle: string
           <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{title}</div>
           <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{subtitle}</div>
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <Pill tone="sky">{passed.length} passed</Pill>
           <Pill tone="green">{selected.length} selected</Pill>
           <Pill tone="red">{rejected.length} rejected</Pill>
+          {maxSelect > 0 && <Pill tone="neutral">limit {minSelect}-{maxSelect}</Pill>}
         </div>
       </div>
 
@@ -780,45 +885,25 @@ function LlmPassCard({ title, subtitle, raw }: { title: string; subtitle: string
         <Empty text={`${title} output was not returned for this run.`} />
       ) : (
         <div className="space-y-3">
-          <div>
-            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Selected</div>
-            {selected.length ? (
-              <div className="space-y-1.5">
-                {selected.map((row, index) => {
-                  const name = textValue(row.entity_name ?? row.value_stream_name ?? row.name, 'Unnamed value stream');
-                  const confidence = Number(row.confidence ?? 0);
-                  return (
-                    <div key={`${name}-${index}`} className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-800 dark:bg-emerald-950/30">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="text-sm font-medium text-zinc-800 dark:text-zinc-100">{name}</div>
-                        {confidence > 0 && <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-300">{Math.round(confidence * 100)}%</span>}
-                      </div>
-                      {textValue(row.reason) && <div className="mt-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{textValue(row.reason)}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">No selected rows in this pass.</div>
-            )}
-          </div>
-
-          {rejected.length > 0 && (
-            <div>
-              <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Rejected</div>
-              <div className="space-y-1.5">
-                {rejected.slice(0, 8).map((row, index) => {
-                  const name = textValue(row.entity_name ?? row.value_stream_name ?? row.name, 'Unnamed value stream');
-                  return (
-                    <div key={`${name}-${index}`} className="rounded border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
-                      <div className="text-sm text-zinc-700 dark:text-zinc-200">{name}</div>
-                      {textValue(row.reason) && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{textValue(row.reason)}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <LlmPassSection
+            title="Passed to this LLM"
+            rows={passed}
+            emptyText="No candidate list was returned for this pass."
+            tone="sky"
+          />
+          <LlmPassSection
+            title="Selected by this pass"
+            rows={selected}
+            emptyText="No selected rows in this pass."
+            tone="green"
+            showConfidence
+          />
+          <LlmPassSection
+            title="Rejected / not selected"
+            rows={rejected}
+            emptyText="No rejected rows in this pass."
+            tone="red"
+          />
 
           <details className="rounded border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
             <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-zinc-600 dark:text-zinc-300">Raw pass payload</summary>

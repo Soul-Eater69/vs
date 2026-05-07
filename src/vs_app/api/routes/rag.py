@@ -22,7 +22,7 @@ _IDEA_CARDS_DIR = Path(os.environ.get("IDEA_CARDS_DIR", "idea_cards"))
 _HISTORICAL_BACKEND = os.environ.get("HISTORICAL_SEARCH_BACKEND", "azure")
 _HISTORICAL_AZURE_INDEX = os.environ.get(
     "HISTORICAL_AZURE_SEARCH_INDEX_NAME",
-    "historical-ticket-summaries",
+    "idp_idmt_data",
 )
 _GROUND_TRUTH_SOURCE = os.environ.get("RAG_GROUND_TRUTH_SOURCE", "azure")
 _CONDENSE_TIMEOUT_SECONDS = float(os.environ.get("RAG_CONDENSE_TIMEOUT_SECONDS", "45"))

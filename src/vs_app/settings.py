@@ -43,7 +43,7 @@ AZURE_SEARCH_ENDPOINT: str = os.environ.get("AZURE_SEARCH_ENDPOINT", "")
 AZURE_SEARCH_INDEX_NAME: str = os.environ.get("AZURE_SEARCH_INDEX_NAME", "value-streams")
 HISTORICAL_AZURE_SEARCH_INDEX_NAME: str = os.environ.get(
     "HISTORICAL_AZURE_SEARCH_INDEX_NAME",
-    "historical-ticket-summaries",
+    "idp_idmt_data",
 )
 HISTORICAL_SEARCH_BACKEND: str = os.environ.get("HISTORICAL_SEARCH_BACKEND", "azure")
 AZURE_SEARCH_API_KEY: str = os.environ.get("AZURE_SEARCH_API_KEY", "")

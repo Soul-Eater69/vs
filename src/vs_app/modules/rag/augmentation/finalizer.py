@@ -96,7 +96,12 @@ def _run_selection_passes(
 ) -> tuple[dict, dict]:
     def run_direct() -> dict:
         if not direct_candidates:
-            return {"selected_value_streams": [], "rejected_candidates": []}
+            return {
+                "selected_value_streams": [],
+                "rejected_candidates": [],
+                "candidates_passed": [],
+                "selection_limits": {"min_select": 0, "max_select": 0},
+            }
         return _run_selection_pass(
             gen_svc=generation_service_cls(),
             output_schema=output_schema,
@@ -107,7 +112,12 @@ def _run_selection_passes(
 
     def run_historical_gap() -> dict:
         if not historical_gap_candidates:
-            return {"selected_value_streams": [], "rejected_candidates": []}
+            return {
+                "selected_value_streams": [],
+                "rejected_candidates": [],
+                "candidates_passed": [],
+                "selection_limits": {"min_select": 0, "max_select": 0},
+            }
         return _run_selection_pass(
             gen_svc=generation_service_cls(),
             output_schema=output_schema,
@@ -140,9 +150,16 @@ def _run_selection_pass(
     from ..ranking.reranker import sanitize_selected
 
     if not candidates:
-        return {"selected_value_streams": [], "rejected_candidates": []}
+        return {
+            "selected_value_streams": [],
+            "rejected_candidates": [],
+            "candidates_passed": [],
+            "selection_limits": {"min_select": 0, "max_select": 0},
+        }
 
     if prompt_kind == "historical_gap":
+        min_select = 0
+        max_select = _historical_gap_selection_max(candidates)
         prompt = build_historical_gap_prompt(
             query_for_prompt=query_for_prompt,
             candidates=candidates,
@@ -150,8 +167,8 @@ def _run_selection_pass(
             historical_ticket_hits=historical_ticket_hits,
         )
         system_prompt = build_system_prompt(
-            min_select=0,
-            max_select=_historical_gap_selection_max(candidates),
+            min_select=min_select,
+            max_select=max_select,
         )
     else:
         prompt = build_direct_candidate_prompt(
@@ -170,7 +187,19 @@ def _run_selection_pass(
         system_prompt=system_prompt,
     )
     parsed = result.model_dump() if hasattr(result, "model_dump") else {"selected_value_streams": []}
-    return sanitize_selected(parsed, candidates)
+    parsed = sanitize_selected(parsed, candidates)
+    parsed["candidates_passed"] = [_to_pass_candidate(row) for row in candidates]
+    parsed["candidate_count"] = len(candidates)
+    parsed["selection_limits"] = {
+        "min_select": min_select,
+        "max_select": max_select,
+    }
+    parsed["rejected_candidates"] = _pass_rejected_candidates(
+        selected=parsed.get("selected_value_streams") or [],
+        candidates=candidates,
+        prompt_kind=prompt_kind,
+    )
+    return parsed
 
 
 def _direct_selection_max(candidates: int | List[dict]) -> int:
@@ -206,6 +235,69 @@ def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[
         else:
             direct_candidates.append(row)
     return direct_candidates, historical_gap_candidates
+
+
+def _to_pass_candidate(row: dict) -> dict:
+    return {
+        "entity_id": str(row.get("entity_id") or "").strip(),
+        "entity_name": str(row.get("entity_name") or "").strip(),
+        "description": str(row.get("description") or "").strip(),
+        "bucket": row.get("bucket"),
+        "candidate_lane": row.get("candidate_lane"),
+        "candidate_status": row.get("candidate_status"),
+        "candidate_status_reason": row.get("candidate_status_reason"),
+        "ranking_score": row.get("ranking_score"),
+        "semantic_score": row.get("semantic_score"),
+        "historical_strength": row.get("historical_strength"),
+        "support_count": row.get("support_count"),
+        "direct_count": row.get("direct_count"),
+        "implied_count": row.get("implied_count"),
+        "weighted_support_count": row.get("weighted_support_count"),
+        "best_support_score": row.get("best_support_score"),
+        "avg_support_score": row.get("avg_support_score"),
+        "from_semantic": row.get("from_semantic"),
+        "from_historical": row.get("from_historical"),
+        "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
+        "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
+        "historical_reasons": list(row.get("historical_reasons") or [])[:3],
+    }
+
+
+def _pass_rejected_candidates(
+    *,
+    selected: List[dict],
+    candidates: List[dict],
+    prompt_kind: str,
+) -> List[dict]:
+    selected_keys = set()
+    for row in selected:
+        selected_keys.update(_selection_keys(row))
+
+    rejected: List[dict] = []
+    for candidate in candidates:
+        if selected_keys.intersection(_selection_keys(candidate)):
+            continue
+        out = _to_pass_candidate(candidate)
+        out["reason"] = (
+            "Not selected by the historical LLM pass."
+            if prompt_kind == "historical_gap"
+            else "Not selected by the direct LLM pass."
+        )
+        rejected.append(out)
+    return rejected
+
+
+def _selection_keys(row: dict) -> set[str]:
+    keys: set[str] = set()
+    entity_id = _norm_key(str(row.get("entity_id") or ""))
+    if entity_id:
+        keys.add(f"id:{entity_id}")
+    entity_name = _norm_key(
+        str(row.get("entity_name") or row.get("value_stream_name") or row.get("name") or "")
+    )
+    if entity_name:
+        keys.add(f"name:{entity_name}")
+    return keys
 
 
 def _finalize_selected(

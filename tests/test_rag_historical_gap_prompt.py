@@ -5,9 +5,9 @@ from vs_app.modules.rag.augmentation.prompt_context import build_historical_gap_
 
 
 def test_split_llm_candidates_separates_historical_gap_lane() -> None:
-    direct = {"entity_name": "Configure, Price, and Quote", "candidate_lane": "confirmed_direct"}
-    semantic = {"entity_name": "Establish Product Offering", "candidate_lane": "semantic_direct"}
-    historical = {"entity_name": "Issue Payment", "candidate_lane": "historical_recall"}
+    direct = {"entity_name": "Configure, Price, and Quote", "lane": "semantic_plus_historical"}
+    semantic = {"entity_name": "Establish Product Offering", "lane": "semantic_only"}
+    historical = {"entity_name": "Issue Payment", "lane": "historical_only"}
 
     direct_candidates, historical_candidates = _split_llm_candidates([direct, historical, semantic])
 
@@ -23,7 +23,7 @@ def test_historical_gap_prompt_explains_pattern_induced_selection() -> None:
                 "entity_id": "vs-invoice",
                 "entity_name": "Manage Invoice and Payment Receipt",
                 "bucket": "historical_only",
-                "candidate_lane": "historical_recall",
+                "candidate_lane": "historical_only",
                 "from_historical": True,
                 "support_count": 10,
                 "direct_count": 0,
@@ -38,7 +38,7 @@ def test_historical_gap_prompt_explains_pattern_induced_selection() -> None:
                 "entity_id": "vs-member",
                 "entity_name": "Manage Member Care",
                 "bucket": "historical_only",
-                "candidate_lane": "historical_recall",
+                "candidate_lane": "historical_only",
                 "from_historical": True,
                 "support_count": 9,
                 "direct_count": 1,
@@ -69,7 +69,7 @@ def test_historical_gap_prompt_includes_top_faiss_ticket_context() -> None:
                 "entity_id": "vs-member",
                 "entity_name": "Manage Member Care",
                 "bucket": "historical_only",
-                "candidate_lane": "historical_recall",
+                "candidate_lane": "historical_only",
                 "from_historical": True,
                 "support_count": 9,
                 "direct_count": 1,
@@ -96,4 +96,3 @@ def test_historical_gap_prompt_includes_top_faiss_ticket_context() -> None:
     assert "Direct value streams: Manage Member Care" in prompt
     assert "Implied value streams: Establish Provider Network, Ensure Payment Integrity" in prompt
     assert "Ticket summary: This initiative proposes a roadmap" in prompt
-

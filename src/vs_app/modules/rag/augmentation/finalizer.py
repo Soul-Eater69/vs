@@ -14,10 +14,6 @@ from .prompt_context import (
 
 logger = logging.getLogger(__name__)
 
-_HISTORICAL_GAP_FILL_BUDGET = 4
-_CONFIRMED_MERGED_RESCUE_BUDGET = 12
-_HISTORICAL_LLM_KEEP_CONFIDENCE = 0.70
-
 
 def generate_value_streams(
     query_for_prompt: str,
@@ -25,17 +21,24 @@ def generate_value_streams(
     auto_selected: List[dict] | None = None,
     historical_ticket_hits: List[dict] | None = None,
 ) -> dict:
-    from vs_app.integrations.clients.generation_service import GenerationService
-
-    auto_selected = list(auto_selected or [])
+    auto_selected_ignored = list(auto_selected or [])
     if not llm_candidates:
         return {
-            "selected_value_streams": _dedupe_selected(auto_selected),
+            "selected_value_streams": [],
             "llm_selected_value_streams": [],
-            "raw_response": None,
+            "rescued_confirmed_merged_value_streams": [],
+            "rescued_historical_gap_fill_value_streams": [],
+            "dropped_historical_gap_fill_value_streams": [],
+            "raw_response": {
+                "selected_value_streams": [],
+                "direct_pass": _empty_pass(),
+                "historical_gap_pass": _empty_pass(),
+                "auto_selected_ignored": auto_selected_ignored,
+            },
             "candidates_used": [],
         }
 
+    from vs_app.integrations.clients.generation_service import GenerationService
     from vs_app.modules.prompts.loader import SelectionResult
 
     direct_candidates, historical_gap_candidates = _split_llm_candidates(llm_candidates)
@@ -53,34 +56,22 @@ def generate_value_streams(
         list(direct_parsed.get("selected_value_streams") or []),
         list(historical_parsed.get("selected_value_streams") or []),
     )
-    (
-        final_selected,
-        filtered_llm_selected,
-        rescued_confirmed_merged,
-        rescued_gap_fill,
-        dropped_gap_fill,
-    ) = _finalize_selected(
-        auto_selected=auto_selected,
-        llm_selected=llm_selected,
-        llm_candidates=llm_candidates,
-    )
+    final_selected = _merge_selected([], llm_selected)
 
-    parsed = {
-        "selected_value_streams": filtered_llm_selected,
+    raw_response = {
+        "selected_value_streams": final_selected,
         "direct_pass": direct_parsed,
         "historical_gap_pass": historical_parsed,
+        "auto_selected_ignored": auto_selected_ignored,
     }
-    parsed["rescued_confirmed_merged"] = rescued_confirmed_merged
-    parsed["rescued_historical_gap_fill"] = rescued_gap_fill
-    parsed["dropped_historical_gap_fill"] = dropped_gap_fill
 
     return {
         "selected_value_streams": final_selected,
         "llm_selected_value_streams": llm_selected,
-        "rescued_confirmed_merged_value_streams": rescued_confirmed_merged,
-        "rescued_historical_gap_fill_value_streams": rescued_gap_fill,
-        "dropped_historical_gap_fill_value_streams": dropped_gap_fill,
-        "raw_response": parsed,
+        "rescued_confirmed_merged_value_streams": [],
+        "rescued_historical_gap_fill_value_streams": [],
+        "dropped_historical_gap_fill_value_streams": [],
+        "raw_response": raw_response,
         "candidates_used": llm_candidates,
     }
 
@@ -96,12 +87,7 @@ def _run_selection_passes(
 ) -> tuple[dict, dict]:
     def run_direct() -> dict:
         if not direct_candidates:
-            return {
-                "selected_value_streams": [],
-                "rejected_candidates": [],
-                "candidates_passed": [],
-                "selection_limits": {"min_select": 0, "max_select": 0},
-            }
+            return _empty_pass()
         return _run_selection_pass(
             gen_svc=generation_service_cls(),
             output_schema=output_schema,
@@ -112,12 +98,7 @@ def _run_selection_passes(
 
     def run_historical_gap() -> dict:
         if not historical_gap_candidates:
-            return {
-                "selected_value_streams": [],
-                "rejected_candidates": [],
-                "candidates_passed": [],
-                "selection_limits": {"min_select": 0, "max_select": 0},
-            }
+            return _empty_pass()
         return _run_selection_pass(
             gen_svc=generation_service_cls(),
             output_schema=output_schema,
@@ -150,12 +131,7 @@ def _run_selection_pass(
     from ..ranking.reranker import sanitize_selected
 
     if not candidates:
-        return {
-            "selected_value_streams": [],
-            "rejected_candidates": [],
-            "candidates_passed": [],
-            "selection_limits": {"min_select": 0, "max_select": 0},
-        }
+        return _empty_pass()
 
     if prompt_kind == "historical_gap":
         min_select = 0
@@ -166,28 +142,25 @@ def _run_selection_pass(
             precedent_candidates=precedent_candidates,
             historical_ticket_hits=historical_ticket_hits,
         )
-        system_prompt = build_system_prompt(
-            min_select=min_select,
-            max_select=max_select,
-        )
     else:
+        min_select, max_select = _direct_selection_bounds(candidates)
         prompt = build_direct_candidate_prompt(
             query_for_prompt=query_for_prompt,
             candidates=candidates,
-        )
-        min_select, max_select = _direct_selection_bounds(candidates)
-        system_prompt = build_system_prompt(
-            min_select=min_select,
-            max_select=max_select,
         )
 
     result = gen_svc.generate_structured(
         query=prompt,
         output_schema=output_schema,
-        system_prompt=system_prompt,
+        system_prompt=build_system_prompt(min_select=min_select, max_select=max_select),
     )
     parsed = result.model_dump() if hasattr(result, "model_dump") else {"selected_value_streams": []}
     parsed = sanitize_selected(parsed, candidates)
+    candidates_by_key = _candidate_lookup(candidates)
+    parsed["selected_value_streams"] = [
+        _rewrite_score_reason(row, _candidate_for_selection(row, candidates_by_key))
+        for row in parsed.get("selected_value_streams", [])
+    ]
     parsed["candidates_passed"] = [_to_pass_candidate(row) for row in candidates]
     parsed["candidate_count"] = len(candidates)
     parsed["selection_limits"] = {
@@ -226,15 +199,55 @@ def _historical_gap_selection_max(candidates: int | List[dict]) -> int:
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:
     direct_candidates: List[dict] = []
-    historical_gap_candidates: List[dict] = []
+    historical_candidates: List[dict] = []
+
     for row in llm_candidates:
-        lane = str(row.get("candidate_lane") or "")
-        is_historical_only = bool(row.get("from_historical")) and not bool(row.get("from_semantic"))
-        if lane == "historical_recall" or is_historical_only:
-            historical_gap_candidates.append(row)
+        lane = str(row.get("lane") or row.get("candidate_lane") or row.get("bucket") or "")
+        if lane == "historical_only":
+            historical_candidates.append(row)
         else:
             direct_candidates.append(row)
-    return direct_candidates, historical_gap_candidates
+
+    return direct_candidates, historical_candidates
+
+
+def _merge_selected(auto_selected: List[dict], llm_selected: List[dict]) -> List[dict]:
+    merged = {}
+    for row in list(auto_selected) + list(llm_selected):
+        name = str(row.get("entity_name") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key not in merged:
+            merged[key] = dict(row)
+            continue
+
+        current = merged[key]
+        current["confidence"] = max(
+            float(current.get("confidence", 0.0) or 0.0),
+            float(row.get("confidence", 0.0) or 0.0),
+        )
+        reasons = [str(current.get("reason") or "").strip(), str(row.get("reason") or "").strip()]
+        current["reason"] = " ".join(dict.fromkeys(text for text in reasons if text))
+
+        for field in ("supporting_ticket_ids", "supporting_chunk_ids"):
+            merged_values = list(current.get(field) or [])
+            for value in row.get(field) or []:
+                if value not in merged_values:
+                    merged_values.append(value)
+            current[field] = merged_values[:5]
+
+    return _dedupe_selected(merged.values())
+
+
+def _empty_pass() -> dict:
+    return {
+        "selected_value_streams": [],
+        "rejected_candidates": [],
+        "candidates_passed": [],
+        "candidate_count": 0,
+        "selection_limits": {"min_select": 0, "max_select": 0},
+    }
 
 
 def _to_pass_candidate(row: dict) -> dict:
@@ -242,16 +255,20 @@ def _to_pass_candidate(row: dict) -> dict:
         "entity_id": str(row.get("entity_id") or "").strip(),
         "entity_name": str(row.get("entity_name") or "").strip(),
         "description": str(row.get("description") or "").strip(),
+        "lane": row.get("lane"),
         "bucket": row.get("bucket"),
         "candidate_lane": row.get("candidate_lane"),
         "candidate_status": row.get("candidate_status"),
         "candidate_status_reason": row.get("candidate_status_reason"),
         "ranking_score": row.get("ranking_score"),
         "semantic_score": row.get("semantic_score"),
+        "semantic_rank": row.get("semantic_rank"),
         "historical_strength": row.get("historical_strength"),
+        "supporting_ticket_count": row.get("supporting_ticket_count"),
         "support_count": row.get("support_count"),
         "direct_count": row.get("direct_count"),
         "implied_count": row.get("implied_count"),
+        "weighted_support": row.get("weighted_support"),
         "weighted_support_count": row.get("weighted_support_count"),
         "best_support_score": row.get("best_support_score"),
         "avg_support_score": row.get("avg_support_score"),
@@ -287,144 +304,6 @@ def _pass_rejected_candidates(
     return rejected
 
 
-def _selection_keys(row: dict) -> set[str]:
-    keys: set[str] = set()
-    entity_id = _norm_key(str(row.get("entity_id") or ""))
-    if entity_id:
-        keys.add(f"id:{entity_id}")
-    entity_name = _norm_key(
-        str(row.get("entity_name") or row.get("value_stream_name") or row.get("name") or "")
-    )
-    if entity_name:
-        keys.add(f"name:{entity_name}")
-    return keys
-
-
-def _finalize_selected(
-    *,
-    auto_selected: List[dict],
-    llm_selected: List[dict],
-    llm_candidates: List[dict],
-    confirmed_merged_rescue_budget: int = _CONFIRMED_MERGED_RESCUE_BUDGET,
-    historical_gap_fill_budget: int = _HISTORICAL_GAP_FILL_BUDGET,
-) -> tuple[List[dict], List[dict], List[dict], List[dict], List[dict]]:
-    candidates_by_key = _candidate_lookup(llm_candidates)
-    filtered_llm_selected: List[dict] = []
-    dropped_gap_fill: List[dict] = []
-
-    for row in llm_selected:
-        candidate = _candidate_for_selection(row, candidates_by_key)
-        if (
-            _is_historical_gap_fill_candidate(candidate)
-            and not _passes_gap_fill_evidence(candidate)
-            and not _passes_high_confidence_historical_selection(row, candidate)
-        ):
-            dropped_gap_fill.append(_with_gap_fill_reason(row, candidate, "weak_historical_gap_fill_evidence"))
-            continue
-        filtered_llm_selected.append(_rewrite_score_reason(row, candidate))
-
-    selected_so_far = _merge_selected(auto_selected, filtered_llm_selected)
-    rescued_confirmed_merged = _rescue_confirmed_merged(
-        llm_candidates=llm_candidates,
-        already_selected=selected_so_far,
-        limit=confirmed_merged_rescue_budget,
-    )
-    selected_so_far = _merge_selected(selected_so_far, rescued_confirmed_merged)
-    existing_gap_fill_count = sum(
-        1
-        for row in selected_so_far
-        if _is_historical_gap_fill_candidate(_candidate_for_selection(row, candidates_by_key))
-    )
-    remaining_budget = max(0, historical_gap_fill_budget - existing_gap_fill_count)
-    rescued_gap_fill = _rescue_historical_gap_fill(
-        llm_candidates=llm_candidates,
-        already_selected=selected_so_far,
-        limit=remaining_budget,
-    )
-    final_selected = _merge_selected(selected_so_far, rescued_gap_fill)
-    return final_selected, filtered_llm_selected, rescued_confirmed_merged, rescued_gap_fill, dropped_gap_fill
-
-
-def _merge_selected(auto_selected: List[dict], llm_selected: List[dict]) -> List[dict]:
-    merged = {}
-    for row in list(auto_selected) + list(llm_selected):
-        name = str(row.get("entity_name") or "").strip()
-        if not name:
-            continue
-        key = name.lower()
-        if key not in merged:
-            merged[key] = dict(row)
-            continue
-
-        current = merged[key]
-        current["confidence"] = max(
-            float(current.get("confidence", 0.0) or 0.0),
-            float(row.get("confidence", 0.0) or 0.0),
-        )
-        reasons = [str(current.get("reason") or "").strip(), str(row.get("reason") or "").strip()]
-        reasons = [text for text in reasons if text]
-        current["reason"] = " ".join(dict.fromkeys(reasons))
-
-        for field in ("supporting_ticket_ids", "supporting_chunk_ids"):
-            merged_values = list(current.get(field) or [])
-            for value in row.get(field) or []:
-                if value not in merged_values:
-                    merged_values.append(value)
-            current[field] = merged_values[:5]
-
-    return _dedupe_selected(merged.values())
-
-
-def _rescue_historical_gap_fill(
-    *,
-    llm_candidates: List[dict],
-    already_selected: List[dict],
-    limit: int,
-) -> List[dict]:
-    if limit <= 0:
-        return []
-
-    selected_keys = {
-        _norm_key(str(row.get("entity_name") or ""))
-        for row in already_selected
-        if str(row.get("entity_name") or "").strip()
-    }
-    rescue_pool = [
-        row
-        for row in llm_candidates
-        if _is_historical_gap_fill_candidate(row)
-        and _passes_gap_fill_evidence(row)
-        and _norm_key(str(row.get("entity_name") or "")) not in selected_keys
-    ]
-    rescue_pool.sort(key=_gap_fill_priority, reverse=True)
-    return [_to_gap_fill_selected(row) for row in rescue_pool[:limit]]
-
-
-def _rescue_confirmed_merged(
-    *,
-    llm_candidates: List[dict],
-    already_selected: List[dict],
-    limit: int,
-) -> List[dict]:
-    if limit <= 0:
-        return []
-
-    selected_keys = {
-        _norm_key(str(row.get("entity_name") or ""))
-        for row in already_selected
-        if str(row.get("entity_name") or "").strip()
-    }
-    rescue_pool = [
-        row
-        for row in llm_candidates
-        if _is_confirmed_merged_candidate(row)
-        and _passes_confirmed_merged_evidence(row)
-        and _norm_key(str(row.get("entity_name") or "")) not in selected_keys
-    ]
-    rescue_pool.sort(key=_confirmed_merged_priority, reverse=True)
-    return [_to_confirmed_merged_selected(row) for row in rescue_pool[:limit]]
-
-
 def _candidate_lookup(candidates: List[dict]) -> dict[str, dict]:
     lookup: dict[str, dict] = {}
     for row in candidates:
@@ -445,168 +324,30 @@ def _candidate_for_selection(row: dict | None, lookup: dict[str, dict]) -> dict:
     return lookup.get(f"id:{entity_id}") or lookup.get(f"name:{entity_name}") or {}
 
 
-def _is_historical_gap_fill_candidate(row: dict | None) -> bool:
-    if not row:
-        return False
-    return (
-        str(row.get("candidate_lane") or "") == "historical_recall"
-        and bool(row.get("from_historical"))
-        and not bool(row.get("from_semantic"))
+def _selection_keys(row: dict) -> set[str]:
+    keys: set[str] = set()
+    entity_id = _norm_key(str(row.get("entity_id") or ""))
+    if entity_id:
+        keys.add(f"id:{entity_id}")
+    entity_name = _norm_key(
+        str(row.get("entity_name") or row.get("value_stream_name") or row.get("name") or "")
     )
+    if entity_name:
+        keys.add(f"name:{entity_name}")
+    return keys
 
 
-def _is_confirmed_merged_candidate(row: dict | None) -> bool:
-    if not row:
-        return False
-    return (
-        str(row.get("candidate_lane") or "") == "confirmed_direct"
-        and bool(row.get("from_historical"))
-        and bool(row.get("from_semantic"))
+def _rewrite_score_reason(row: dict, candidate: dict) -> dict:
+    reason = str(row.get("reason") or "")
+    if not _has_score_language(reason):
+        return row
+
+    out = dict(row)
+    out["reason"] = _business_reason_for_candidate(
+        candidate,
+        fallback="Selected because the idea card has a defensible business connection to this value stream.",
     )
-
-
-def _passes_confirmed_merged_evidence(row: dict | None) -> bool:
-    if not row:
-        return False
-    support_count = int(row.get("support_count", 0) or 0)
-    semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
-    best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    weighted_support = float(row.get("weighted_support_count", support_count) or 0.0)
-
-    if weighted_support < 0.75:
-        return False
-    if support_count >= 5 and semantic_score >= 1.20 and best_score >= 0.60:
-        return True
-    if support_count >= 5 and semantic_score >= 1.00:
-        return True
-    return support_count >= 3 and semantic_score >= 1.35 and best_score >= 0.65
-
-
-def _passes_gap_fill_evidence(row: dict | None) -> bool:
-    if not row:
-        return False
-    support_count = int(row.get("support_count", 0) or 0)
-    direct_count = int(row.get("direct_count", 0) or 0)
-    implied_count = int(row.get("implied_count", 0) or 0)
-    best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    avg_score = float(row.get("avg_support_score", 0.0) or 0.0)
-    weighted_support = float(row.get("weighted_support_count", 0.0) or 0.0)
-    ticket_count = len({str(tid).strip() for tid in (row.get("supporting_ticket_ids") or []) if str(tid).strip()})
-
-    if (
-        ticket_count == 1
-        and direct_count >= 4
-        and support_count >= 4
-        and best_score >= 0.62
-        and avg_score >= 0.56
-        and weighted_support >= 0.75
-    ):
-        return True
-
-    if (
-        support_count >= 5
-        and direct_count >= 3
-        and best_score >= 0.62
-        and avg_score >= 0.56
-        and weighted_support >= 0.60
-    ):
-        return True
-
-    if (
-        support_count >= 8
-        and implied_count >= 5
-        and best_score >= 0.60
-        and avg_score >= 0.55
-        and weighted_support >= 0.60
-    ):
-        return True
-
-    if (
-        support_count >= 3
-        and ticket_count >= 2
-        and best_score >= 0.70
-        and avg_score >= 0.58
-        and weighted_support >= 0.75
-        and (direct_count >= 1 or implied_count >= 3)
-    ):
-        return True
-
-    return (
-        support_count >= 5
-        and ticket_count >= 2
-        and best_score >= 0.64
-        and avg_score >= 0.56
-        and weighted_support >= 0.75
-        and (direct_count >= 1 or implied_count >= 3)
-    )
-
-
-def _passes_high_confidence_historical_selection(selection: dict, candidate: dict | None) -> bool:
-    if not candidate:
-        return False
-    confidence = float(selection.get("confidence", 0.0) or 0.0)
-    return confidence >= _HISTORICAL_LLM_KEEP_CONFIDENCE
-
-
-def _gap_fill_priority(row: dict) -> tuple[float, float, float, int, int]:
-    return (
-        float(row.get("best_support_score", 0.0) or 0.0),
-        float(row.get("avg_support_score", 0.0) or 0.0),
-        float(row.get("weighted_support_count", 0.0) or 0.0),
-        int(row.get("direct_count", 0) or 0),
-        int(row.get("support_count", 0) or 0),
-    )
-
-
-def _confirmed_merged_priority(row: dict) -> tuple[int, float, float, float]:
-    return (
-        int(row.get("support_count", 0) or 0),
-        float(row.get("best_support_score", 0.0) or 0.0),
-        float(row.get("semantic_score", 0.0) or 0.0),
-        float(row.get("ranking_score", 0.0) or 0.0),
-    )
-
-
-def _to_confirmed_merged_selected(row: dict) -> dict:
-    support_count = int(row.get("support_count", 0) or 0)
-    semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
-    confidence = min(0.90, 0.52 + 0.08 * min(support_count, 4) + 0.06 * min(semantic_score, 2.0))
-    return {
-        "entity_id": str(row.get("entity_id") or "").strip(),
-        "entity_name": str(row.get("entity_name") or "").strip(),
-        "confidence": round(confidence, 4),
-        "reason": _business_reason_for_candidate(
-            row,
-            fallback=(
-                "Selected because the idea card directly aligns to this value stream and similar "
-                "prior work shows the same business pattern."
-            ),
-        ),
-        "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
-        "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
-        "selection_source": "confirmed_merged_rescue",
-    }
-
-
-def _to_gap_fill_selected(row: dict) -> dict:
-    support_count = int(row.get("support_count", 0) or 0)
-    best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    confidence = min(0.84, 0.44 + 0.08 * min(support_count, 4) + 0.08 * min(best_score, 1.0))
-    return {
-        "entity_id": str(row.get("entity_id") or "").strip(),
-        "entity_name": str(row.get("entity_name") or "").strip(),
-        "confidence": round(confidence, 4),
-        "reason": _business_reason_for_candidate(
-            row,
-            fallback=(
-                "Selected as an implied value stream because similar prior tickets show this "
-                "downstream business workflow recurring with the same initiative pattern."
-            ),
-        ),
-        "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
-        "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
-        "selection_source": "historical_gap_fill_rescue",
-    }
+    return out
 
 
 def _business_reason_for_candidate(row: dict, *, fallback: str) -> str:
@@ -624,19 +365,6 @@ def _business_reason_for_candidate(row: dict, *, fallback: str) -> str:
     if analog:
         return f"Selected because similar prior work shows {name or 'this value stream'} recurring in the same business pattern: {analog}"
     return fallback
-
-
-def _rewrite_score_reason(row: dict, candidate: dict) -> dict:
-    reason = str(row.get("reason") or "")
-    if not _has_score_language(reason):
-        return row
-
-    out = dict(row)
-    out["reason"] = _business_reason_for_candidate(
-        candidate,
-        fallback="Selected because the idea card has a defensible business connection to this value stream.",
-    )
-    return out
 
 
 def _has_score_language(reason: str) -> bool:
@@ -678,21 +406,6 @@ def _sentence_fragment(text: str) -> str:
         return ""
     fragment = fragment[:220].rstrip(" ,;:.")
     return fragment[:1].lower() + fragment[1:]
-
-
-def _with_gap_fill_reason(row: dict, candidate: dict, reason: str) -> dict:
-    out = dict(row)
-    out["drop_reason"] = reason
-    if candidate:
-        out["candidate_evidence"] = {
-            "support_count": candidate.get("support_count", 0),
-            "direct_count": candidate.get("direct_count", 0),
-            "implied_count": candidate.get("implied_count", 0),
-            "weighted_support_count": candidate.get("weighted_support_count", 0.0),
-            "best_support_score": candidate.get("best_support_score", 0.0),
-            "avg_support_score": candidate.get("avg_support_score", 0.0),
-        }
-    return out
 
 
 def _norm_key(value: str) -> str:

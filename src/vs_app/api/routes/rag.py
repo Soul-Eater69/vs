@@ -26,6 +26,8 @@ _HISTORICAL_AZURE_INDEX = os.environ.get(
 )
 _GROUND_TRUTH_SOURCE = os.environ.get("RAG_GROUND_TRUTH_SOURCE", "azure")
 _CONDENSE_TIMEOUT_SECONDS = float(os.environ.get("RAG_CONDENSE_TIMEOUT_SECONDS", "45"))
+_DEFAULT_SEMANTIC_FETCH_K = int(os.environ.get("RAG_SEMANTIC_FETCH_K", "40"))
+_DEFAULT_HISTORICAL_TICKET_FETCH_K = int(os.environ.get("RAG_HISTORICAL_TICKET_FETCH_K", "35"))
 
 
 def _sse(event: str, data: dict) -> str:
@@ -90,6 +92,16 @@ def _source_ticket_exclusions(request: ValueStreamRagRequest) -> list[str] | Non
     return [request.ticket_id]
 
 
+def _apply_final_output_count(generated: dict, final_output_count: int | None) -> None:
+    if final_output_count is None:
+        return
+    limit = max(0, int(final_output_count or 0))
+    generated["selected_value_streams"] = list(generated.get("selected_value_streams") or [])[:limit]
+    raw_response = generated.get("raw_response")
+    if isinstance(raw_response, dict):
+        raw_response["selected_value_streams"] = list(raw_response.get("selected_value_streams") or [])[:limit]
+
+
 async def _condense_or_fallback(condense_idea_card, raw_text: str, cleaned_query: str) -> tuple[str, list[str]]:
     warnings: list[str] = []
     try:
@@ -118,14 +130,19 @@ async def predict_value_streams_stream(
             filter_historical_result,
             retrieve_historical_support,
         )
-        from vs_app.modules.rag.augmentation.candidate_merger import merge_candidate_sources
+        from vs_app.modules.rag.augmentation.candidate_merger import (
+            CandidateWindowPolicy,
+            merge_candidate_sources,
+        )
         from vs_app.modules.rag.augmentation.finalizer import generate_value_streams
         from vs_app.modules.rag.fingerprints import build_rag_debug_fingerprints
 
         try:
-            top_k = max(request.top_k_historical, request.top_k_value_streams)
-            top_k_vs = min(max(12, top_k), 50)
-            max_llm_candidates = min(max(top_k_vs + 15, 40), 50)
+            semantic_fetch_k = min(max(1, request.semantic_fetch_k or _DEFAULT_SEMANTIC_FETCH_K), 50)
+            historical_ticket_fetch_k = min(
+                max(1, request.historical_ticket_fetch_k or _DEFAULT_HISTORICAL_TICKET_FETCH_K),
+                40,
+            )
             faiss_dir = str(_FAISS_DIR)
 
             # Step 1: Extract
@@ -159,7 +176,7 @@ async def predict_value_streams_stream(
                 "historical_faiss_dir": faiss_dir,
                 "historical_search_backend": _HISTORICAL_BACKEND,
                 "historical_azure_index_name": _HISTORICAL_AZURE_INDEX,
-                "max_ticket_hits": min(max(12, top_k), 40),
+                "max_ticket_hits": historical_ticket_fetch_k,
             }
             if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
                 historical_kwargs["exclude_ticket_ids"] = exclude_ids
@@ -167,7 +184,7 @@ async def predict_value_streams_stream(
                 asyncio.to_thread(
                     retrieve_semantic_candidates,
                     retrieval_query,
-                    top_k=top_k_vs,
+                    top_k=semantic_fetch_k,
                 )
             )
             historical_task = asyncio.create_task(
@@ -185,7 +202,8 @@ async def predict_value_streams_stream(
             augmented = merge_candidate_sources(
                 semantic_candidates,
                 historical.get("historical_value_stream_support", []),
-                max_llm_candidates=max_llm_candidates,
+                policy=CandidateWindowPolicy(),
+                max_llm_candidates=request.llm_candidate_window,
             )
 
             # Step 5: Direct + historical LLM selection run in parallel.
@@ -197,6 +215,7 @@ async def predict_value_streams_stream(
                 auto_selected=augmented["auto_selected_value_streams"],
                 historical_ticket_hits=historical.get("historical_ticket_hits", []),
             )
+            _apply_final_output_count(generated, request.final_output_count)
 
             # Step 6: Final response assembly
             yield _sse("step", {"step": "finalize", "label": "Finalizing selections..."})
@@ -235,6 +254,8 @@ async def predict_value_streams_stream(
                 "historical_value_stream_support": historical.get("historical_value_stream_support", []),
                 "candidate_value_streams": augmented["merged_candidates"],
                 "llm_candidates": generated["candidates_used"],
+                "candidate_window_policy": augmented.get("candidate_window_policy", {}),
+                "candidate_window_counts": augmented.get("candidate_window_counts", {}),
                 "historical_source": historical.get("historical_source", ""),
                 "raw_response": generated["raw_response"],
                 "direct_llm_output": (
@@ -281,6 +302,10 @@ async def predict_value_streams(
         fetch_count=max(request.top_k_historical, request.top_k_value_streams),
         top_k_historical=request.top_k_historical,
         top_k_value_streams=request.top_k_value_streams,
+        semantic_fetch_k=request.semantic_fetch_k,
+        historical_ticket_fetch_k=request.historical_ticket_fetch_k,
+        llm_candidate_window=request.llm_candidate_window,
+        final_output_count=request.final_output_count,
         historical_search_backend=_HISTORICAL_BACKEND,
         historical_azure_index_name=_HISTORICAL_AZURE_INDEX,
         use_llm_finalizer=request.use_llm_finalizer,

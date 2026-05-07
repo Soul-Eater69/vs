@@ -11,6 +11,10 @@ class ValueStreamRagRequest(BaseModel):
     source: Literal["jira"] | None = None
     top_k_historical: int = 20
     top_k_value_streams: int = 20
+    semantic_fetch_k: int = 40
+    historical_ticket_fetch_k: int = 35
+    llm_candidate_window: int = 30
+    final_output_count: int | None = None
     use_llm_finalizer: bool = True
     exclude_source_ticket_from_historical: bool = True
 

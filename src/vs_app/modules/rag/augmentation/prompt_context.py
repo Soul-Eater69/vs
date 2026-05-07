@@ -44,12 +44,8 @@ def format_candidate_blocks(candidates: List[dict]) -> str:
         lines = [
             f"{idx}. {row.get('entity_name', '')}",
             f"Entity ID: {row.get('entity_id', '')}",
-            f"Evidence bucket: {str(row.get('bucket') or '').strip() or 'unknown'}",
+            f"Lane: {_lane(row)}",
         ]
-
-        lane = str(row.get("candidate_lane") or "").strip()
-        if lane:
-            lines.append(f"Candidate lane: {lane}")
 
         description = str(row.get("description") or "").strip()
         if description:
@@ -92,7 +88,7 @@ def format_historical_precedents(candidates: List[dict], *, limit: int = 8) -> s
             add_precedent(precedents, ticket_id, name, inference_type, "")
 
     if not precedents:
-        return "No grouped precedent context was available; rely on candidate-level analog evidence."
+        return "See historical ticket context and candidate-level analog evidence below."
 
     rows = sorted(
         precedents.values(),
@@ -108,7 +104,7 @@ def format_historical_precedents(candidates: List[dict], *, limit: int = 8) -> s
 
 def format_historical_ticket_hits(ticket_hits: List[dict], *, limit: int = 10) -> str:
     if not ticket_hits:
-        return "No top FAISS ticket-hit context was available; rely on grouped precedents and candidate evidence."
+        return "No historical ticket context was available; rely on candidate-level analog evidence."
 
     blocks = []
     for idx, hit in enumerate(ticket_hits[:limit], start=1):
@@ -121,7 +117,7 @@ def format_historical_ticket_hits(ticket_hits: List[dict], *, limit: int = 10) -
             implied_names = fallback_names
 
         lines = [
-            f"{idx}. {ticket_id}{f' - {title}' if title and title != ticket_id else ''}",
+            f"H{idx}. {ticket_id}{f' - {title}' if title and title != ticket_id else ''}",
             f"   Similarity: {float(hit.get('best_score', 0.0) or 0.0):.4f}",
         ]
         label_source = str(hit.get("label_source") or "").strip()
@@ -205,15 +201,18 @@ def parse_analog_reason(reason: str) -> tuple[str, str, str] | None:
 
 def order_candidates(candidates: List[dict]) -> List[dict]:
     lane_priority = {
-        "confirmed_direct": 0,
-        "historical_recall": 1,
-        "semantic_direct": 2,
+        "semantic_plus_historical": 0,
+        "semantic_only": 1,
+        "historical_only": 2,
     }
     return sorted(
         list(candidates),
         key=lambda row: (
-            lane_priority.get(str(row.get("candidate_lane") or ""), 9),
-            -float(row.get("ranking_score", 0.0) or 0.0),
+            lane_priority.get(_lane(row), 9),
+            -float(row.get("semantic_score", 0.0) or 0.0),
+            -float(row.get("best_support_score", 0.0) or 0.0),
+            -float(row.get("weighted_support", row.get("weighted_support_count", 0.0)) or 0.0),
+            str(row.get("entity_name") or "").lower(),
         ),
     )
 
@@ -221,13 +220,23 @@ def order_candidates(candidates: List[dict]) -> List[dict]:
 def _historical_support_lines(row: dict, *, prefix: str = "Historical support") -> List[str]:
     direct_count = int(row.get("direct_count", 0) or 0)
     implied_count = int(row.get("implied_count", 0) or 0)
-    return [
+    supporting_ticket_count = int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0)
+    supporting_ticket_ids = _text_list(row.get("supporting_ticket_ids") or [])
+    weighted_support = float(row.get("weighted_support", row.get("weighted_support_count", 0.0)) or 0.0)
+    lines = [
         (
-            f"{prefix}: {int(row.get('support_count', 0) or 0)} ticket signals "
-            f"({direct_count} direct, {implied_count} implied), "
-            f"best similarity {float(row.get('best_support_score', 0.0) or 0.0):.4f}, "
-            f"average similarity {float(row.get('avg_support_score', 0.0) or 0.0):.4f}"
-        )
+            f"{prefix}: {supporting_ticket_count} unique tickets "
+            f"({direct_count} direct, {implied_count} implied)"
+        ),
+        f"Best historical similarity: {float(row.get('best_support_score', 0.0) or 0.0):.4f}",
+        f"Average historical similarity: {float(row.get('avg_support_score', 0.0) or 0.0):.4f}",
+    ]
+    if weighted_support:
+        lines.append(f"Weighted historical support: {weighted_support:.4f}")
+    if supporting_ticket_ids:
+        lines.append(f"Supporting tickets: {', '.join(supporting_ticket_ids[:5])}")
+    return [
+        *lines
     ]
 
 
@@ -255,3 +264,6 @@ def _text_list(values: Iterable[object]) -> List[str]:
         out.append(text)
     return out
 
+
+def _lane(row: dict) -> str:
+    return str(row.get("lane") or row.get("candidate_lane") or row.get("bucket") or "").strip() or "unknown"

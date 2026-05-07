@@ -21,6 +21,10 @@ class ValueStreamRagCommand:
     use_llm_finalizer: bool = True
     top_k_historical: int | None = None
     top_k_value_streams: int | None = None
+    semantic_fetch_k: int = 40
+    historical_ticket_fetch_k: int = 35
+    llm_candidate_window: int = 30
+    final_output_count: int | None = None
     exclude_source_ticket_from_historical: bool = True
 
 
@@ -108,6 +112,10 @@ class ValueStreamRagService:
             historical_azure_index_name=command.historical_azure_index_name,
             allowed_value_stream_names=command.allowed_value_stream_names,
             exclude_ticket_ids=exclude_ids,
+            semantic_fetch_k=command.semantic_fetch_k,
+            historical_ticket_fetch_k=command.historical_ticket_fetch_k,
+            llm_candidate_window=command.llm_candidate_window,
+            final_output_count=command.final_output_count,
         )
 
     async def _run_composed_flow(self, command: ValueStreamRagCommand) -> dict:

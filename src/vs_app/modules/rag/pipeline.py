@@ -9,21 +9,25 @@ def select_value_streams(
     query: str,
     *,
     fetch_count: int = 12,
+    semantic_fetch_k: int = 40,
+    historical_ticket_fetch_k: int = 35,
+    llm_candidate_window: int = 30,
+    final_output_count: int | None = None,
     historical_faiss_dir: str = "ticket_data/_faiss",
     historical_search_backend: str | None = None,
     historical_azure_index_name: str | None = None,
     allowed_value_stream_names: Optional[List[str]] = None,
     exclude_ticket_ids: Optional[List[str]] = None,
 ) -> dict:
-    from .augmentation.candidate_merger import merge_candidate_sources
+    from .augmentation.candidate_merger import CandidateWindowPolicy, merge_candidate_sources
     from .augmentation.finalizer import generate_value_streams
     from .fingerprints import build_rag_debug_fingerprints
     from .query.views import clean_ppt_text, condense_idea_card
     from .retrieval.historical_retriever import filter_historical_result, retrieve_historical_support
     from .retrieval.semantic_retriever import retrieve_semantic_candidates
 
-    top_k = min(max(12, fetch_count), 50)
-    max_llm_candidates = min(max(top_k + 15, 40), 50)
+    top_k = min(max(1, semantic_fetch_k), 50)
+    max_ticket_hits = min(max(1, historical_ticket_fetch_k), 40)
     cleaned_query = clean_ppt_text(query)
     query_for_prompt = condense_idea_card(query, max_chars=3500)
     retrieval_query = query_for_prompt or cleaned_query
@@ -42,7 +46,7 @@ def select_value_streams(
             historical_faiss_dir=historical_faiss_dir,
             historical_search_backend=historical_search_backend,
             historical_azure_index_name=historical_azure_index_name,
-            max_ticket_hits=min(max(12, fetch_count), 40),
+            max_ticket_hits=max_ticket_hits,
             exclude_ticket_ids=exclude_ticket_ids,
         )
         semantic_candidates = semantic_future.result()
@@ -52,7 +56,8 @@ def select_value_streams(
     augmented = merge_candidate_sources(
         semantic_candidates,
         historical.get("historical_value_stream_support", []),
-        max_llm_candidates=max_llm_candidates,
+        policy=CandidateWindowPolicy(),
+        max_llm_candidates=llm_candidate_window,
     )
     generated = generate_value_streams(
         query_for_prompt=retrieval_query,
@@ -60,6 +65,7 @@ def select_value_streams(
         auto_selected=augmented["auto_selected_value_streams"],
         historical_ticket_hits=historical.get("historical_ticket_hits", []),
     )
+    _apply_final_output_count(generated, final_output_count)
     raw_response = generated["raw_response"]
     debug = build_rag_debug_fingerprints(
         cleaned_query=cleaned_query,
@@ -95,6 +101,8 @@ def select_value_streams(
         "historical_value_stream_support": historical.get("historical_value_stream_support", []),
         "candidate_value_streams": augmented["merged_candidates"],
         "llm_candidates": generated["candidates_used"],
+        "candidate_window_policy": augmented.get("candidate_window_policy", {}),
+        "candidate_window_counts": augmented.get("candidate_window_counts", {}),
         "historical_source": historical.get("historical_source", ""),
         "raw_response": raw_response,
         "direct_llm_output": (
@@ -134,6 +142,16 @@ def _retrieve_historical_support_compat(
     if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
         kwargs["exclude_ticket_ids"] = exclude_ticket_ids
     return retrieve_historical_support(query, **kwargs)
+
+
+def _apply_final_output_count(generated: dict, final_output_count: int | None) -> None:
+    if final_output_count is None:
+        return
+    limit = max(0, int(final_output_count or 0))
+    generated["selected_value_streams"] = list(generated.get("selected_value_streams") or [])[:limit]
+    raw_response = generated.get("raw_response")
+    if isinstance(raw_response, dict):
+        raw_response["selected_value_streams"] = list(raw_response.get("selected_value_streams") or [])[:limit]
 
 
 def run_historical_rag_pipeline(

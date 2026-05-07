@@ -41,7 +41,7 @@ def test_condensed_query_feeds_semantic_and_historical_retrieval(monkeypatch) ->
     )
     monkeypatch.setattr(
         "vs_app.modules.rag.augmentation.candidate_merger.merge_candidate_sources",
-        lambda semantic, historical, max_llm_candidates: {
+        lambda semantic, historical, **kwargs: {
             "merged_candidates": semantic,
             "llm_candidates": semantic,
             "auto_selected_value_streams": [],

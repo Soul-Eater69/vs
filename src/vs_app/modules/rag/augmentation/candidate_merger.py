@@ -1,600 +1,326 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 import logging
-import math
-import re
-from typing import Dict, List
+from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
 
-def merge_candidate_sources(
-    semantic_candidates: List[dict],
-    historical_support: List[dict],
-    *,
-    max_llm_candidates: int = 24,
-    strong_support_count: int = 6,
-    strong_support_score: float = 0.78,
-    strong_confirmed_support_count: int = 4,
-    strong_confirmed_support_score: float = 0.70,
-    moderate_support_count: int = 2,
-    moderate_support_score: float = 0.45,
-    strong_implied_support_count: int = 8,
-    strong_implied_support_score: float = 0.75,
-) -> dict:
-    by_name: Dict[str, dict] = {}
+@dataclass(frozen=True)
+class CandidateWindowPolicy:
+    max_semantic_plus_historical: int = 8
+    max_semantic_only: int = 12
+    max_historical_only: int = 10
+    max_supporting_tickets_per_candidate: int = 3
 
-    for row in semantic_candidates:
+    @property
+    def max_llm_candidates(self) -> int:
+        return (
+            self.max_semantic_plus_historical
+            + self.max_semantic_only
+            + self.max_historical_only
+        )
+
+
+def merge_candidate_sources(
+    semantic_candidates: list[dict],
+    historical_support: list[dict],
+    *,
+    policy: CandidateWindowPolicy | None = None,
+    max_llm_candidates: int | None = None,
+    **legacy_kwargs,
+) -> dict:
+    """Merge semantic and historical evidence, then choose a bounded LLM window.
+
+    This function intentionally does not decide value-stream truth. It only organizes
+    evidence into lanes and controls prompt size.
+    """
+
+    if legacy_kwargs:
+        logger.debug("Ignoring legacy candidate threshold kwargs: %s", sorted(legacy_kwargs))
+
+    active_policy = policy or CandidateWindowPolicy()
+    if max_llm_candidates is not None and max_llm_candidates < active_policy.max_llm_candidates:
+        active_policy = _policy_with_total_cap(active_policy, max_llm_candidates)
+
+    by_name: dict[str, dict] = {}
+
+    for semantic_rank, row in enumerate(semantic_candidates, start=1):
         name = str(row.get("entity_name") or "").strip()
         if not name:
             continue
-        by_name[_norm_name(name)] = {
-            "entity_id": str(row.get("entity_id") or "").strip(),
-            "entity_name": name,
-            "description": str(row.get("description") or "").strip(),
-            "semantic_score": float(row.get("semantic_score", 0.0) or 0.0),
-            "from_semantic": True,
-            "from_historical": False,
-            "support_count": 0,
-            "direct_count": 0,
-            "implied_count": 0,
-            "weighted_support_count": 0.0,
-            "weighted_direct_count": 0.0,
-            "weighted_implied_count": 0.0,
-            "best_support_score": 0.0,
-            "avg_support_score": 0.0,
-            "supporting_ticket_ids": [],
-            "supporting_chunk_ids": [],
-            "historical_reasons": [],
-            "label_sources": [],
-            "bucket": "semantic_only",
-            "ranking_score": 0.0,
-            "candidate_lane": "unassigned",
-            "candidate_status": "unclassified",
-            "candidate_status_reason": "",
-        }
+        key = _norm_name(name)
+        by_name[key] = _base_candidate(
+            entity_id=str(row.get("entity_id") or "").strip(),
+            entity_name=name,
+            description=str(row.get("description") or "").strip(),
+        )
+        by_name[key].update(
+            {
+                "from_semantic": True,
+                "semantic_score": _float(row.get("semantic_score")),
+                "semantic_rank": semantic_rank,
+            }
+        )
 
     for row in historical_support:
         name = str(row.get("entity_name") or "").strip()
         if not name:
             continue
         key = _norm_name(name)
-        existing = by_name.get(key)
-        if existing is None:
-            existing = {
-                "entity_id": str(row.get("entity_id") or "").strip(),
-                "entity_name": name,
-                "description": "",
-                "semantic_score": 0.0,
-                "from_semantic": False,
-                "from_historical": True,
-                "support_count": 0,
-                "direct_count": 0,
-                "implied_count": 0,
-                "weighted_support_count": 0.0,
-                "weighted_direct_count": 0.0,
-                "weighted_implied_count": 0.0,
-                "best_support_score": 0.0,
-                "avg_support_score": 0.0,
-                "supporting_ticket_ids": [],
-                "supporting_chunk_ids": [],
-                "historical_reasons": [],
-                "label_sources": [],
-                "bucket": "historical_only",
-                "ranking_score": 0.0,
-                "candidate_lane": "unassigned",
-                "candidate_status": "unclassified",
-                "candidate_status_reason": "",
-            }
-            by_name[key] = existing
-
-        existing["from_historical"] = True
-        existing["support_count"] = int(row.get("support_count", 0) or 0)
-        existing["direct_count"] = int(row.get("direct_count", 0) or 0)
-        existing["implied_count"] = int(row.get("implied_count", 0) or 0)
-        existing["weighted_support_count"] = float(row.get("weighted_support_count", 0.0) or 0.0)
-        existing["weighted_direct_count"] = float(row.get("weighted_direct_count", 0.0) or 0.0)
-        existing["weighted_implied_count"] = float(row.get("weighted_implied_count", 0.0) or 0.0)
-        existing["best_support_score"] = float(row.get("best_support_score", 0.0) or 0.0)
-        existing["avg_support_score"] = float(row.get("avg_support_score", 0.0) or 0.0)
-        existing["supporting_ticket_ids"] = list(row.get("supporting_ticket_ids") or [])
-        existing["supporting_chunk_ids"] = list(row.get("supporting_chunk_ids") or [])
-        existing["historical_reasons"] = list(row.get("historical_reasons") or [])[:3]
-        existing["label_sources"] = list(row.get("label_sources") or [])
+        existing = by_name.setdefault(
+            key,
+            _base_candidate(
+                entity_id=str(row.get("entity_id") or "").strip(),
+                entity_name=name,
+                description=str(row.get("description") or "").strip(),
+            ),
+        )
         if not existing.get("entity_id"):
             existing["entity_id"] = str(row.get("entity_id") or "").strip()
+        if not existing.get("description"):
+            existing["description"] = str(row.get("description") or "").strip()
+
+        supporting_ticket_ids = _unique_text(row.get("supporting_ticket_ids") or [])
+        supporting_ticket_count = (
+            len(supporting_ticket_ids)
+            if supporting_ticket_ids
+            else int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0)
+        )
+        weighted_support = _weighted_support(row, supporting_ticket_count)
+
+        existing.update(
+            {
+                "from_historical": True,
+                "supporting_ticket_count": supporting_ticket_count,
+                "support_count": supporting_ticket_count,
+                "direct_count": int(row.get("direct_count", 0) or 0),
+                "implied_count": int(row.get("implied_count", 0) or 0),
+                "best_support_score": _float(row.get("best_support_score")),
+                "avg_support_score": _float(row.get("avg_support_score")),
+                "weighted_support": weighted_support,
+                "weighted_support_count": weighted_support,
+                "weighted_direct_count": _float(row.get("weighted_direct_count")),
+                "weighted_implied_count": _float(row.get("weighted_implied_count")),
+                "supporting_ticket_ids": supporting_ticket_ids[
+                    : active_policy.max_supporting_tickets_per_candidate
+                ],
+                "supporting_chunk_ids": _unique_text(row.get("supporting_chunk_ids") or [])[
+                    : active_policy.max_supporting_tickets_per_candidate
+                ],
+                "historical_reasons": _unique_text(row.get("historical_reasons") or [])[
+                    : active_policy.max_supporting_tickets_per_candidate
+                ],
+                "label_sources": _unique_text(row.get("label_sources") or []),
+            }
+        )
 
     merged = list(by_name.values())
     for row in merged:
-        if row["from_semantic"] and row["from_historical"]:
-            row["bucket"] = "semantic_plus_historical"
-        elif row["from_semantic"]:
-            row["bucket"] = "semantic_only"
-        else:
-            row["bucket"] = "historical_only"
-        row["historical_strength"] = _historical_strength(row)
-        row["ranking_score"] = _ranking_score(row)
-        row["candidate_lane"] = _candidate_lane(row)
+        lane = assign_lane(row)
+        row["lane"] = lane
+        row["bucket"] = lane
+        row["candidate_lane"] = lane
+        row["ranking_score"] = 0.0
+        row["historical_strength"] = 0.0
 
-    merged.sort(
-        key=lambda row: float(row.get("ranking_score", 0.0) or 0.0),
-        reverse=True,
-    )
+    semantic_plus = sorted(
+        [row for row in merged if row["lane"] == "semantic_plus_historical"],
+        key=_sort_semantic_plus_historical,
+    )[: active_policy.max_semantic_plus_historical]
+    semantic_only = sorted(
+        [row for row in merged if row["lane"] == "semantic_only"],
+        key=_sort_semantic_only,
+    )[: active_policy.max_semantic_only]
+    historical_only = sorted(
+        [row for row in merged if row["lane"] == "historical_only"],
+        key=_sort_historical_only,
+    )[: active_policy.max_historical_only]
 
-    auto_selected: List[dict] = []
-    llm_candidate_pool: Dict[str, List[dict]] = {
-        "confirmed_direct": [],
-        "historical_recall": [],
-        "semantic_direct": [],
-    }
+    llm_candidates = semantic_plus + semantic_only + historical_only
+    llm_keys = {_norm_name(str(row.get("entity_name") or "")) for row in llm_candidates}
 
     for row in merged:
-        if _should_auto_include_merged(
-            row,
-            support_count=strong_confirmed_support_count,
-            min_score=strong_confirmed_support_score,
-        ):
-            row["candidate_status"] = "auto_selected"
-            row["candidate_status_reason"] = "cross_confirmed_semantic_and_historical"
-            auto_selected.append(_to_selected_merged(row))
-            continue
+        if _norm_name(str(row.get("entity_name") or "")) in llm_keys:
+            row["candidate_status"] = "sent_to_llm"
+            row["candidate_status_reason"] = "within_candidate_window"
+        else:
+            row["candidate_status"] = "outside_llm_window"
+            row["candidate_status_reason"] = "lane_window_cap"
 
-        if _should_auto_include(
-            row,
-            support_count=strong_support_count,
-            min_score=strong_support_score,
-            strong_implied_count=strong_implied_support_count,
-            strong_implied_score=strong_implied_support_score,
-        ):
-            row["candidate_status"] = "auto_selected"
-            row["candidate_status_reason"] = "strong_historical_support"
-            auto_selected.append(_to_selected_value_stream(row))
-            continue
-
-        lane = str(row.get("candidate_lane") or "")
-        if lane == "confirmed_direct":
-            llm_candidate_pool[lane].append(row)
-            continue
-
-        if lane == "historical_recall" and _should_send_historical_recall_to_llm(
-            row,
-            support_count=moderate_support_count,
-            min_score=moderate_support_score,
-        ):
-            llm_candidate_pool[lane].append(row)
-            continue
-
-        if lane == "semantic_direct" and _should_send_semantic_to_llm(row):
-            llm_candidate_pool[lane].append(row)
-            continue
-
-        row["candidate_status"] = "dropped_before_llm"
-        row["candidate_status_reason"] = "insufficient_support"
-
-    llm_candidates = _select_llm_candidates(
-        merged,
-        llm_candidate_pool,
-        max_llm_candidates=max_llm_candidates,
-    )
+    merged.sort(key=_sort_merged_for_debug)
 
     logger.info(
-        "[HIST-RAG] %d merged candidates -> %d auto-selected, %d for LLM (cap=%d)",
+        "[HIST-RAG] %d merged candidates -> 0 auto-selected, %d for LLM",
         len(merged),
-        len(auto_selected),
         len(llm_candidates),
-        max_llm_candidates,
     )
 
     return {
         "merged_candidates": merged,
-        "auto_selected_value_streams": auto_selected,
+        "auto_selected_value_streams": [],
         "llm_candidates": llm_candidates,
+        "candidate_window_policy": {
+            **asdict(active_policy),
+            "max_llm_candidates": active_policy.max_llm_candidates,
+        },
+        "candidate_window_counts": {
+            "semantic_plus_historical": len(semantic_plus),
+            "semantic_only": len(semantic_only),
+            "historical_only": len(historical_only),
+        },
     }
+
+
+def assign_lane(row: dict) -> str:
+    if row.get("from_semantic") and row.get("from_historical"):
+        return "semantic_plus_historical"
+    if row.get("from_semantic"):
+        return "semantic_only"
+    if row.get("from_historical"):
+        return "historical_only"
+    return "unknown"
+
+
+def historical_support_weight(score: float) -> float:
+    if score >= 0.80:
+        return 1.0
+    if score >= 0.70:
+        return 0.6
+    if score >= 0.60:
+        return 0.3
+    return 0.0
+
+
+def _base_candidate(*, entity_id: str, entity_name: str, description: str) -> dict:
+    return {
+        "entity_id": entity_id,
+        "entity_name": entity_name,
+        "description": description,
+        "lane": "unknown",
+        "bucket": "unknown",
+        "candidate_lane": "unknown",
+        "from_semantic": False,
+        "semantic_score": 0.0,
+        "semantic_rank": None,
+        "from_historical": False,
+        "supporting_ticket_count": 0,
+        "support_count": 0,
+        "direct_count": 0,
+        "implied_count": 0,
+        "best_support_score": 0.0,
+        "avg_support_score": 0.0,
+        "weighted_support": 0.0,
+        "weighted_support_count": 0.0,
+        "weighted_direct_count": 0.0,
+        "weighted_implied_count": 0.0,
+        "supporting_ticket_ids": [],
+        "supporting_chunk_ids": [],
+        "historical_reasons": [],
+        "label_sources": [],
+        "ranking_score": 0.0,
+        "historical_strength": 0.0,
+        "candidate_status": "outside_llm_window",
+        "candidate_status_reason": "lane_window_cap",
+    }
+
+
+def _policy_with_total_cap(policy: CandidateWindowPolicy, total: int) -> CandidateWindowPolicy:
+    total = max(0, int(total or 0))
+    if total >= policy.max_llm_candidates:
+        return policy
+
+    semantic_plus = min(policy.max_semantic_plus_historical, total)
+    remaining = total - semantic_plus
+    historical_only = min(policy.max_historical_only, max(0, remaining // 2))
+    semantic_only = max(0, remaining - historical_only)
+    if semantic_only > policy.max_semantic_only:
+        overflow = semantic_only - policy.max_semantic_only
+        semantic_only = policy.max_semantic_only
+        historical_only = min(policy.max_historical_only, historical_only + overflow)
+
+    return CandidateWindowPolicy(
+        max_semantic_plus_historical=semantic_plus,
+        max_semantic_only=semantic_only,
+        max_historical_only=historical_only,
+        max_supporting_tickets_per_candidate=policy.max_supporting_tickets_per_candidate,
+    )
+
+
+def _sort_semantic_plus_historical(row: dict) -> tuple:
+    return (
+        -_float(row.get("semantic_score")),
+        -_float(row.get("best_support_score")),
+        -_float(row.get("weighted_support", row.get("weighted_support_count"))),
+        -int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0),
+        str(row.get("entity_name") or "").lower(),
+    )
+
+
+def _sort_semantic_only(row: dict) -> tuple:
+    return (
+        -_float(row.get("semantic_score")),
+        str(row.get("entity_name") or "").lower(),
+    )
+
+
+def _sort_historical_only(row: dict) -> tuple:
+    return (
+        -_float(row.get("best_support_score")),
+        -_float(row.get("weighted_support", row.get("weighted_support_count"))),
+        -int(row.get("direct_count", 0) or 0),
+        -int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0),
+        -int(row.get("implied_count", 0) or 0),
+        -_float(row.get("avg_support_score")),
+        str(row.get("entity_name") or "").lower(),
+    )
+
+
+def _sort_merged_for_debug(row: dict) -> tuple:
+    lane = str(row.get("lane") or "")
+    if lane == "semantic_plus_historical":
+        lane_key = 0
+        detail_key = _sort_semantic_plus_historical(row)
+    elif lane == "semantic_only":
+        lane_key = 1
+        detail_key = _sort_semantic_only(row)
+    elif lane == "historical_only":
+        lane_key = 2
+        detail_key = _sort_historical_only(row)
+    else:
+        lane_key = 9
+        detail_key = (str(row.get("entity_name") or "").lower(),)
+    return (lane_key, *detail_key)
+
+
+def _weighted_support(row: dict, supporting_ticket_count: int) -> float:
+    if row.get("weighted_support") is not None:
+        return _float(row.get("weighted_support"))
+    if row.get("weighted_support_count") is not None:
+        return _float(row.get("weighted_support_count"))
+    return round(historical_support_weight(_float(row.get("best_support_score"))) * supporting_ticket_count, 4)
+
+
+def _float(value: object) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _norm_name(value: str) -> str:
     return " ".join((value or "").strip().lower().split())
 
 
-def _historical_strength(row: dict) -> float:
-    return (
-        float(row.get("best_support_score", 0.0) or 0.0)
-        + 0.18 * _weighted_support_value(row, "weighted_direct_count", "direct_count")
-        + 0.06 * _weighted_support_value(row, "weighted_implied_count", "implied_count")
-        + _label_source_adjustment(row)
-    )
-
-
-def _candidate_lane(row: dict) -> str:
-    if row.get("from_semantic") and row.get("from_historical"):
-        return "confirmed_direct"
-    if row.get("from_historical"):
-        return "historical_recall"
-    if row.get("from_semantic"):
-        return "semantic_direct"
-    return "weak_noise"
-
-
-def _ranking_score(row: dict) -> float:
-    semantic = float(row.get("semantic_score", 0.0) or 0.0)
-    hist = float(row.get("historical_strength", 0.0) or 0.0)
-    if row.get("from_semantic") and row.get("from_historical"):
-        return semantic + 0.25 * hist
-    if row.get("from_semantic"):
-        return semantic
-    return 0.70 * hist
-
-
-def _label_source_adjustment(row: dict) -> float:
-    sources = {str(value).strip() for value in (row.get("label_sources") or []) if str(value).strip()}
-    if not sources:
-        return 0.0
-    # Current generated summaries should use jira_issuelinks.
-    if "jira_issuelinks" in sources:
-        return 0.06
-    return 0.0
-
-
-def _should_auto_include(
-    row: dict,
-    *,
-    support_count: int,
-    min_score: float,
-    strong_implied_count: int,
-    strong_implied_score: float,
-) -> bool:
-    """Tier 2 (direct-tagged) and Tier 3 (heavy-implied) for historical-only rows.
-
-    No moderate fallback — anything that doesn't pass one of the named tiers
-    is sent to the LLM for judgment.
-    """
-    if row.get("from_semantic"):
-        return False
-
-    best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    avg_score = float(row.get("avg_support_score", 0.0) or 0.0)
-    direct_count = int(row.get("direct_count", 0) or 0)
-    total_count = int(row.get("support_count", 0) or 0)
-    weighted_total = _weighted_support_value(row, "weighted_support_count", "support_count")
-
-    # Tier 2: direct jira-tagged consensus. 3+ analog tickets explicitly
-    # tagged this VS in jira AND total support is meaningful AND peak score
-    # is reasonable.
-    if (
-        direct_count >= 4
-        and total_count >= support_count
-        and best_score >= min_score
-        and avg_score >= 0.65
-        and weighted_total >= 2.0
-    ):
-        return True
-
-    # Tier 3: heavy implied consensus. Many analogs, high peak, high
-    # average (this avg gate is the key discriminator — TPs have
-    # consistently-similar analogs, FPs have one peak hit and a noisy
-    # tail), and concentrated weighting (filters out broadly-tagged
-    # tickets).
-    if (
-        total_count >= strong_implied_count
-        and best_score >= strong_implied_score
-        and avg_score >= 0.65
-        and weighted_total >= 2.5
-    ):
-        return True
-
-    return False
-
-
-def _should_auto_include_merged(row: dict, *, support_count: int, min_score: float) -> bool:
-    """Tier 1: cross-confirmed (semantic + historical agree, both strong)."""
-    if not (row.get("from_semantic") and row.get("from_historical")):
-        return False
-    if float(row.get("semantic_score", 0.0) or 0.0) < 1.5:
-        return False
-    if float(row.get("best_support_score", 0.0) or 0.0) < min_score:
-        return False
-    if int(row.get("support_count", 0) or 0) < support_count:
-        return False
-    return True
-
-
-def _to_selected_merged(row: dict) -> dict:
-    semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
-    weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
-    confidence = min(0.95, 0.55 + 0.10 * min(semantic_score, 2.0) + 0.08 * min(weighted_support, 3.0))
-
-    reason = _business_reason_for_candidate(
-        row,
-        fallback=(
-            "Selected because the idea card directly aligns to this value stream and similar "
-            "prior tickets show the same business pattern."
-        ),
-    )
-
-    return {
-        "entity_id": str(row.get("entity_id") or "").strip(),
-        "entity_name": str(row.get("entity_name") or "").strip(),
-        "confidence": round(confidence, 4),
-        "reason": reason,
-        "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
-        "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
-    }
-
-
-def _should_send_historical_recall_to_llm(row: dict, *, support_count: int, min_score: float) -> bool:
-    """Admit historical-recall candidates based on repeated coherent analog patterns."""
-    total_count = int(row.get("support_count", 0) or 0)
-    direct_count = int(row.get("direct_count", 0) or 0)
-    implied_count = int(row.get("implied_count", 0) or 0)
-    best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    avg_score = float(row.get("avg_support_score", 0.0) or 0.0)
-    weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
-
-    if direct_count >= 2 and best_score >= max(min_score, 0.55):
-        return True
-
-    if total_count >= 3 and best_score >= 0.70 and avg_score >= 0.58:
-        return True
-
-    if implied_count >= 5 and best_score >= 0.72 and avg_score >= 0.60:
-        return True
-
-    # Source-ticket exclusion removes the strongest neighbor during leave-one-out
-    # testing. Keep repeated, coherent moderate evidence in the LLM lane so the
-    # historical pass can still adjudicate it instead of silently dropping it.
-    if (
-        total_count >= 5
-        and best_score >= 0.60
-        and avg_score >= 0.55
-        and (direct_count >= 1 or implied_count >= 5)
-    ):
-        return True
-
-    if total_count >= 8 and best_score >= 0.60 and avg_score >= 0.52:
-        return True
-
-    if total_count >= support_count:
-        return weighted_support >= max(1.0, support_count * 0.4)
-    return best_score >= min_score and weighted_support >= 0.5
-
-
-def _should_send_semantic_to_llm(row: dict) -> bool:
-    """Keep the direct-semantic lane focused on candidates with meaningful relevance."""
-    if not row.get("from_semantic"):
-        return False
-    return float(row.get("semantic_score", 0.0) or 0.0) >= 0.95
-
-
-def _to_selected_value_stream(row: dict) -> dict:
-    best_score = float(row.get("best_support_score", 0.0) or 0.0)
-    weighted_support = _weighted_support_value(row, "weighted_support_count", "support_count")
-    confidence = min(0.92, 0.38 + 0.12 * min(weighted_support, 4.0) + 0.10 * min(best_score, 1.0))
-
-    reason = _business_reason_for_candidate(
-        row,
-        fallback=(
-            "Selected as a historical recovery because similar prior tickets show this "
-            "business workflow recurring with the same initiative pattern."
-        ),
-    )
-
-    return {
-        "entity_id": str(row.get("entity_id") or "").strip(),
-        "entity_name": str(row.get("entity_name") or "").strip(),
-        "confidence": round(confidence, 4),
-        "reason": reason,
-        "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
-        "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
-    }
-
-
-def _weighted_support_value(row: dict, weighted_key: str, fallback_key: str) -> float:
-    weighted = row.get(weighted_key)
-    if weighted is not None:
-        return float(weighted or 0.0)
-    return float(row.get(fallback_key, 0.0) or 0.0)
-
-
-def _business_reason_for_candidate(row: dict, *, fallback: str) -> str:
-    name = str(row.get("entity_name") or "").strip()
-    description = _sentence_fragment(str(row.get("description") or "").strip())
-    analog = _first_analog_summary(row)
-
-    if description and analog:
-        return (
-            f"Selected because the idea card aligns to {description}. "
-            f"Similar prior work shows the same pattern: {analog}"
-        )
-    if description:
-        return f"Selected because the idea card aligns to {description}."
-    if analog:
-        return (
-            f"Selected because similar prior work shows {name or 'this value stream'} "
-            f"recurring in the same business pattern: {analog}"
-        )
-    return fallback
-
-
-def _first_analog_summary(row: dict) -> str:
-    for reason in row.get("historical_reasons") or []:
-        clean = _clean_analog_reason(str(reason))
-        if clean:
-            return clean[:260]
-    return ""
-
-
-def _clean_analog_reason(reason: str) -> str:
-    clean = " ".join((reason or "").split())
-    clean = re.sub(r"^\[[^\]]+\]\s*", "", clean)
-    return clean.strip()
-
-
-def _sentence_fragment(text: str) -> str:
-    fragment = " ".join((text or "").split()).strip()
-    if not fragment:
-        return ""
-    fragment = fragment[:220].rstrip(" ,;:.")
-    return fragment[:1].lower() + fragment[1:]
-
-
-def _select_llm_candidates(
-    merged: List[dict],
-    llm_candidate_pool: Dict[str, List[dict]],
-    *,
-    max_llm_candidates: int,
-) -> List[dict]:
-    selected_keys: set[str] = set()
-    selected: List[dict] = []
-
-    def select_row(row: dict, reason: str) -> None:
-        key = _norm_name(str(row.get("entity_name") or ""))
-        if not key or key in selected_keys:
-            return
-        selected_keys.add(key)
-        row["candidate_status"] = "sent_to_llm"
-        row["candidate_status_reason"] = reason
-        selected.append(row)
-
-    lane_quotas = _lane_quotas(max_llm_candidates)
-    lane_reasons = {
-        "confirmed_direct": "protected_confirmed_lane",
-        "historical_recall": "protected_historical_lane",
-        "semantic_direct": "protected_semantic_lane",
-    }
-
-    ordered_pool = {
-        lane: sorted(rows, key=_lane_priority, reverse=True)
-        for lane, rows in llm_candidate_pool.items()
-    }
-
-    for lane in ("confirmed_direct", "historical_recall", "semantic_direct"):
-        quota = min(len(ordered_pool.get(lane, [])), lane_quotas.get(lane, 0))
-        for row in ordered_pool.get(lane, [])[:quota]:
-            if len(selected) >= max_llm_candidates:
-                break
-            select_row(row, lane_reasons[lane])
-
-    if len(selected) < max_llm_candidates:
-        pending_keys = {
-            _norm_name(str(row.get("entity_name") or ""))
-            for lane_rows in llm_candidate_pool.values()
-            for row in lane_rows
-        }
-        overflow = sorted(
-            [
-                row
-                for lane_rows in ordered_pool.values()
-                for row in lane_rows
-                if _norm_name(str(row.get("entity_name") or "")) in pending_keys
-            ],
-            key=_overflow_priority,
-            reverse=True,
-        )
-        for row in overflow:
-            if len(selected) >= max_llm_candidates:
-                break
-            key = _norm_name(str(row.get("entity_name") or ""))
-            if key in selected_keys or key not in pending_keys:
-                continue
-            select_row(row, "within_llm_candidate_cap")
-
-    for lane_rows in llm_candidate_pool.values():
-        for row in lane_rows:
-            key = _norm_name(str(row.get("entity_name") or ""))
-            if key in selected_keys:
-                continue
-            row["candidate_status"] = "dropped_before_llm"
-            row["candidate_status_reason"] = "llm_candidate_cap"
-
-    return selected
-
-
-def _lane_quotas(total: int) -> Dict[str, int]:
-    if total <= 0:
-        return {
-            "confirmed_direct": 0,
-            "historical_recall": 0,
-            "semantic_direct": 0,
-        }
-
-    confirmed = min(max(1, math.ceil(total * 0.55)), 32)
-    historical = min(max(1, math.ceil(total * 0.30)), 18)
-
-    while confirmed + historical > total:
-        if confirmed > historical and confirmed > 1:
-            confirmed -= 1
-        elif historical > 1:
-            historical -= 1
-        else:
-            break
-
-    semantic = max(0, total - confirmed - historical)
-    if total >= 3 and semantic == 0:
-        if confirmed > historical and confirmed > 1:
-            confirmed -= 1
-        elif historical > 1:
-            historical -= 1
-        semantic = 1
-
-    return {
-        "confirmed_direct": confirmed,
-        "historical_recall": historical,
-        "semantic_direct": semantic,
-    }
-
-
-def _lane_priority(row: dict) -> tuple:
-    lane = str(row.get("candidate_lane") or "")
-    if lane == "historical_recall":
-        return _historical_lane_priority(row)
-    if lane == "confirmed_direct":
-        return _confirmed_lane_priority(row)
-    if lane == "semantic_direct":
-        return _semantic_lane_priority(row)
-    return (0.0,)
-
-
-def _historical_lane_priority(row: dict) -> tuple:
-    ticket_count = len(
-        {
-            str(ticket_id).strip().lower()
-            for ticket_id in (row.get("supporting_ticket_ids") or [])
-            if str(ticket_id).strip()
-        }
-    )
-    return (
-        ticket_count,
-        int(row.get("support_count", 0) or 0),
-        int(row.get("direct_count", 0) or 0),
-        float(row.get("best_support_score", 0.0) or 0.0),
-        float(row.get("avg_support_score", 0.0) or 0.0),
-        float(row.get("weighted_support_count", 0.0) or 0.0),
-        float(row.get("historical_strength", 0.0) or 0.0),
-        float(row.get("ranking_score", 0.0) or 0.0),
-    )
-
-
-def _confirmed_lane_priority(row: dict) -> tuple:
-    return (
-        float(row.get("ranking_score", 0.0) or 0.0),
-        float(row.get("semantic_score", 0.0) or 0.0),
-        int(row.get("support_count", 0) or 0),
-        float(row.get("best_support_score", 0.0) or 0.0),
-    )
-
-
-def _semantic_lane_priority(row: dict) -> tuple:
-    return (
-        float(row.get("semantic_score", 0.0) or 0.0),
-        float(row.get("ranking_score", 0.0) or 0.0),
-    )
-
-
-def _overflow_priority(row: dict) -> tuple:
-    lane = str(row.get("candidate_lane") or "")
-    lane_weight = {
-        "confirmed_direct": 3,
-        "historical_recall": 2,
-        "semantic_direct": 1,
-    }.get(lane, 0)
-    return (lane_weight, *_lane_priority(row))
+def _unique_text(values: Iterable[object]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out

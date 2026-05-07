@@ -394,18 +394,21 @@ function SelectionPane({ selected, rejected }: { selected: SelectedVS[]; rejecte
 }
 
 function scoreOf(c: Candidate) {
-  return Number(
-    c._aggregated_best_score
-    ?? c.score
-    ?? c.ranking_score
-    ?? c.semantic_score
-    ?? c.historical_strength
-    ?? c.best_support_score
-    ?? c.avg_support_score
-    ?? c["@search.reranker_score"]
-    ?? c["@search.score"]
-    ?? 0
-  ) || 0;
+  for (const value of [
+    c._aggregated_best_score,
+    c.score,
+    c.semantic_score,
+    c.best_support_score,
+    c.avg_support_score,
+    c["@search.reranker_score"],
+    c["@search.score"],
+    c.ranking_score,
+    c.historical_strength,
+  ]) {
+    const parsed = Number(value ?? 0);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 0;
 }
 
 function bucketTone(bucket?: string): 'neutral' | 'sky' | 'green' | 'amber' | 'red' {
@@ -426,6 +429,7 @@ function statusTone(status?: string): 'neutral' | 'sky' | 'green' | 'amber' | 'r
   if (status === 'auto_selected') return 'green';
   if (status === 'sent_to_llm') return 'sky';
   if (status === 'dropped_before_llm') return 'red';
+  if (status === 'outside_llm_window') return 'amber';
   return 'neutral';
 }
 
@@ -433,6 +437,7 @@ function statusLabel(status?: string) {
   if (status === 'auto_selected') return 'auto-selected';
   if (status === 'sent_to_llm') return 'sent to LLM';
   if (status === 'dropped_before_llm') return 'dropped before LLM';
+  if (status === 'outside_llm_window') return 'outside LLM window';
   return null;
 }
 
@@ -444,6 +449,8 @@ function statusReasonLabel(reason?: string) {
   if (reason === 'within_llm_candidate_cap') return 'inside LLM cap';
   if (reason === 'llm_candidate_cap') return 'cut by LLM cap';
   if (reason === 'insufficient_support') return 'insufficient support';
+  if (reason === 'within_candidate_window') return 'within candidate window';
+  if (reason === 'lane_window_cap') return 'lane window cap';
   return null;
 }
 
@@ -1083,8 +1090,10 @@ export default function Home() {
 
     try {
       const body: Record<string, unknown> = {
-        top_k_value_streams: count,
-        top_k_historical: count,
+        semantic_fetch_k: 40,
+        historical_ticket_fetch_k: 35,
+        llm_candidate_window: 30,
+        final_output_count: count,
         use_llm_finalizer: true,
         exclude_source_ticket_from_historical: excludeSourceTicketFromHistorical,
       };
@@ -1291,12 +1300,12 @@ export default function Home() {
               <div className="space-y-4">
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Historical RAG Candidates</span>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Final Output Count</span>
                     <Pill tone="sky">{count}</Pill>
                   </div>
                   <input type="range" min={5} max={maxCandidateCount} value={count} onChange={e => setCount(+e.target.value)} className="w-full accent-hcsc dark:accent-teal-400" />
                   <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                    Historical RAG can surface up to 50 value-stream candidates before the merge.
+                    Retrieval uses fixed defaults: 40 semantic candidates, 35 historical tickets, and a 30-candidate LLM window.
                   </p>
                 </div>
                 <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">

@@ -24,7 +24,7 @@ system_extension: |
   Decision policy:
   - Favor quality over quantity: prefer fewer well-supported selections over many marginal ones.
   - Prioritize recall for candidates with both semantic and historical support.
-  - Treat confirmed_direct candidates as strong review candidates, not automatic final selections.
+  - Treat semantic_plus_historical candidates as strong review candidates, not automatic final selections.
     Select them only when the current idea card or the analog summaries show material work in
     that value stream.
   - Include historical-only candidates when the analog evidence shows a defensible business
@@ -41,7 +41,7 @@ system_extension: |
   - Do not drop a distinct downstream workflow only because an upstream or neighboring workflow
     is also selected. However, do not select downstream or neighboring workflows by default.
     Select both only when each has independent, clearly relevant current-card or analog evidence.
-  - When the prompt marks a candidate as a gap-fill historical_recall candidate, give it real
+  - When the prompt marks a candidate as a historical_only candidate, give it real
     consideration before favoring a merely plausible semantic-only alternative.
   - If a candidate block lists "Potential overlap/conflict", use that as a cue to choose the
     better-supported neighbor rather than selecting both by default.
@@ -72,7 +72,7 @@ user: |
 
   SELECTION RULES:
   - Favor candidates with both semantic and historical support.
-  - For confirmed_direct candidates, select only when the current idea card or analog evidence
+  - For semantic_plus_historical candidates, select only when the current idea card or analog evidence
     materially supports the workflow. Do not use overlap alone as a reason to omit a distinct
     workflow, but also do not select every adjacent workflow by default.
   - For historical-only candidates, the analog evidence lines are your primary signal;

@@ -30,6 +30,7 @@ class JiraIngestionConfig:
     llm_max_output_tokens: int | None = None
     summary_input_char_limit: int = 20_000
     classification_input_char_limit: int = 20_000
+    enable_llm_prompt_sanitization_retry: bool = True
 
     entity_dict_path: str = "data/entity_dicts"
 

@@ -22,6 +22,43 @@ logger = logging.getLogger(__name__)
 
 _MAX_INPUT_CHARS = 20_000
 _MAX_OUTPUT_TOKENS = 1_200
+_CONTENT_FILTER_MARKERS = (
+    "content filter",
+    "content_filter",
+    "response was filtered",
+    "prompt triggering",
+)
+_PROMPT_FILTER_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"\b(sexual assault|rape|molestation|human trafficking|domestic violence|"
+            r"child abuse|elder abuse|abuse|assault)\b",
+            re.IGNORECASE,
+        ),
+        "safety-sensitive care topic",
+    ),
+    (
+        re.compile(
+            r"\b(suicide|suicidal|self[- ]?harm|overdose|opioid overdose)\b",
+            re.IGNORECASE,
+        ),
+        "behavioral health safety topic",
+    ),
+    (
+        re.compile(
+            r"\b(kill(?:ed|ing)?|murder|homicide|death|dead|fatal(?:ity|ities)?)\b",
+            re.IGNORECASE,
+        ),
+        "mortality or severe-harm topic",
+    ),
+    (
+        re.compile(
+            r"\b(sex|sexual|pregnancy|pregnant|maternity|reproductive)\b",
+            re.IGNORECASE,
+        ),
+        "family health",
+    ),
+)
 
 
 class SummaryExtractionError(RuntimeError):
@@ -47,7 +84,23 @@ def summarize_ticket(
         text=consolidated_text[:_input_char_limit(cfg, "summary_input_char_limit")],
     )
 
-    raw = _call_llm(prompt, llm_client, cfg)
+    try:
+        raw = _call_llm(prompt, llm_client, cfg)
+    except SummaryExtractionError as exc:
+        if not _should_retry_with_sanitized_prompt(exc, cfg):
+            raise
+        sanitized_text = sanitize_for_llm_prompt(consolidated_text)
+        if sanitized_text == consolidated_text:
+            raise
+        logger.warning(
+            "Retrying %s summary with sanitized prompt after content-filter response",
+            ticket_id,
+        )
+        prompt = build_structured_summary_prompt(
+            ticket_id=ticket_id,
+            text=sanitized_text[:_input_char_limit(cfg, "summary_input_char_limit")],
+        )
+        raw = _call_llm(prompt, llm_client, cfg)
     parsed = parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)
     output = _validate(SummaryOutput, parsed, ticket_id, SummaryExtractionError)
 
@@ -105,12 +158,34 @@ def classify_ticket_value_streams(
         text=consolidated_text[:_input_char_limit(cfg, "classification_input_char_limit")],
         value_streams="\n".join(f"- {name}" for name in normalized_names),
     )
-    raw = _call_llm(
-        prompt,
-        llm_client,
-        cfg,
-        error_cls=ValueStreamClassificationError,
-    )
+    try:
+        raw = _call_llm(
+            prompt,
+            llm_client,
+            cfg,
+            error_cls=ValueStreamClassificationError,
+        )
+    except ValueStreamClassificationError as exc:
+        if not _should_retry_with_sanitized_prompt(exc, cfg):
+            raise
+        sanitized_text = sanitize_for_llm_prompt(consolidated_text)
+        if sanitized_text == consolidated_text:
+            raise
+        logger.warning(
+            "Retrying %s value-stream classification with sanitized prompt after content-filter response",
+            ticket_id,
+        )
+        prompt = build_value_stream_classification_prompt(
+            ticket_id=ticket_id,
+            text=sanitized_text[:_input_char_limit(cfg, "classification_input_char_limit")],
+            value_streams="\n".join(f"- {name}" for name in normalized_names),
+        )
+        raw = _call_llm(
+            prompt,
+            llm_client,
+            cfg,
+            error_cls=ValueStreamClassificationError,
+        )
     parsed = _parse_json(raw, f"{ticket_id}:value_streams")
     output = _validate(
         VsClassificationResult,
@@ -210,6 +285,21 @@ def _output_token_limit(cfg: Any) -> int | None:
         limit = _MAX_OUTPUT_TOKENS
     return max(200, limit)
 
+
+def _should_retry_with_sanitized_prompt(exc: Exception, cfg: Any) -> bool:
+    if not bool(getattr(cfg, "enable_llm_prompt_sanitization_retry", True)):
+        return False
+    text = str(exc).lower()
+    return any(marker in text for marker in _CONTENT_FILTER_MARKERS)
+
+
+def sanitize_for_llm_prompt(text: str) -> str:
+    """Redact safety-filter-prone clinical wording while preserving business context."""
+    sanitized = str(text or "")
+    for pattern, replacement in _PROMPT_FILTER_REPLACEMENTS:
+        sanitized = pattern.sub(replacement, sanitized)
+    return sanitized
+
 def _parse_json(raw: str, ticket_id: str) -> dict:
     return parse_structured_summary_payload(raw, context_id=ticket_id, logger=logger)
 
@@ -247,5 +337,6 @@ __all__ = [
     "SummaryExtractionError",
     "ValueStreamClassificationError",
     "classify_ticket_value_streams",
+    "sanitize_for_llm_prompt",
     "summarize_ticket",
 ]

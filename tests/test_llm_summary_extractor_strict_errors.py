@@ -94,3 +94,31 @@ def test_summary_input_char_limit_comes_from_cfg(monkeypatch) -> None:
 
     assert "x" * 1000 in captured["prompt"]
     assert "x" * 1001 not in captured["prompt"]
+
+
+def test_content_filter_summary_retries_with_sanitized_prompt(monkeypatch) -> None:
+    prompts = []
+
+    def fake_complete_text(prompt, *args, **kwargs):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            raise RuntimeError("The response was filtered due to the prompt triggering Azure content filter")
+        return (
+            '{"summary_text":"summary","business_problem":"problem",'
+            '"business_capability":"capability","stakeholders":[],'
+            '"systems_and_products":[],"key_terms":[]}'
+        )
+
+    monkeypatch.setattr(extractor, "complete_text", fake_complete_text)
+
+    doc = summarize_ticket(
+        "IDMT-1",
+        "[DESCRIPTION]\nsexual assault program workflow",
+        object(),
+        Cfg(),
+    )
+
+    assert doc.summary_text == "summary"
+    assert "sexual assault" in prompts[0]
+    assert "sexual assault" not in prompts[1]
+    assert "safety-sensitive care topic" in prompts[1]

@@ -6,39 +6,98 @@ system: |
   short sentence (max ~140 characters) of business rationale. Do not output names or
   descriptions — names are filled in downstream from the entity_id.
 
-  This is a human review-pool selection task, not final truth certification.
-  The user requested {max_select} picks.
+  This is review-pool selection, not final truth certification. The user requested up to
+  {max_select} picks. Quality matters more than hitting the exact number — return only
+  candidates with a defensible business connection. The system will deterministically
+  top up any remaining slots from the highest-ranked unselected candidates.
 
-  Selection policy:
-  - Return exactly {max_select} picks whenever the candidate list contains at least that
-    many entries with any defensible evidence. Only return fewer when there genuinely are
-    not enough candidates with even weak but plausible evidence.
-  - Prefer recall heavily over precision; the human reviewer is the precision filter.
+  HOW TO READ THE CANDIDATE BLOCKS
+
+  Lanes (the "Lane:" line on each candidate):
+  - semantic_plus_historical: strongest review lane. Both current-card semantic match AND
+    historical analog support. Include unless the idea card or evidence clearly contradicts.
+  - semantic_only: include when current-card meaning supports the workflow, capability,
+    stakeholder impact, or downstream process.
+  - historical_only: candidate that semantic retrieval missed but past tickets repeatedly
+    associated with similar work. May be an implied gap-fill — do not reject only because
+    the wording differs from the idea card.
+
+  Analog evidence (the "Evidence:" / "Analog evidence" lines):
+  - "[ticket / direct]" means that ticket was explicitly tagged with this value stream.
+    Repeated direct analogs with relevant summaries are strong evidence.
+  - "[ticket / implied]" means the value stream was inferred from that ticket's functions
+    or downstream relationships. Treat as weaker unless multiple implied analogs agree.
+  - Multiple coherent implied analogs pointing at the same candidate can be enough when
+    the functional bridge is clear.
+  - If the analog summaries describe work from a different domain than the current idea
+    card, DISCOUNT the historical support even if the support count is high.
+
+  SELECTION POLICY
+
+  - Prefer recall over precision when there is defensible evidence; the human reviewer is
+    the final precision filter.
   - A candidate counts as defensible if it has any of: plausible semantic alignment,
-    historical/analog support, downstream/operational impact, stakeholder relevance,
-    or implied workflow connection.
-  - A candidate does not need to be the main purpose of the idea card.
-  - Use lower confidence for weaker or indirect candidates instead of dropping them.
+    coherent analog evidence, downstream/operational impact specific to the idea card,
+    stakeholder relevance, or a repeated implied pattern.
+  - A candidate does not need to be the main purpose of the idea card to qualify.
+  - Use lower confidence (0.30-0.54) for weaker or indirect candidates instead of dropping
+    them, but do not pad with candidates that have no defensible business connection.
   - Only pick entity_id values that appear in the candidate list. Do not invent IDs.
   - Order picks by descending priority (strongest first).
+  - You may return fewer than {max_select} when fewer candidates are genuinely defensible.
 
-  Lane guidance:
-  - semantic_plus_historical: strongest review lane; pick unless the idea card or evidence
-    clearly contradicts the candidate.
-  - semantic_only: pick when current-card meaning supports the business workflow,
-    capability, stakeholder impact, or downstream process.
-  - historical_only: pick when analog evidence shows a plausible repeated pattern,
-    downstream workflow, or implied operational work.
+  WHAT NOT TO PICK
 
-  Confidence guidance:
-  - 0.80-1.00 = strong direct alignment or very strong combined semantic/historical evidence.
-  - 0.55-0.79 = meaningful but not perfect fit; good review candidate.
-  - 0.30-0.54 = weak or indirect but plausible; include when review-pool space allows.
+  - Do not pick a stream only because it is adjacent, downstream, administratively related,
+    or appeared together with selected streams in past tickets. Adjacent ≠ relevant.
+  - Do not pick generic enterprise streams (e.g. "Align and Execute IT Strategy",
+    "Develop Mission, Vision, and Strategy", "Discover Business Insights") merely because
+    the card mentions a roadmap, modernization, phased plan, or analytics. Pick them only
+    when the work is actually that stream's core function, not a side-mention.
+  - Do not pick "Promote Community Health" or similar broad public-health streams unless
+    the analog evidence directly supports outreach/community-health work for THIS card.
+  - Do not pick streams whose analog evidence is from a different operational domain than
+    the current idea card.
 
-  Reason guidance:
-  - Keep each reason to one short sentence, ~140 characters max.
-  - Explain the business connection in plain language (workflow, stakeholder impact,
-    downstream operation, or analog pattern).
+  RELATED-BUT-DISTINCT STREAMS
+
+  - When two candidates represent closely related but distinct business domains
+    (e.g. "Manage X" vs "Administer X", "Establish X" vs "Maintain X"), pick only the one
+    with stronger direct evidence. Do not pick both unless each has independent,
+    clearly relevant current-card or analog evidence.
+  - Do not drop a distinct downstream workflow only because an upstream is also selected.
+    But also do not pick downstream/neighboring workflows by default.
+  - If a candidate block lists "Potential overlap/conflict", treat that as a cue to choose
+    the better-supported neighbor rather than picking both.
+
+  CALIBRATION EXAMPLES
+
+  Positive (pattern-induced selection):
+  - Idea card describes network steering, tiering, payment, invoice, utilization, or member
+    operations only indirectly, AND multiple similar past tickets carried a downstream
+    value stream with coherent analog summaries → INCLUDE that downstream stream as
+    implied gap-fill. Example: include "Manage Invoice and Payment Receipt" when several
+    similar tickets show recurring billing/payment receipt work, even if the current card
+    does not literally say "invoice".
+
+  Negative (generic false positive):
+  - Idea card mentions a roadmap, strategy, modernization, or phased plan → do NOT include
+    "Align and Execute IT Strategy" unless the work is actually IT strategy execution
+    rather than business capability delivery.
+  - High historical hits but analog summaries from a different domain → do NOT include.
+
+  CONFIDENCE GUIDANCE
+
+  - 0.85-1.00: strong direct alignment, or multiple direct analogs with clearly similar summaries.
+  - 0.65-0.84: meaningful but not perfect fit, or strong historical recovery with related analogs.
+  - 0.40-0.64: plausible but borderline; implied analogs with partial functional overlap.
+  - 0.30-0.39: weak but defensible; reviewer should validate.
+
+  REASON GUIDANCE
+
+  - One short sentence (max ~140 characters).
+  - Cite the business connection: which idea-card workflow, stakeholder impact, downstream
+    operation, or analog pattern makes the candidate relevant.
   - Do not cite scores, ranks, support counts, similarity values, or lane names.
 
   Output only data matching the provided schema. Each pick has entity_id, confidence, and reason.
@@ -48,13 +107,16 @@ user: |
 
   {query_for_prompt}
 
-  REQUESTED REVIEW POOL SIZE:
+  REQUESTED REVIEW POOL SIZE (upper bound):
   {requested_final_output_count}
 
   TASK:
-  Evaluate every candidate below and select exactly the requested review-pool size when
-  enough candidates have defensible evidence. Prefer recall and assign lower confidence to
-  weaker or indirect candidates rather than dropping them.
+  Evaluate every candidate below. Pick those with a defensible business connection to the
+  idea card — favor recall, but do not pad with candidates that have no real connection.
+  For historical-only candidates, the analog evidence is your primary signal; judge whether
+  the analog tickets describe work similar to the current idea card. Use lower confidence
+  for weaker or indirect candidates rather than dropping them. You may return fewer than
+  the requested size when fewer are genuinely defensible.
 
   CANDIDATE VALUE STREAMS:
 

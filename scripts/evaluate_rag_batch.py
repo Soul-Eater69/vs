@@ -82,6 +82,22 @@ class TicketMetrics:
     merged_candidate_count: int
     historical_hit_count: int
     excluded_ticket_ids: list[str]
+    output_count_mode: str = "fixed"
+    final_output_count: int = 0
+    gt_buffer: int = 0
+    runtime_final_output_count: int = 0
+    semantic_fetch_k: int = 0
+    historical_ticket_fetch_k: int = 0
+    llm_candidate_window: int = 0
+    candidate_count: int = 0
+    prompt_chars: int = 0
+    final_llm_ms: int = 0
+    total_ms: int = 0
+    candidate_window_semantic_plus_historical: int = 0
+    candidate_window_historical_only: int = 0
+    candidate_window_semantic_only: int = 0
+    selection_source_llm_pick: int = 0
+    selection_source_safe_backfill: int = 0
     error: str = ""
 
 
@@ -119,12 +135,16 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    sweep_counts = parse_sweep_counts(args.sweep_counts, args.max_output_count)
+
     started = datetime.now(timezone.utc)
     print(
         f"Evaluating {len(items)} tickets with concurrency={args.concurrency}, "
         f"top_k={args.fetch_count}, exclude_source={not args.include_source_ticket}, "
         f"min_truth_streams={args.min_ground_truth_streams}, "
-        f"historical_backend={args.historical_search_backend}"
+        f"historical_backend={args.historical_search_backend}, "
+        f"output_count_mode={args.output_count_mode}"
+        + (f", sweep_counts={sweep_counts}" if args.output_count_mode == "sweep" else "")
     )
 
     results = run_batch(
@@ -137,6 +157,12 @@ def main() -> int:
         exclude_source_ticket=not args.include_source_ticket,
         retries=args.retries,
         retry_backoff_seconds=args.retry_backoff_seconds,
+        output_count_mode=args.output_count_mode,
+        final_output_count=args.final_output_count,
+        gt_buffer=args.gt_buffer,
+        min_output_count=args.min_output_count,
+        max_output_count=args.max_output_count,
+        sweep_counts=sweep_counts,
     )
 
     summary = summarize(results)
@@ -154,6 +180,12 @@ def main() -> int:
         "retry_backoff_seconds": args.retry_backoff_seconds,
         "min_ground_truth_streams": args.min_ground_truth_streams,
         "exclude_source_ticket": not args.include_source_ticket,
+        "output_count_mode": args.output_count_mode,
+        "final_output_count": args.final_output_count,
+        "gt_buffer": args.gt_buffer,
+        "min_output_count": args.min_output_count,
+        "max_output_count": args.max_output_count,
+        "sweep_counts": sweep_counts if args.output_count_mode == "sweep" else None,
         "summary": summary,
         "results": [serialize_result(row) for row in results],
     }
@@ -163,9 +195,16 @@ def main() -> int:
     write_json(json_path, payload)
     write_csv(csv_path, results)
 
+    sweep_summary_path = None
+    if args.output_count_mode == "sweep":
+        sweep_summary_path = output_dir / "rag_sweep_summary.json"
+        write_json(sweep_summary_path, summarize_by_output_count(results))
+
     print_summary(summary)
     print(f"Wrote JSON: {json_path}")
     print(f"Wrote CSV:  {csv_path}")
+    if sweep_summary_path is not None:
+        print(f"Wrote sweep summary: {sweep_summary_path}")
     return 0
 
 
@@ -225,6 +264,47 @@ def parse_args() -> argparse.Namespace:
             "Default 2 avoids single-label tickets dominating precision/recall diagnostics."
         ),
     )
+    parser.add_argument(
+        "--output-count-mode",
+        choices=["fixed", "gt_buffer", "sweep"],
+        default="gt_buffer",
+        help=(
+            "How to choose final_output_count per example. "
+            "fixed = same count for all rows; "
+            "gt_buffer = len(ground_truth)+buffer; "
+            "sweep = run multiple fixed counts."
+        ),
+    )
+    parser.add_argument(
+        "--final-output-count",
+        type=int,
+        default=15,
+        help="Used when --output-count-mode fixed. UI default is 15.",
+    )
+    parser.add_argument(
+        "--gt-buffer",
+        type=int,
+        default=3,
+        help="Added to ground-truth count when --output-count-mode gt_buffer.",
+    )
+    parser.add_argument(
+        "--min-output-count",
+        type=int,
+        default=8,
+        help="Minimum final_output_count for gt_buffer mode.",
+    )
+    parser.add_argument(
+        "--max-output-count",
+        type=int,
+        default=25,
+        help="Maximum final_output_count for any mode.",
+    )
+    parser.add_argument(
+        "--sweep-counts",
+        type=str,
+        default="10,12,15,18,20",
+        help="Comma-separated final_output_count values for sweep mode.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no-shuffle", action="store_true")
     parser.add_argument(
@@ -249,6 +329,91 @@ def parse_args() -> argparse.Namespace:
 def apply_eval_llm_defaults() -> None:
     for key, value in EVAL_LLM_ENV_DEFAULTS.items():
         os.environ.setdefault(key, value)
+
+
+def clamp_int(value: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, int(value)))
+
+
+def resolve_final_output_count(
+    *,
+    ground_truth: list[str],
+    output_count_mode: str,
+    final_output_count: int,
+    gt_buffer: int,
+    min_output_count: int,
+    max_output_count: int,
+) -> int:
+    """Resolve the per-row final_output_count for non-sweep modes.
+
+    fixed     → user-supplied count, clamped to [1, max_output_count].
+    gt_buffer → len(ground_truth) + gt_buffer, clamped to [min, max].
+    """
+    if output_count_mode == "fixed":
+        return clamp_int(final_output_count, 1, max_output_count)
+    if output_count_mode == "gt_buffer":
+        return clamp_int(
+            len(ground_truth or []) + gt_buffer,
+            min_output_count,
+            max_output_count,
+        )
+    raise ValueError(
+        "resolve_final_output_count is not for sweep mode; iterate sweep_counts directly."
+    )
+
+
+def parse_sweep_counts(raw: str, max_output_count: int) -> list[int]:
+    counts: list[int] = []
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        counts.append(clamp_int(int(part), 1, max_output_count))
+
+    seen: set[int] = set()
+    out: list[int] = []
+    for count in counts:
+        if count in seen:
+            continue
+        seen.add(count)
+        out.append(count)
+    return out or [10, 12, 15, 18, 20]
+
+
+def extract_debug_fields(payload: dict) -> dict:
+    """Pull runtime/timing/prompt debug data from the pipeline payload, tolerating
+    the slight differences between the streaming-route shape and the pipeline shape.
+    """
+    debug = payload.get("debug") or {}
+    raw = payload.get("raw_response") or {}
+
+    runtime_config = (
+        payload.get("rag_runtime_config")
+        or debug.get("rag_runtime_config")
+        or {}
+    )
+    prompt_debug = debug.get("prompt_debug") or raw.get("prompt_debug") or {}
+    timing_ms = debug.get("timing_ms") or raw.get("timing_ms") or {}
+    candidate_window_counts = debug.get("candidate_window_counts") or {}
+
+    return {
+        "runtime_config": runtime_config if isinstance(runtime_config, dict) else {},
+        "prompt_debug": prompt_debug if isinstance(prompt_debug, dict) else {},
+        "timing_ms": timing_ms if isinstance(timing_ms, dict) else {},
+        "candidate_window_counts": (
+            candidate_window_counts if isinstance(candidate_window_counts, dict) else {}
+        ),
+    }
+
+
+def count_selection_sources(selected_rows: Iterable[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in selected_rows or []:
+        if not isinstance(row, dict):
+            continue
+        source = str(row.get("selection_source") or "unknown")
+        counts[source] = counts.get(source, 0) + 1
+    return counts
 
 
 def load_ground_truth(
@@ -370,12 +535,45 @@ def run_batch(
     exclude_source_ticket: bool,
     retries: int,
     retry_backoff_seconds: float,
+    output_count_mode: str,
+    final_output_count: int,
+    gt_buffer: int,
+    min_output_count: int,
+    max_output_count: int,
+    sweep_counts: list[int],
 ) -> list[TicketMetrics]:
-    max_workers = max(1, concurrency)
-    results: list[TicketMetrics] = []
+    """Schedule eval jobs per mode and execute in parallel.
 
+    fixed/gt_buffer → one job per item with the resolved count.
+    sweep           → one job per (item, count) pair so each ticket runs once
+                      per sweep value; output_count_mode is tagged
+                      ``sweep_fixed_<count>`` so summary can group by count.
+    """
+    max_workers = max(1, concurrency)
+
+    jobs: list[tuple[EvaluationItem, int, str, int]] = []
+    if output_count_mode == "sweep":
+        for item in items:
+            for count in sweep_counts:
+                jobs.append((item, count, f"sweep_fixed_{count}", 0))
+    else:
+        for item in items:
+            count = (
+                resolve_final_output_count(
+                    ground_truth=item.ground_truth,
+                    output_count_mode=output_count_mode,
+                    final_output_count=final_output_count,
+                    gt_buffer=gt_buffer,
+                    min_output_count=min_output_count,
+                    max_output_count=max_output_count,
+                )
+            )
+            buffer_used = gt_buffer if output_count_mode == "gt_buffer" else 0
+            jobs.append((item, count, output_count_mode, buffer_used))
+
+    results: list[TicketMetrics] = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_by_item = {
+        future_by_job = {
             executor.submit(
                 evaluate_one_with_retries,
                 item,
@@ -386,30 +584,39 @@ def run_batch(
                 exclude_source_ticket=exclude_source_ticket,
                 retries=retries,
                 retry_backoff_seconds=retry_backoff_seconds,
-            ): item
-            for item in items
+                final_output_count=count,
+                output_count_mode=mode_tag,
+                gt_buffer=buffer_used,
+            ): (item, count, mode_tag, buffer_used)
+            for (item, count, mode_tag, buffer_used) in jobs
         }
 
         completed = 0
-        total = len(items)
-        for future in as_completed(future_by_item):
-            item = future_by_item[future]
+        total = len(jobs)
+        for future in as_completed(future_by_job):
+            item, count, mode_tag, buffer_used = future_by_job[future]
             completed += 1
             try:
                 result = future.result()
             except Exception as exc:
-                result = failed_result(item, exc)
+                result = failed_result(
+                    item,
+                    exc,
+                    output_count_mode=mode_tag,
+                    final_output_count=count,
+                    gt_buffer=buffer_used,
+                )
             results.append(result)
             if result.status == "ok":
                 print(
-                    f"[{completed}/{total}] {result.ticket_id} "
+                    f"[{completed}/{total}] {result.ticket_id} n={result.final_output_count} "
                     f"{result.status} p={result.precision:.3f} r={result.recall:.3f} "
                     f"f1={result.f1:.3f} {result.elapsed_seconds:.1f}s"
                 )
             else:
                 print(f"[{completed}/{total}] {result.ticket_id} error {result.error}")
 
-    return sorted(results, key=lambda row: row.ticket_id)
+    return sorted(results, key=lambda row: (row.ticket_id, row.final_output_count))
 
 
 def evaluate_one_with_retries(
@@ -422,6 +629,9 @@ def evaluate_one_with_retries(
     exclude_source_ticket: bool,
     retries: int,
     retry_backoff_seconds: float,
+    final_output_count: int,
+    output_count_mode: str = "fixed",
+    gt_buffer: int = 0,
 ) -> TicketMetrics:
     attempts = max(1, int(retries) + 1)
     last_exc: BaseException | None = None
@@ -434,6 +644,9 @@ def evaluate_one_with_retries(
                 historical_search_backend=historical_search_backend,
                 historical_azure_index_name=historical_azure_index_name,
                 exclude_source_ticket=exclude_source_ticket,
+                final_output_count=final_output_count,
+                output_count_mode=output_count_mode,
+                gt_buffer=gt_buffer,
             )
         except Exception as exc:
             last_exc = exc
@@ -457,6 +670,9 @@ def evaluate_one(
     historical_search_backend: str | None,
     historical_azure_index_name: str | None,
     exclude_source_ticket: bool,
+    final_output_count: int,
+    output_count_mode: str = "fixed",
+    gt_buffer: int = 0,
 ) -> TicketMetrics:
     from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
     from vs_app.modules.rag.pipeline import select_value_streams
@@ -468,6 +684,7 @@ def evaluate_one(
     payload = select_value_streams(
         text,
         fetch_count=fetch_count,
+        final_output_count=final_output_count,
         historical_faiss_dir=historical_faiss_dir,
         historical_search_backend=historical_search_backend,
         historical_azure_index_name=historical_azure_index_name,
@@ -475,8 +692,16 @@ def evaluate_one(
     )
     elapsed = time.perf_counter() - start
 
-    predicted = extract_names(payload.get("selected_value_streams", []))
+    selected_rows = payload.get("selected_value_streams", []) or []
+    predicted = extract_names(selected_rows)
     metrics = compute_metrics(predicted, item.ground_truth)
+
+    debug_fields = extract_debug_fields(payload)
+    runtime_config = debug_fields["runtime_config"]
+    prompt_debug = debug_fields["prompt_debug"]
+    timing_ms = debug_fields["timing_ms"]
+    window_counts = debug_fields["candidate_window_counts"]
+    source_counts = count_selection_sources(selected_rows)
 
     return TicketMetrics(
         ticket_id=item.ticket_id,
@@ -496,11 +721,29 @@ def evaluate_one(
         true_positives=metrics["true_positives"],
         false_positives=metrics["false_positives"],
         false_negatives=metrics["false_negatives"],
-        selected_count=len(payload.get("selected_value_streams", []) or []),
+        selected_count=len(selected_rows),
         llm_candidate_count=len(payload.get("llm_candidates", []) or []),
         merged_candidate_count=len(payload.get("merged_candidate_value_streams", []) or []),
         historical_hit_count=len(payload.get("historical_ticket_hits", []) or []),
         excluded_ticket_ids=list(payload.get("historical_excluded_ticket_ids", []) or []),
+        output_count_mode=output_count_mode,
+        final_output_count=final_output_count,
+        gt_buffer=gt_buffer,
+        runtime_final_output_count=int(runtime_config.get("final_output_count") or 0),
+        semantic_fetch_k=int(runtime_config.get("semantic_fetch_k") or 0),
+        historical_ticket_fetch_k=int(runtime_config.get("historical_ticket_fetch_k") or 0),
+        llm_candidate_window=int(runtime_config.get("llm_candidate_window") or 0),
+        candidate_count=int(prompt_debug.get("candidate_count") or 0),
+        prompt_chars=int(prompt_debug.get("prompt_chars") or 0),
+        final_llm_ms=int(timing_ms.get("final_llm") or 0),
+        total_ms=int(timing_ms.get("total") or 0),
+        candidate_window_semantic_plus_historical=int(
+            window_counts.get("semantic_plus_historical") or 0
+        ),
+        candidate_window_historical_only=int(window_counts.get("historical_only") or 0),
+        candidate_window_semantic_only=int(window_counts.get("semantic_only") or 0),
+        selection_source_llm_pick=int(source_counts.get("llm_pick") or 0),
+        selection_source_safe_backfill=int(source_counts.get("safe_backfill") or 0),
     )
 
 
@@ -523,7 +766,14 @@ def is_transient_gateway_error(exc: BaseException) -> bool:
     )
 
 
-def failed_result(item: EvaluationItem, exc: BaseException) -> TicketMetrics:
+def failed_result(
+    item: EvaluationItem,
+    exc: BaseException,
+    *,
+    output_count_mode: str = "fixed",
+    final_output_count: int = 0,
+    gt_buffer: int = 0,
+) -> TicketMetrics:
     return TicketMetrics(
         ticket_id=item.ticket_id,
         file_name=item.path.name,
@@ -547,6 +797,9 @@ def failed_result(item: EvaluationItem, exc: BaseException) -> TicketMetrics:
         merged_candidate_count=0,
         historical_hit_count=0,
         excluded_ticket_ids=[],
+        output_count_mode=output_count_mode,
+        final_output_count=final_output_count,
+        gt_buffer=gt_buffer,
         error=f"{type(exc).__name__}: {exc}",
     )
 
@@ -603,6 +856,20 @@ def summarize(results: list[TicketMetrics]) -> dict[str, Any]:
         "false_positive_count": fp,
         "false_negative_count": fn,
         "avg_elapsed_seconds": round(average(row.elapsed_seconds for row in ok_rows), 3),
+    }
+
+
+def summarize_by_output_count(results: list[TicketMetrics]) -> dict[str, dict[str, Any]]:
+    """Group sweep-mode results by final_output_count and run summarize() per group."""
+    from collections import defaultdict
+
+    groups: dict[int, list[TicketMetrics]] = defaultdict(list)
+    for row in results:
+        groups[int(row.final_output_count or 0)].append(row)
+
+    return {
+        f"final_output_count={count}": summarize(group_rows)
+        for count, group_rows in sorted(groups.items())
     }
 
 
@@ -670,24 +937,40 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "file_name",
         "status",
         "elapsed_seconds",
+        "output_count_mode",
+        "final_output_count",
+        "gt_buffer",
+        "ground_truth_count",
+        "selected_count",
+        "predicted_count",
         "precision",
         "recall",
         "f1",
         "true_positive_count",
         "false_positive_count",
         "false_negative_count",
-        "predicted_count",
-        "ground_truth_count",
         "predicted_value_streams",
         "ground_truth_value_streams",
         "true_positives",
         "false_positives",
         "false_negatives",
-        "selected_count",
         "llm_candidate_count",
         "merged_candidate_count",
         "historical_hit_count",
         "excluded_ticket_ids",
+        "runtime_final_output_count",
+        "semantic_fetch_k",
+        "historical_ticket_fetch_k",
+        "llm_candidate_window",
+        "candidate_count",
+        "prompt_chars",
+        "final_llm_ms",
+        "total_ms",
+        "candidate_window_semantic_plus_historical",
+        "candidate_window_historical_only",
+        "candidate_window_semantic_only",
+        "selection_source_llm_pick",
+        "selection_source_safe_backfill",
         "error",
     ]
     with path.open("w", encoding="utf-8", newline="") as fh:

@@ -1102,7 +1102,7 @@ function TabBtn({ active, label, icon, count, onClick }: {
 export default function Home() {
   const [cards, setCards] = useState<IdeaCard[]>([]);
   const [selectedCardDocId, setSelectedCardDocId] = useState('');
-  const [count, setCount] = useState(20);
+  const [count, setCount] = useState(15);
   const [uploadedIdeaText, setUploadedIdeaText] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);

@@ -29,7 +29,10 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     # only modest latency cost.
     llm_candidate_window = min(40, max(25, math.ceil(requested * 1.75)))
     semantic_fetch_k = min(60, max(30, math.ceil(requested * 2.5)))
-    historical_ticket_fetch_k = min(40, max(20, math.ceil(requested * 1.6)))
+    # Historical fetch_k matters for sparse-tag value streams (Issue Payment, Manage
+    # Invoice and Payment Receipt, etc.) — they only appear in a small fraction of
+    # historical tickets, so we need a wide net to surface 2-3 evidence hits.
+    historical_ticket_fetch_k = min(60, max(35, math.ceil(requested * 2.5)))
 
     max_semantic_plus_historical = min(18, max(6, math.ceil(llm_candidate_window * 0.45)))
     max_historical_only = min(12, max(4, math.floor(llm_candidate_window * 0.27)))

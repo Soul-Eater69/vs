@@ -71,8 +71,27 @@ class SelectionResult(BaseModel):
     )
 
 
+# Slim schema for the review-pool pass: the model only picks IDs + confidence;
+# entity_name and reason are filled in deterministically post-call so the LLM
+# emits ~6x fewer output tokens, which dominates wall-clock latency.
+class ReviewPoolPick(BaseModel):
+    entity_id: str = Field(description="The entity ID of the picked value stream")
+    confidence: float = Field(
+        description="0.8-1.0 strong, 0.5-0.7 partial, 0.3-0.4 weak but plausible"
+    )
+
+
+class ReviewPoolPickResult(BaseModel):
+    picks: list[ReviewPoolPick] = Field(
+        default_factory=list,
+        description="Picked value streams from the candidate list, in priority order",
+    )
+
+
 __all__ = [
     "InferenceType",
+    "ReviewPoolPick",
+    "ReviewPoolPickResult",
     "SelectedValueStream",
     "SelectionResult",
     "VsClassificationItem",

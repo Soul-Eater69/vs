@@ -25,9 +25,8 @@ def generate_review_pool_value_streams(
 ) -> dict:
     from time import perf_counter
 
-    from ..ranking.reranker import sanitize_selected
     from vs_app.integrations.clients.generation_service import GenerationService
-    from vs_app.modules.prompts.loader import SelectionResult
+    from vs_app.modules.prompts.schemas.value_stream import ReviewPoolPickResult
 
     started = perf_counter()
     requested = max(1, int(final_output_count or 12))
@@ -66,24 +65,45 @@ def generate_review_pool_value_streams(
     )
     system_prompt = build_review_pool_system_prompt(max_select=max_select)
 
+    import os as _os
+    review_pool_effort = _os.environ.get("REVIEW_POOL_REASONING_EFFORT", "minimal")
     llm_started = perf_counter()
     result = GenerationService().generate_structured(
         query=prompt,
-        output_schema=SelectionResult,
+        output_schema=ReviewPoolPickResult,
         system_prompt=system_prompt,
-        reasoning_effort="low",
+        reasoning_effort=review_pool_effort,
     )
     llm_elapsed_ms = round((perf_counter() - llm_started) * 1000)
+    logger.info(
+        "[RAG] review_pool_llm: candidates=%d prompt_chars=%d system_chars=%d effort=%s elapsed_ms=%d",
+        len(candidates),
+        len(prompt),
+        len(system_prompt),
+        review_pool_effort,
+        llm_elapsed_ms,
+    )
 
-    parsed = result.model_dump() if hasattr(result, "model_dump") else {"selected_value_streams": []}
-    parsed = sanitize_selected(parsed, candidates)
-    candidates_by_key = _candidate_lookup(candidates)
-    parsed["selected_value_streams"] = [
-        _rewrite_score_reason(row, _candidate_for_selection(row, candidates_by_key))
-        for row in parsed.get("selected_value_streams", [])
-    ]
+    parsed = result.model_dump() if hasattr(result, "model_dump") else {"picks": []}
+    candidates_by_id = {
+        str(candidate.get("entity_id") or "").strip().lower(): candidate
+        for candidate in candidates
+        if str(candidate.get("entity_id") or "").strip()
+    }
+    selected: List[dict] = []
+    seen_ids: set[str] = set()
+    for pick in parsed.get("picks") or []:
+        pick_id = str(pick.get("entity_id") or "").strip().lower()
+        if not pick_id or pick_id in seen_ids:
+            continue
+        candidate = candidates_by_id.get(pick_id)
+        if not candidate:
+            logger.warning("[REVIEW_POOL] LLM returned unknown entity_id '%s'", pick_id)
+            continue
+        seen_ids.add(pick_id)
+        selected.append(_build_selected_row(candidate, float(pick.get("confidence") or 0.0)))
 
-    selected = _merge_selected([], list(parsed.get("selected_value_streams") or []))[:requested]
+    selected = selected[:requested]
     selected = _backfill_to_requested(selected, candidates, requested)
     rejected = _pass_rejected_candidates(
         selected=selected,
@@ -514,6 +534,20 @@ def _pass_rejected_candidates(
             out["reason"] = "Not selected by the direct LLM pass."
         rejected.append(out)
     return rejected
+
+
+def _build_selected_row(candidate: dict, confidence: float) -> dict:
+    return {
+        "entity_id": str(candidate.get("entity_id") or "").strip(),
+        "entity_name": str(candidate.get("entity_name") or "").strip(),
+        "confidence": max(0.0, min(1.0, confidence)),
+        "reason": _business_reason_for_candidate(
+            candidate,
+            fallback="Selected because the idea card has a defensible business connection to this value stream.",
+        ),
+        "supporting_ticket_ids": list(candidate.get("supporting_ticket_ids") or [])[:5],
+        "supporting_chunk_ids": list(candidate.get("supporting_chunk_ids") or [])[:5],
+    }
 
 
 def _backfill_to_requested(

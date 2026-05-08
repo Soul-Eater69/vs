@@ -104,11 +104,11 @@ class GenerationService:
             {"role": "system", "content": system_prompt or _SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ]
-        structured_llm = self._llm.with_structured_output(
+        llm = self._llm
+        if reasoning_effort:
+            llm = llm.bind(extra_body=build_extra_body(reasoning_effort=reasoning_effort))
+        structured_llm = llm.with_structured_output(
             output_schema,
             method="function_calling",
         )
-        invoke_kwargs: dict[str, Any] = {}
-        if reasoning_effort:
-            invoke_kwargs["extra_body"] = build_extra_body(reasoning_effort=reasoning_effort)
-        return structured_llm.invoke(messages, **invoke_kwargs)
+        return structured_llm.invoke(messages)

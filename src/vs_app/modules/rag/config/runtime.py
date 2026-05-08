@@ -24,12 +24,15 @@ class RagRuntimeConfig:
 def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfig:
     requested = max(1, int(final_output_count or 12))
 
-    llm_candidate_window = min(28, max(requested + 5, math.ceil(requested * 1.25)))
-    semantic_fetch_k = min(50, max(25, requested * 2))
-    historical_ticket_fetch_k = min(30, max(15, math.ceil(requested * 1.25)))
+    # Wider LLM candidate window so strong candidates aren't cut at the lane caps
+    # before the LLM ever sees them. Slim output schema means input-side growth has
+    # only modest latency cost.
+    llm_candidate_window = min(40, max(25, math.ceil(requested * 1.75)))
+    semantic_fetch_k = min(60, max(30, math.ceil(requested * 2.5)))
+    historical_ticket_fetch_k = min(40, max(20, math.ceil(requested * 1.6)))
 
-    max_semantic_plus_historical = min(12, max(6, math.ceil(llm_candidate_window * 0.42)))
-    max_historical_only = min(8, max(4, math.floor(llm_candidate_window * 0.28)))
+    max_semantic_plus_historical = min(18, max(6, math.ceil(llm_candidate_window * 0.45)))
+    max_historical_only = min(12, max(4, math.floor(llm_candidate_window * 0.27)))
     max_semantic_only = max(
         0,
         llm_candidate_window - max_semantic_plus_historical - max_historical_only,

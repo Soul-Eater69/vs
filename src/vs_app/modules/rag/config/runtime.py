@@ -39,11 +39,11 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     # most false positives came from in evaluation), so we keep it small.
     max_semantic_plus_historical = min(
         llm_candidate_window,
-        max(requested + 6, math.ceil(llm_candidate_window * 0.75)),
+        max(requested + 8, math.ceil(llm_candidate_window * 0.78)),
     )
     max_historical_only = min(
         5,
-        max(2, math.floor(llm_candidate_window * 0.15)),
+        max(2, math.floor(llm_candidate_window * 0.12)),
     )
     max_semantic_only = max(
         0,

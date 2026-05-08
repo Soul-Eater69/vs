@@ -20,6 +20,8 @@ GENERIC_OR_RISKY_STREAMS = {
     "adjudicate claim",
     "fill and manage prescriptions",
     "manage producer operations",
+    "align and execute it strategy",
+    "develop mission, vision, and strategy",
 }
 
 

@@ -66,25 +66,32 @@ def generate_review_pool_value_streams(
     system_prompt = build_review_pool_system_prompt(max_select=max_select)
 
     import os as _os
-    review_pool_effort = _os.environ.get("REVIEW_POOL_REASONING_EFFORT", "minimal")
+    review_pool_effort = _os.environ.get("REVIEW_POOL_REASONING_EFFORT", "low")
     llm_started = perf_counter()
-    result = GenerationService().generate_structured(
-        query=prompt,
-        output_schema=ReviewPoolPickResult,
-        system_prompt=system_prompt,
-        reasoning_effort=review_pool_effort,
-    )
+    parsed: dict = {"picks": []}
+    llm_error: str | None = None
+    try:
+        result = GenerationService().generate_structured(
+            query=prompt,
+            output_schema=ReviewPoolPickResult,
+            system_prompt=system_prompt,
+            reasoning_effort=review_pool_effort,
+        )
+        parsed = result.model_dump() if hasattr(result, "model_dump") else {"picks": []}
+    except Exception as exc:
+        llm_error = f"{type(exc).__name__}: {exc}"
+        logger.exception("[RAG] review_pool_llm structured call failed; falling back to backfill")
     llm_elapsed_ms = round((perf_counter() - llm_started) * 1000)
     logger.info(
-        "[RAG] review_pool_llm: candidates=%d prompt_chars=%d system_chars=%d effort=%s elapsed_ms=%d",
+        "[RAG] review_pool_llm: candidates=%d prompt_chars=%d system_chars=%d effort=%s elapsed_ms=%d picks=%d error=%s",
         len(candidates),
         len(prompt),
         len(system_prompt),
         review_pool_effort,
         llm_elapsed_ms,
+        len(parsed.get("picks") or []),
+        llm_error or "none",
     )
-
-    parsed = result.model_dump() if hasattr(result, "model_dump") else {"picks": []}
     candidates_by_id = {
         str(candidate.get("entity_id") or "").strip().lower(): candidate
         for candidate in candidates
@@ -101,7 +108,13 @@ def generate_review_pool_value_streams(
             logger.warning("[REVIEW_POOL] LLM returned unknown entity_id '%s'", pick_id)
             continue
         seen_ids.add(pick_id)
-        selected.append(_build_selected_row(candidate, float(pick.get("confidence") or 0.0)))
+        selected.append(
+            _build_selected_row(
+                candidate,
+                float(pick.get("confidence") or 0.0),
+                llm_reason=str(pick.get("reason") or "").strip(),
+            )
+        )
 
     selected = selected[:requested]
     selected = _backfill_to_requested(selected, candidates, requested)
@@ -536,15 +549,23 @@ def _pass_rejected_candidates(
     return rejected
 
 
-def _build_selected_row(candidate: dict, confidence: float) -> dict:
+def _build_selected_row(
+    candidate: dict,
+    confidence: float,
+    llm_reason: str = "",
+) -> dict:
+    if llm_reason and not _has_score_language(llm_reason):
+        reason = llm_reason
+    else:
+        reason = _business_reason_for_candidate(
+            candidate,
+            fallback="Selected because the idea card has a defensible business connection to this value stream.",
+        )
     return {
         "entity_id": str(candidate.get("entity_id") or "").strip(),
         "entity_name": str(candidate.get("entity_name") or "").strip(),
         "confidence": max(0.0, min(1.0, confidence)),
-        "reason": _business_reason_for_candidate(
-            candidate,
-            fallback="Selected because the idea card has a defensible business connection to this value stream.",
-        ),
+        "reason": reason,
         "supporting_ticket_ids": list(candidate.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(candidate.get("supporting_chunk_ids") or [])[:5],
     }

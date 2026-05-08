@@ -71,13 +71,24 @@ class SelectionResult(BaseModel):
     )
 
 
-# Slim schema for the review-pool pass: the model only picks IDs + confidence;
-# entity_name and reason are filled in deterministically post-call so the LLM
-# emits ~6x fewer output tokens, which dominates wall-clock latency.
+# Slim schema for the review-pool pass: the model picks IDs + confidence + a short
+# rationale. entity_name is filled in deterministically post-call from the candidate
+# dict so the LLM can't drop rows via name paraphrasing.
+# Fields are optional with defaults so a partial/empty tool call from the gateway
+# doesn't raise; downstream code skips picks with empty entity_id and falls back to
+# a templated reason if the LLM omits one.
 class ReviewPoolPick(BaseModel):
-    entity_id: str = Field(description="The entity ID of the picked value stream")
+    entity_id: str = Field(default="", description="The entity ID of the picked value stream")
     confidence: float = Field(
-        description="0.8-1.0 strong, 0.5-0.7 partial, 0.3-0.4 weak but plausible"
+        default=0.5,
+        description="0.8-1.0 strong, 0.5-0.7 partial, 0.3-0.4 weak but plausible",
+    )
+    reason: str = Field(
+        default="",
+        description=(
+            "One short sentence (max ~140 characters) of business rationale: why this "
+            "value stream maps to the idea card. Do not mention scores, ranks, or lanes."
+        ),
     )
 
 

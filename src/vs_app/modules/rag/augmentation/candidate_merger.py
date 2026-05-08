@@ -143,20 +143,62 @@ def merge_candidate_sources(
         row["ranking_score"] = 0.0
         row["historical_strength"] = 0.0
 
-    semantic_plus = sorted(
+    # Evidence-qualified selection: gate historical-only and semantic-only candidates
+    # behind quality floors, then fill the LLM window in priority order:
+    #   1. all merged (semantic+historical) candidates
+    #   2. evidence-qualified historical-only candidates
+    #   3. very strong semantic-only candidates
+    # Stops at llm_candidate_window. This prevents weak semantic-only candidates from
+    # ever crowding out merged candidates, and prevents thin historical-only
+    # candidates from entering the prompt at all.
+    semantic_plus_all = sorted(
         [row for row in merged if row["lane"] == "semantic_plus_historical"],
         key=_sort_semantic_plus_historical,
-    )[: active_policy.max_semantic_plus_historical]
-    semantic_only = sorted(
-        [row for row in merged if row["lane"] == "semantic_only"],
-        key=_sort_semantic_only,
-    )[: active_policy.max_semantic_only]
-    historical_only = sorted(
-        [row for row in merged if row["lane"] == "historical_only"],
+    )
+    historical_only_all = sorted(
+        [
+            row
+            for row in merged
+            if row["lane"] == "historical_only" and _is_good_historical_only(row)
+        ],
         key=_sort_historical_only,
-    )[: active_policy.max_historical_only]
+    )
+    semantic_only_all = sorted(
+        [
+            row
+            for row in merged
+            if row["lane"] == "semantic_only" and _is_strong_semantic_only(row)
+        ],
+        key=_sort_semantic_only,
+    )
 
-    llm_candidates = semantic_plus + semantic_only + historical_only
+    llm_limit = max_llm_candidates or active_policy.max_llm_candidates
+
+    llm_candidates: list[dict] = []
+    for row in semantic_plus_all[: active_policy.max_semantic_plus_historical]:
+        if len(llm_candidates) >= llm_limit:
+            break
+        llm_candidates.append(row)
+
+    historical_room = min(
+        active_policy.max_historical_only, max(0, llm_limit - len(llm_candidates))
+    )
+    for row in historical_only_all[:historical_room]:
+        if len(llm_candidates) >= llm_limit:
+            break
+        llm_candidates.append(row)
+
+    semantic_room = min(
+        active_policy.max_semantic_only, max(0, llm_limit - len(llm_candidates))
+    )
+    for row in semantic_only_all[:semantic_room]:
+        if len(llm_candidates) >= llm_limit:
+            break
+        llm_candidates.append(row)
+
+    semantic_plus = [row for row in llm_candidates if row["lane"] == "semantic_plus_historical"]
+    historical_only = [row for row in llm_candidates if row["lane"] == "historical_only"]
+    semantic_only = [row for row in llm_candidates if row["lane"] == "semantic_only"]
     llm_keys = {_norm_name(str(row.get("entity_name") or "")) for row in llm_candidates}
 
     for row in merged:
@@ -264,6 +306,30 @@ def _policy_with_total_cap(policy: CandidateWindowPolicy, total: int) -> Candida
         max_historical_only=historical_only,
         max_supporting_tickets_per_candidate=policy.max_supporting_tickets_per_candidate,
     )
+
+
+def _is_good_historical_only(row: dict) -> bool:
+    """Gate historical-only candidates behind real evidence — at least 2 hits, a
+    direct tag, a strong best-support score, or meaningful weighted support. Thin
+    historical-only candidates cause noise without recall benefit.
+    """
+    hits = int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0)
+    best = _float(row.get("best_support_score"))
+    direct = int(row.get("direct_count", 0) or 0)
+    weighted = _float(row.get("weighted_support", row.get("weighted_support_count")))
+    return hits >= 2 or direct >= 1 or best >= 0.65 or weighted >= 0.6
+
+
+def _is_strong_semantic_only(row: dict) -> bool:
+    """Gate semantic-only candidates behind a higher semantic floor than the merged
+    lane. Generic/risky streams need an even stronger floor since they're prone to
+    false-positive selection.
+    """
+    name = _norm_name(str(row.get("entity_name") or ""))
+    semantic = _float(row.get("semantic_score"))
+    if name in GENERIC_OR_RISKY_STREAMS:
+        return semantic >= 1.35
+    return semantic >= 1.20
 
 
 def _sort_semantic_plus_historical(row: dict) -> tuple:

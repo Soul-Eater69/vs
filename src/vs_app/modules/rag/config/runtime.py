@@ -24,30 +24,26 @@ class RagRuntimeConfig:
 def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfig:
     requested = max(1, int(final_output_count or 12))
 
-    # Wider LLM candidate window so strong candidates aren't cut at the lane caps
-    # before the LLM ever sees them. Slim output schema means input-side growth has
-    # only modest latency cost.
-    llm_candidate_window = min(40, max(25, math.ceil(requested * 1.75)))
-    semantic_fetch_k = min(60, max(30, math.ceil(requested * 2.5)))
-    # Historical fetch_k matters for sparse-tag value streams (Issue Payment, Manage
-    # Invoice and Payment Receipt, etc.) — they only appear in a small fraction of
-    # historical tickets, so we need a wide net to surface 2-3 evidence hits.
-    historical_ticket_fetch_k = min(60, max(35, math.ceil(requested * 2.5)))
+    # Fixed broad retrieval. Retrieval is cheaper than the LLM call, so we don't
+    # shrink it with the requested output count — the user's slider only affects
+    # the *output* count, not how widely we search for evidence.
+    semantic_fetch_k = 60
+    historical_ticket_fetch_k = 60
 
-    # Most true positives live in the merged (semantic+historical) lane, so we
-    # protect that lane first. Semantic-only is the riskiest lane (this is where
-    # most false positives came from in evaluation), so we keep it small.
-    max_semantic_plus_historical = min(
-        llm_candidate_window,
-        max(requested + 8, math.ceil(llm_candidate_window * 0.78)),
-    )
-    max_historical_only = min(
+    # Adaptive LLM candidate window. This is how many evidence-qualified candidates
+    # the LLM may inspect, not how many it returns. Bigger than `requested` so the
+    # model has room to reject weak picks.
+    llm_candidate_window = min(50, max(35, math.ceil(requested * 3.0)))
+
+    # Upper bounds for evidence-qualified selection in candidate_merger.py.
+    # Merged lane has no hard quota — it can fill the whole window if enough
+    # qualified candidates exist. Historical-only and semantic-only are
+    # cap-limited so they can't crowd out merged candidates.
+    max_semantic_plus_historical = llm_candidate_window
+    max_historical_only = min(8, max(4, math.floor(llm_candidate_window * 0.16)))
+    max_semantic_only = min(
         5,
-        max(2, math.floor(llm_candidate_window * 0.12)),
-    )
-    max_semantic_only = max(
-        0,
-        llm_candidate_window - max_semantic_plus_historical - max_historical_only,
+        max(1, llm_candidate_window - max_semantic_plus_historical - max_historical_only),
     )
 
     return RagRuntimeConfig(

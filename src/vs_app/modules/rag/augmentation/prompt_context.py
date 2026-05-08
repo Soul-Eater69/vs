@@ -101,8 +101,11 @@ def format_review_pool_candidate_blocks(
     analog_chars = int(budget.get("analog_chars", 140))
     ticket_limit = int(budget.get("historical_ticket_ids_per_candidate", 3))
 
+    # Preserve the order produced by candidate_merger.py — it already prioritizes
+    # merged candidates first, then evidence-qualified historical-only, then strong
+    # semantic-only. Re-ordering here would undo that logic.
     blocks = []
-    for idx, row in enumerate(order_candidates(candidates), start=1):
+    for idx, row in enumerate(candidates, start=1):
         lane = _lane(row)
         lines = [
             f"{idx}. {row.get('entity_name', '')}",

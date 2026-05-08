@@ -117,9 +117,6 @@ def generate_review_pool_value_streams(
         )
 
     selected = selected[:requested]
-    # Mark LLM picks before any backfill runs.
-    for row in selected:
-        row.setdefault("selection_source", "llm_pick")
     selected = _safe_backfill_review_pool(
         selected=selected,
         candidates=candidates,
@@ -573,6 +570,7 @@ def _build_selected_row(
         "entity_name": str(candidate.get("entity_name") or "").strip(),
         "confidence": max(0.0, min(1.0, confidence)),
         "reason": reason,
+        "selection_source": "llm_pick",
         "supporting_ticket_ids": list(candidate.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(candidate.get("supporting_chunk_ids") or [])[:5],
     }

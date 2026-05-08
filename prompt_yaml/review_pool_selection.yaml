@@ -36,6 +36,10 @@ system: |
 
   SELECTION POLICY
 
+  - The candidate list is already evidence-filtered before it reaches you. Evaluate
+    every candidate, including lower-ranked merged candidates — historically-supported
+    streams may be indirect but important and should not be skipped just because they
+    appear later in the list.
   - Prefer recall over precision when there is defensible evidence; the human reviewer is
     the final precision filter.
   - A candidate counts as defensible if it has any of: plausible semantic alignment,

@@ -92,16 +92,6 @@ def _source_ticket_exclusions(request: ValueStreamRagRequest) -> list[str] | Non
     return [request.ticket_id]
 
 
-def _apply_final_output_count(generated: dict, final_output_count: int | None) -> None:
-    if final_output_count is None:
-        return
-    limit = max(0, int(final_output_count or 0))
-    generated["selected_value_streams"] = list(generated.get("selected_value_streams") or [])[:limit]
-    raw_response = generated.get("raw_response")
-    if isinstance(raw_response, dict):
-        raw_response["selected_value_streams"] = list(raw_response.get("selected_value_streams") or [])[:limit]
-
-
 async def _condense_or_fallback(condense_idea_card, raw_text: str, cleaned_query: str) -> tuple[str, list[str]]:
     warnings: list[str] = []
     try:
@@ -214,8 +204,8 @@ async def predict_value_streams_stream(
                 llm_candidates=augmented["llm_candidates"],
                 auto_selected=augmented["auto_selected_value_streams"],
                 historical_ticket_hits=historical.get("historical_ticket_hits", []),
+                final_output_count=request.final_output_count,
             )
-            _apply_final_output_count(generated, request.final_output_count)
 
             # Step 6: Final response assembly
             yield _sse("step", {"step": "finalize", "label": "Finalizing selections..."})

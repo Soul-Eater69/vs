@@ -45,9 +45,9 @@ class GenerationService:
         model: Optional[str] = None,
         base_url: Optional[str] = config.LLM_BASE_URL,
     ) -> None:
-        model = model or os.environ.get("GENERATION_LLM_MODEL", "gpt-5-idp")
+        model = model or os.environ.get("GENERATION_LLM_MODEL", "gpt-5-mini-idp")
         kwargs = {"model": model}
-        reasoning_effort = os.environ.get("GENERATION_LLM_REASONING_EFFORT", "high")
+        reasoning_effort = os.environ.get("GENERATION_LLM_REASONING_EFFORT", "medium")
         if reasoning_effort:
             kwargs["extra_body"] = build_extra_body(reasoning_effort=reasoning_effort)
         if base_url:

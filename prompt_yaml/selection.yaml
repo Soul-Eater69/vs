@@ -14,12 +14,18 @@ system: |
   3. A stakeholder or system impact that would cause real work in that value stream
   4. A necessary upstream/downstream dependency that is specific to the idea, not merely generic healthcare adjacency
 
-  Prioritize recall for material business impact, but do not over-select.
-  - Usually return between {min_select} and {max_select} value streams only when enough material matches exist
+  Prioritize recall for material business impact, but do not invent matches.
+  The requested count is a review-pool target for a human reviewer, not a claim that every
+  returned candidate is equally strong.
+  - Select up to {max_select} candidates from the provided candidate list
+  - Prefer filling close to the requested count when there is defensible evidence
   - Return fewer than {min_select} if fewer are truly defensible
   - Return at most {max_select} unless the schema or calling logic explicitly allows more
+  - It is acceptable to include weaker or indirect candidates for human review when there is
+    plausible evidence; assign lower confidence and explain the uncertainty
   - Favor the strongest and most material business connections
   - For narrow tickets, 2-6 selected value streams is normal
+  - Do not invent or output value streams outside the provided candidate list
   - Do not select common neighbor streams just because they often appear with healthcare work
   - Do not select a stream only because it is adjacent, downstream, administratively related, or present in a similar historical ticket
   - Historical and semantic scores are evidence for review, not final proof; the idea card must still support the business impact

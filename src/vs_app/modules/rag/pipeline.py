@@ -64,8 +64,8 @@ def select_value_streams(
         llm_candidates=augmented["llm_candidates"],
         auto_selected=augmented["auto_selected_value_streams"],
         historical_ticket_hits=historical.get("historical_ticket_hits", []),
+        final_output_count=final_output_count,
     )
-    _apply_final_output_count(generated, final_output_count)
     raw_response = generated["raw_response"]
     debug = build_rag_debug_fingerprints(
         cleaned_query=cleaned_query,
@@ -142,16 +142,6 @@ def _retrieve_historical_support_compat(
     if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
         kwargs["exclude_ticket_ids"] = exclude_ticket_ids
     return retrieve_historical_support(query, **kwargs)
-
-
-def _apply_final_output_count(generated: dict, final_output_count: int | None) -> None:
-    if final_output_count is None:
-        return
-    limit = max(0, int(final_output_count or 0))
-    generated["selected_value_streams"] = list(generated.get("selected_value_streams") or [])[:limit]
-    raw_response = generated.get("raw_response")
-    if isinstance(raw_response, dict):
-        raw_response["selected_value_streams"] = list(raw_response.get("selected_value_streams") or [])[:limit]
 
 
 def run_historical_rag_pipeline(

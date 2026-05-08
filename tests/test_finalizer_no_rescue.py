@@ -4,6 +4,7 @@ import sys
 from types import ModuleType
 
 from vs_app.modules.rag.augmentation import finalizer
+from vs_app.modules.rag.augmentation.finalizer import _selection_budget
 
 
 class _FakeResult:
@@ -138,3 +139,69 @@ def test_finalizer_dedupes_selected_candidates(monkeypatch) -> None:
 
     assert len(result["selected_value_streams"]) == 1
     assert result["selected_value_streams"][0]["confidence"] == 0.8
+
+
+def test_final_output_count_budget_splits_direct_and_historical() -> None:
+    budget = _selection_budget(
+        final_output_count=20,
+        direct_candidate_count=24,
+        historical_candidate_count=10,
+    )
+
+    assert budget["direct_max_select"] == 14
+    assert budget["historical_max_select"] == 6
+    assert budget["total_max_select"] == 20
+    assert budget["direct_min_select"] == 8
+    assert budget["historical_min_select"] == 3
+
+
+def test_final_output_count_budget_gives_direct_full_count_without_historical() -> None:
+    budget = _selection_budget(
+        final_output_count=20,
+        direct_candidate_count=18,
+        historical_candidate_count=0,
+    )
+
+    assert budget["direct_min_select"] == 18
+    assert budget["direct_max_select"] == 18
+    assert budget["historical_max_select"] == 0
+    assert budget["total_max_select"] == 18
+
+
+def test_final_output_count_budget_gives_historical_full_count_without_direct() -> None:
+    budget = _selection_budget(
+        final_output_count=20,
+        direct_candidate_count=0,
+        historical_candidate_count=7,
+    )
+
+    assert budget["direct_max_select"] == 0
+    assert budget["historical_min_select"] == 7
+    assert budget["historical_max_select"] == 7
+    assert budget["total_max_select"] == 7
+
+
+def test_generate_value_streams_raw_response_includes_requested_budget(monkeypatch) -> None:
+    class FakeGenerationService:
+        def generate_structured(self, **kwargs):
+            return _FakeResult([])
+
+    _install_generation_service(monkeypatch, FakeGenerationService)
+
+    result = finalizer.generate_value_streams(
+        query_for_prompt="query",
+        final_output_count=20,
+        llm_candidates=[
+            {"entity_id": f"d-{idx}", "entity_name": f"Direct {idx}", "lane": "semantic_only"}
+            for idx in range(20)
+        ]
+        + [
+            {"entity_id": f"h-{idx}", "entity_name": f"Historical {idx}", "lane": "historical_only"}
+            for idx in range(10)
+        ],
+    )
+
+    assert result["raw_response"]["requested_final_output_count"] == 20
+    assert result["raw_response"]["selection_budget"]["total_max_select"] == 20
+    assert result["rescued_confirmed_merged_value_streams"] == []
+    assert result["rescued_historical_gap_fill_value_streams"] == []

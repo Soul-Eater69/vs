@@ -20,9 +20,15 @@ def generate_value_streams(
     llm_candidates: List[dict],
     auto_selected: List[dict] | None = None,
     historical_ticket_hits: List[dict] | None = None,
+    final_output_count: int | None = None,
 ) -> dict:
     auto_selected_ignored = list(auto_selected or [])
     if not llm_candidates:
+        budget = _selection_budget(
+            final_output_count=final_output_count,
+            direct_candidate_count=0,
+            historical_candidate_count=0,
+        )
         return {
             "selected_value_streams": [],
             "llm_selected_value_streams": [],
@@ -34,6 +40,8 @@ def generate_value_streams(
                 "direct_pass": _empty_pass(),
                 "historical_gap_pass": _empty_pass(),
                 "auto_selected_ignored": auto_selected_ignored,
+                "requested_final_output_count": final_output_count,
+                "selection_budget": budget,
             },
             "candidates_used": [],
         }
@@ -42,6 +50,11 @@ def generate_value_streams(
     from vs_app.modules.prompts.loader import SelectionResult
 
     direct_candidates, historical_gap_candidates = _split_llm_candidates(llm_candidates)
+    budget = _selection_budget(
+        final_output_count=final_output_count,
+        direct_candidate_count=len(direct_candidates),
+        historical_candidate_count=len(historical_gap_candidates),
+    )
 
     direct_parsed, historical_parsed = _run_selection_passes(
         generation_service_cls=GenerationService,
@@ -50,6 +63,7 @@ def generate_value_streams(
         direct_candidates=direct_candidates,
         historical_gap_candidates=historical_gap_candidates,
         historical_ticket_hits=list(historical_ticket_hits or []),
+        selection_budget=budget,
     )
 
     llm_selected = _merge_selected(
@@ -63,6 +77,8 @@ def generate_value_streams(
         "direct_pass": direct_parsed,
         "historical_gap_pass": historical_parsed,
         "auto_selected_ignored": auto_selected_ignored,
+        "requested_final_output_count": final_output_count,
+        "selection_budget": budget,
     }
 
     return {
@@ -84,6 +100,7 @@ def _run_selection_passes(
     direct_candidates: List[dict],
     historical_gap_candidates: List[dict],
     historical_ticket_hits: List[dict],
+    selection_budget: dict,
 ) -> tuple[dict, dict]:
     def run_direct() -> dict:
         if not direct_candidates:
@@ -94,6 +111,8 @@ def _run_selection_passes(
             query_for_prompt=query_for_prompt,
             candidates=direct_candidates,
             prompt_kind="direct",
+            min_select=selection_budget["direct_min_select"],
+            max_select=selection_budget["direct_max_select"],
         )
 
     def run_historical_gap() -> dict:
@@ -107,6 +126,8 @@ def _run_selection_passes(
             precedent_candidates=historical_gap_candidates,
             historical_ticket_hits=historical_ticket_hits,
             prompt_kind="historical_gap",
+            min_select=selection_budget["historical_min_select"],
+            max_select=selection_budget["historical_max_select"],
         )
 
     if direct_candidates and historical_gap_candidates:
@@ -127,6 +148,8 @@ def _run_selection_pass(
     prompt_kind: str,
     precedent_candidates: List[dict] | None = None,
     historical_ticket_hits: List[dict] | None = None,
+    min_select: int | None = None,
+    max_select: int | None = None,
 ) -> dict:
     from ..ranking.reranker import sanitize_selected
 
@@ -134,8 +157,8 @@ def _run_selection_pass(
         return _empty_pass()
 
     if prompt_kind == "historical_gap":
-        min_select = 0
-        max_select = _historical_gap_selection_max(candidates)
+        min_select = 0 if min_select is None else min_select
+        max_select = _historical_gap_selection_max(candidates) if max_select is None else max_select
         prompt = build_historical_gap_prompt(
             query_for_prompt=query_for_prompt,
             candidates=candidates,
@@ -143,7 +166,8 @@ def _run_selection_pass(
             historical_ticket_hits=historical_ticket_hits,
         )
     else:
-        min_select, max_select = _direct_selection_bounds(candidates)
+        if min_select is None or max_select is None:
+            min_select, max_select = _direct_selection_bounds(candidates)
         prompt = build_direct_candidate_prompt(
             query_for_prompt=query_for_prompt,
             candidates=candidates,
@@ -195,6 +219,71 @@ def _historical_gap_selection_max(candidates: int | List[dict]) -> int:
     if candidate_count <= 0:
         return 0
     return min(8, max(3, math.ceil(candidate_count * 0.35)))
+
+
+def _selection_budget(
+    *,
+    final_output_count: int | None,
+    direct_candidate_count: int,
+    historical_candidate_count: int,
+) -> dict:
+    if final_output_count is None:
+        direct_min, direct_max = _direct_selection_bounds(direct_candidate_count)
+        historical_min = 0
+        historical_max = _historical_gap_selection_max(historical_candidate_count)
+        return {
+            "direct_min_select": min(direct_min, direct_candidate_count),
+            "direct_max_select": min(direct_max, direct_candidate_count),
+            "historical_min_select": historical_min,
+            "historical_max_select": min(historical_max, historical_candidate_count),
+            "total_max_select": min(direct_max, direct_candidate_count)
+            + min(historical_max, historical_candidate_count),
+        }
+
+    requested = max(1, int(final_output_count))
+
+    if direct_candidate_count <= 0:
+        historical_max = min(requested, historical_candidate_count)
+        return {
+            "direct_min_select": 0,
+            "direct_max_select": 0,
+            "historical_min_select": historical_max,
+            "historical_max_select": historical_max,
+            "total_max_select": historical_max,
+        }
+
+    if historical_candidate_count <= 0:
+        direct_max = min(requested, direct_candidate_count)
+        return {
+            "direct_min_select": direct_max,
+            "direct_max_select": direct_max,
+            "historical_min_select": 0,
+            "historical_max_select": 0,
+            "total_max_select": direct_max,
+        }
+
+    direct_max = min(direct_candidate_count, max(1, math.ceil(requested * 0.70)))
+    historical_max = min(historical_candidate_count, max(0, requested - direct_max))
+
+    remaining = requested - (direct_max + historical_max)
+    if remaining > 0:
+        direct_room = max(0, direct_candidate_count - direct_max)
+        direct_add = min(direct_room, remaining)
+        direct_max += direct_add
+        remaining -= direct_add
+    if remaining > 0:
+        historical_max = min(historical_candidate_count, historical_max + remaining)
+
+    direct_min = min(direct_max, max(1, math.floor(direct_max * 0.60)))
+    historical_min = min(historical_max, max(0, math.floor(historical_max * 0.50)))
+
+    return {
+        "direct_min_select": direct_min,
+        "direct_max_select": direct_max,
+        "historical_min_select": historical_min,
+        "historical_max_select": historical_max,
+        "total_max_select": direct_max + historical_max,
+    }
 
 
 def _split_llm_candidates(llm_candidates: List[dict]) -> tuple[List[dict], List[dict]]:

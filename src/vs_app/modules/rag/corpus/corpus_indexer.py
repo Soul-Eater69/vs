@@ -7,7 +7,7 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 DEFAULT_STORE_PATH = pathlib.Path("historical_enriched.json")
-ENRICHMENT_MODEL = "gpt-5-idp"
+ENRICHMENT_MODEL = "gpt-5-mini-idp"
 
 
 def _build_embedding_client() -> Optional[object]:

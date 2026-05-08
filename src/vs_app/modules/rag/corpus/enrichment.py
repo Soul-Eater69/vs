@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import List
 
 from vs_app.modules.prompts.loader import (
@@ -21,7 +22,7 @@ from .corpus_models import (
 
 logger = logging.getLogger(__name__)
 
-ENRICHMENT_MODEL = "gpt-5-idp"
+ENRICHMENT_MODEL = "gpt-5-mini-idp"
 
 
 def _build_prompt(raw_text: str, vs_labels: List[str]) -> str:
@@ -31,7 +32,7 @@ def _build_prompt(raw_text: str, vs_labels: List[str]) -> str:
 
 
 def enrich_one(ticket: RawTicket, model: str = ENRICHMENT_MODEL) -> EnrichedTicket:
-    from vs_app.integrations.clients.llm import IDPChatOpenAI
+    from vs_app.integrations.clients.llm import IDPChatOpenAI, build_extra_body
 
     base = EnrichedTicket(
         ticket_id=ticket.ticket_id,
@@ -50,7 +51,11 @@ def enrich_one(ticket: RawTicket, model: str = ENRICHMENT_MODEL) -> EnrichedTick
         return base
 
     try:
-        llm = IDPChatOpenAI(model=model)
+        reasoning_effort = os.environ.get("RAG_ENRICHMENT_LLM_REASONING_EFFORT", "medium")
+        llm = IDPChatOpenAI(
+            model=model,
+            extra_body=build_extra_body(reasoning_effort=reasoning_effort),
+        )
         structured = llm.with_structured_output(TicketEnrichmentResult, method="function_calling")
         result: TicketEnrichmentResult = structured.invoke([
             {"role": "system", "content": build_historical_enrichment_system_prompt()},

@@ -102,6 +102,7 @@ interface PipelineResult {
   selected_value_streams: SelectedVS[];
   rejected_candidates: RejectedVS[];
   candidates_used?: Candidate[];
+  llm_candidates?: Candidate[];
   candidate_value_streams?: Candidate[];
   semantic_candidate_value_streams?: Candidate[];
   historical_candidate_value_streams?: Candidate[];
@@ -762,6 +763,21 @@ function rowsFromPass(pass: unknown, keys: string[]) {
   return [];
 }
 
+function candidateLane(row: Record<string, unknown>) {
+  return textValue(row.lane ?? row.candidate_lane ?? row.bucket);
+}
+
+function splitLlmCandidates(candidates?: Candidate[]) {
+  const direct: Record<string, unknown>[] = [];
+  const historical: Record<string, unknown>[] = [];
+  for (const candidate of candidates ?? []) {
+    const row = candidate as Record<string, unknown>;
+    if (candidateLane(row) === 'historical_only') historical.push(row);
+    else direct.push(row);
+  }
+  return { direct, historical };
+}
+
 function textValue(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
@@ -791,7 +807,7 @@ function LlmPassRow({
   const historicalStrength = numberValue(row.historical_strength);
   const historicalBest = numberValue(row.best_support_score);
   const supportCount = numberValue(row.support_count ?? row._support_count);
-  const lane = textValue(row.candidate_lane);
+  const lane = candidateLane(row);
   const statusReason = textValue(row.candidate_status_reason);
   const bucket = textValue(row.bucket ?? row.candidate_source);
   const historicalReasons = Array.isArray(row.historical_reasons) ? row.historical_reasons : [];
@@ -815,7 +831,7 @@ function LlmPassRow({
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {bucket && <Pill tone={bucketTone(bucket)}>{bucket === 'semantic_plus_historical' ? 'merged' : bucket.replace(/_/g, ' ')}</Pill>}
-        {lane && <Pill tone={lane === 'historical_recall' ? 'amber' : lane === 'confirmed_direct' ? 'green' : 'sky'}>{lane.replace(/_/g, ' ')}</Pill>}
+        {lane && <Pill tone={lane === 'historical_only' ? 'amber' : lane === 'semantic_plus_historical' ? 'green' : 'sky'}>{lane.replace(/_/g, ' ')}</Pill>}
         {statusReason && <Pill tone="neutral">{statusReasonLabel(statusReason) ?? statusReason}</Pill>}
         {rankingScore > 0 && <Pill tone="green">rank {rankingScore.toFixed(3)}</Pill>}
         {semanticScore > 0 && <Pill tone="sky">semantic {semanticScore.toFixed(3)}</Pill>}
@@ -865,8 +881,19 @@ function LlmPassSection({
   );
 }
 
-function LlmPassCard({ title, subtitle, raw }: { title: string; subtitle: string; raw: unknown }) {
-  const passed = rowsFromPass(raw, ['candidates_passed', 'passed_candidates', 'candidates_used', 'candidates']);
+function LlmPassCard({
+  title,
+  subtitle,
+  raw,
+  fallbackPassed = [],
+}: {
+  title: string;
+  subtitle: string;
+  raw: unknown;
+  fallbackPassed?: Record<string, unknown>[];
+}) {
+  const passRows = rowsFromPass(raw, ['candidates_passed', 'passed_candidates', 'candidates_used', 'candidates']);
+  const passed = passRows.length ? passRows : fallbackPassed;
   const selected = rowsFromPass(raw, ['selected_value_streams', 'selected', 'value_streams']);
   const rejected = rowsFromPass(raw, ['rejected_candidates', 'rejected']);
   const limits = asRecord(asRecord(raw)?.selection_limits);
@@ -922,10 +949,21 @@ function LlmPassCard({ title, subtitle, raw }: { title: string; subtitle: string
   );
 }
 
-function LlmPassesPane({ direct, historical, rawResponse }: { direct?: unknown; historical?: unknown; rawResponse?: unknown }) {
+function LlmPassesPane({
+  direct,
+  historical,
+  rawResponse,
+  llmCandidates,
+}: {
+  direct?: unknown;
+  historical?: unknown;
+  rawResponse?: unknown;
+  llmCandidates?: Candidate[];
+}) {
   const raw = asRecord(rawResponse);
   const directOutput = direct ?? raw?.direct_pass;
   const historicalOutput = historical ?? raw?.historical_gap_pass;
+  const fallback = splitLlmCandidates(llmCandidates);
 
   if (directOutput == null && historicalOutput == null) {
     return <Empty text="No direct or historical LLM pass output was returned for this run." />;
@@ -933,8 +971,18 @@ function LlmPassesPane({ direct, historical, rawResponse }: { direct?: unknown; 
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <LlmPassCard title="Direct LLM" subtitle="Semantic and confirmed candidate adjudication" raw={directOutput} />
-      <LlmPassCard title="Historic LLM" subtitle="Historical gap and pattern-induced adjudication" raw={historicalOutput} />
+      <LlmPassCard
+        title="Direct LLM"
+        subtitle="Semantic and confirmed candidate adjudication"
+        raw={directOutput}
+        fallbackPassed={fallback.direct}
+      />
+      <LlmPassCard
+        title="Historic LLM"
+        subtitle="Historical gap and pattern-induced adjudication"
+        raw={historicalOutput}
+        fallbackPassed={fallback.historical}
+      />
     </div>
   );
 }
@@ -1405,7 +1453,7 @@ export default function Home() {
 
                 {tab === 'selection'  && <SelectionPane  selected={result.selected_value_streams ?? []} rejected={result.rejected_candidates ?? []} />}
                 {tab === 'comparison' && <ComparisonPane selected={result.selected_value_streams ?? []} groundTruth={result.ground_truth} title={result.ground_truth_title} />}
-                {tab === 'llmPasses'  && <LlmPassesPane direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} />}
+                {tab === 'llmPasses'  && <LlmPassesPane direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} llmCandidates={result.llm_candidates ?? result.candidates_used ?? []} />}
                 {tab === 'retrieval'  && <RetrievalPane  candidates={cands} />}
                 {tab === 'vsCandidates'       && <RetrievalPane candidates={vsCandidates} emptyText="No semantic VS candidates retrieved yet." />}
                 {tab === 'historicCandidates' && <RetrievalPane candidates={historicCandidates} emptyText="No historic candidates recovered yet." />}

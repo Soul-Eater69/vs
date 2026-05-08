@@ -22,5 +22,6 @@ class ValueStreamRagRequest(BaseModel):
     def validate_query_input(self) -> "ValueStreamRagRequest":
         if not (self.ticket_id or self.idea_card_text):
             raise ValueError("At least one of ticket_id or idea_card_text must be provided.")
-        self.final_output_count = min(25, max(1, int(self.final_output_count or 12)))
+        requested = 12 if self.final_output_count is None else int(self.final_output_count)
+        self.final_output_count = min(25, max(1, requested))
         return self

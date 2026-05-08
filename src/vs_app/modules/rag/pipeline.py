@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 import inspect
+import logging
+from time import perf_counter
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def select_value_streams(
@@ -28,6 +33,7 @@ def select_value_streams(
     from .retrieval.semantic_retriever import retrieve_semantic_candidates
 
     runtime_config = derive_rag_runtime_config(final_output_count)
+    runtime_config_dict = asdict(runtime_config)
     if final_output_count is not None:
         semantic_fetch_k = runtime_config.semantic_fetch_k
         historical_ticket_fetch_k = runtime_config.historical_ticket_fetch_k
@@ -73,6 +79,7 @@ def select_value_streams(
         else CandidateWindowPolicy(),
         max_llm_candidates=llm_candidate_window,
     )
+    finalizer_started = perf_counter()
     generated = generate_review_pool_value_streams(
         query_for_prompt=retrieval_query,
         llm_candidates=augmented["llm_candidates"],
@@ -86,6 +93,16 @@ def select_value_streams(
         },
     )
     raw_response = generated["raw_response"]
+    review_pool_llm_output = (
+        raw_response.get("single_review_pool_pass") if isinstance(raw_response, dict) else None
+    )
+    logger.info(
+        "[RAG] review_pool=%s llm_candidates=%s prompt_chars=%s finalizer_ms=%s",
+        runtime_config.final_output_count,
+        len(generated.get("candidates_used", [])),
+        raw_response.get("prompt_debug", {}).get("prompt_chars") if isinstance(raw_response, dict) else None,
+        round((perf_counter() - finalizer_started) * 1000),
+    )
     debug = build_rag_debug_fingerprints(
         cleaned_query=cleaned_query,
         query_for_prompt=query_for_prompt,
@@ -96,7 +113,7 @@ def select_value_streams(
         llm_selected=generated["llm_selected_value_streams"],
         final_selected=generated["selected_value_streams"],
     )
-    debug["rag_runtime_config"] = runtime_config.__dict__
+    debug["rag_runtime_config"] = runtime_config_dict
     debug["prompt_debug"] = raw_response.get("prompt_debug", {}) if isinstance(raw_response, dict) else {}
     debug["candidate_window_counts"] = augmented.get("candidate_window_counts", {})
     return {
@@ -125,15 +142,12 @@ def select_value_streams(
         "llm_candidates": generated["candidates_used"],
         "candidate_window_policy": augmented.get("candidate_window_policy", {}),
         "candidate_window_counts": augmented.get("candidate_window_counts", {}),
-        "rag_runtime_config": runtime_config.__dict__,
+        "rag_runtime_config": runtime_config_dict,
         "historical_source": historical.get("historical_source", ""),
         "raw_response": raw_response,
-        "direct_llm_output": (
-            raw_response.get("direct_pass") if isinstance(raw_response, dict) else None
-        ),
-        "historical_llm_output": (
-            raw_response.get("historical_gap_pass") if isinstance(raw_response, dict) else None
-        ),
+        "review_pool_llm_output": review_pool_llm_output,
+        "direct_llm_output": review_pool_llm_output,
+        "historical_llm_output": None,
         "query_preparation": {
             "cleaned_query": cleaned_query,
             "query_for_prompt": query_for_prompt,
@@ -210,6 +224,8 @@ def run_historical_rag_pipeline(
         "llm_candidates": result.get("llm_candidates", []),
         "historical_source": result.get("historical_source", ""),
         "raw_response": result.get("raw_response"),
+        "review_pool_llm_output": result.get("review_pool_llm_output"),
+        "rag_runtime_config": result.get("rag_runtime_config", {}),
         "query_preparation": result.get("query_preparation", {}),
         "warnings": result.get("warnings", []),
         "debug": result.get("debug", {}),

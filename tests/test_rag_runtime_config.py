@@ -10,6 +10,9 @@ def test_runtime_config_for_review_pool_20() -> None:
     assert cfg.semantic_fetch_k == 40
     assert cfg.historical_ticket_fetch_k == 25
     assert cfg.llm_candidate_window == 25
+    assert cfg.max_semantic_plus_historical == 11
+    assert cfg.max_semantic_only == 7
+    assert cfg.max_historical_only == 7
     assert (
         cfg.max_semantic_plus_historical
         + cfg.max_semantic_only

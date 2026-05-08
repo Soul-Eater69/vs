@@ -46,8 +46,10 @@ class ValueStreamRagResult:
     llm_candidates: list[dict]
     historical_source: str
     raw_response: Any
+    review_pool_llm_output: Any
     direct_llm_output: Any
     historical_llm_output: Any
+    rag_runtime_config: dict[str, Any]
     query_preparation: dict[str, Any]
     warnings: list[Any]
     evidence: list[dict]
@@ -170,8 +172,10 @@ class ValueStreamRagService:
         payload.setdefault("llm_candidates", [])
         payload.setdefault("historical_source", "composed")
         payload.setdefault("raw_response", None)
+        payload.setdefault("review_pool_llm_output", None)
         payload.setdefault("direct_llm_output", None)
         payload.setdefault("historical_llm_output", None)
+        payload.setdefault("rag_runtime_config", {})
         payload.setdefault("query_preparation", {})
         payload.setdefault("warnings", [])
         payload.setdefault("evidence", list(historical_support or []))
@@ -234,8 +238,10 @@ class ValueStreamRagService:
             llm_candidates=list(payload.get("llm_candidates", []) or []),
             historical_source=str(payload.get("historical_source", "") or ""),
             raw_response=payload.get("raw_response"),
+            review_pool_llm_output=payload.get("review_pool_llm_output"),
             direct_llm_output=payload.get("direct_llm_output"),
             historical_llm_output=payload.get("historical_llm_output"),
+            rag_runtime_config=dict(payload.get("rag_runtime_config", {}) or {}),
             query_preparation=dict(payload.get("query_preparation", {}) or {}),
             warnings=list(payload.get("warnings", []) or []),
             evidence=list(payload.get("evidence", payload.get("historical_value_stream_support", [])) or []),

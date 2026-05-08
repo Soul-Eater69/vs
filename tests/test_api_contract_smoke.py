@@ -37,6 +37,11 @@ def test_rag_public_schema_requires_query_input() -> None:
         pass
 
 
+def test_rag_request_clamps_final_output_count() -> None:
+    assert ValueStreamRagRequest(idea_card_text="hello", final_output_count=100).final_output_count == 25
+    assert ValueStreamRagRequest(idea_card_text="hello", final_output_count=0).final_output_count == 1
+
+
 def test_rag_api_defaults_historical_backend_and_truth_to_azure(monkeypatch) -> None:
     assert rag._HISTORICAL_BACKEND == "azure"
 

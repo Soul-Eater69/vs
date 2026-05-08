@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import os
 from dataclasses import asdict
 from pathlib import Path
@@ -18,6 +19,7 @@ from vs_app.ingestion.persistence.azure_historical_index import load_historical_
 from vs_app.modules.rag.service import ValueStreamRagCommand
 
 router = APIRouter(prefix="/rag", tags=["rag"])
+logger = logging.getLogger(__name__)
 
 _FAISS_DIR = Path(os.environ.get("HISTORICAL_FAISS_DIR", "ticket_data/_faiss"))
 _IDEA_CARDS_DIR = Path(os.environ.get("IDEA_CARDS_DIR", "idea_cards"))
@@ -228,6 +230,21 @@ async def predict_value_streams_stream(
             )
             timing_ms["final_llm"] = round((perf_counter() - step_started) * 1000)
             timing_ms["total"] = round((perf_counter() - total_started) * 1000)
+            raw_response = generated["raw_response"]
+            review_pool_llm_output = (
+                raw_response.get("single_review_pool_pass")
+                if isinstance(raw_response, dict)
+                else None
+            )
+            logger.info(
+                "[RAG] review_pool=%s llm_candidates=%s prompt_chars=%s timing_ms=%s",
+                runtime_config.final_output_count,
+                len(generated.get("candidates_used", [])),
+                raw_response.get("prompt_debug", {}).get("prompt_chars")
+                if isinstance(raw_response, dict)
+                else None,
+                timing_ms,
+            )
 
             # Step 6: Final response assembly
             yield _sse("step", {"step": "finalize", "label": "Finalizing selections..."})
@@ -270,17 +287,10 @@ async def predict_value_streams_stream(
                 "candidate_window_counts": augmented.get("candidate_window_counts", {}),
                 "rag_runtime_config": asdict(runtime_config),
                 "historical_source": historical.get("historical_source", ""),
-                "raw_response": generated["raw_response"],
-                "direct_llm_output": (
-                    generated["raw_response"].get("direct_pass")
-                    if isinstance(generated.get("raw_response"), dict)
-                    else None
-                ),
-                "historical_llm_output": (
-                    generated["raw_response"].get("historical_gap_pass")
-                    if isinstance(generated.get("raw_response"), dict)
-                    else None
-                ),
+                "raw_response": raw_response,
+                "review_pool_llm_output": review_pool_llm_output,
+                "direct_llm_output": review_pool_llm_output,
+                "historical_llm_output": None,
                 "query_preparation": {
                     "cleaned_query": cleaned_query,
                     "query_for_prompt": query_for_prompt,

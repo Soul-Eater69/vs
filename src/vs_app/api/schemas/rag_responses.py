@@ -22,8 +22,10 @@ class ValueStreamRagResponse(BaseModel):
     llm_candidates: list[dict] = Field(default_factory=list)
     historical_source: str = ""
     raw_response: Any = None
+    review_pool_llm_output: Any = None
     direct_llm_output: Any = None
     historical_llm_output: Any = None
+    rag_runtime_config: dict[str, Any] = Field(default_factory=dict)
     query_preparation: dict[str, Any] = Field(default_factory=dict)
     warnings: list[Any] = Field(default_factory=list)
     evidence: list[dict] = Field(default_factory=list)
@@ -64,8 +66,10 @@ class ValueStreamRagResponse(BaseModel):
             llm_candidates=list(getattr(result, "llm_candidates", []) or []),
             historical_source=str(getattr(result, "historical_source", "") or ""),
             raw_response=getattr(result, "raw_response", None),
+            review_pool_llm_output=getattr(result, "review_pool_llm_output", None),
             direct_llm_output=getattr(result, "direct_llm_output", None),
             historical_llm_output=getattr(result, "historical_llm_output", None),
+            rag_runtime_config=dict(getattr(result, "rag_runtime_config", {}) or {}),
             query_preparation=dict(getattr(result, "query_preparation", {}) or {}),
             warnings=list(getattr(result, "warnings", []) or []),
             evidence=list(getattr(result, "evidence", []) or []),

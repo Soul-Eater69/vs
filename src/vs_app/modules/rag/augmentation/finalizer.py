@@ -133,6 +133,15 @@ def generate_value_streams(
     historical_ticket_hits: List[dict] | None = None,
     final_output_count: int | None = None,
 ) -> dict:
+    """Deprecated legacy two-pass finalizer.
+
+    The RAG pipeline should use generate_review_pool_value_streams(...).
+    This function is kept temporarily for backward compatibility only.
+    Do not call it from new code.
+    """
+    logger.warning(
+        "generate_value_streams(...) is deprecated; use generate_review_pool_value_streams(...)."
+    )
     auto_selected_ignored = list(auto_selected or [])
     if not llm_candidates:
         budget = _selection_budget(

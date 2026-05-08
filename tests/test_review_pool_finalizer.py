@@ -4,6 +4,7 @@ import sys
 from types import ModuleType
 
 from vs_app.modules.rag.augmentation import finalizer
+from vs_app.modules.rag.augmentation.prompt_context import build_review_pool_candidate_prompt
 
 
 class _FakeResult:
@@ -147,3 +148,47 @@ def test_review_pool_missed_strong_candidates_are_debug_only(monkeypatch) -> Non
     assert result["selected_value_streams"] == []
     missed = result["raw_response"]["missed_strong_candidates"]
     assert [row["entity_name"] for row in missed] == ["Issue Payment"]
+
+
+def test_review_pool_prompt_stays_compact() -> None:
+    candidates = [
+        _candidate(
+            f"vs-{idx}",
+            f"Value Stream {idx}",
+            "semantic_plus_historical" if idx % 3 == 0 else "semantic_only",
+            from_semantic=True,
+            from_historical=idx % 3 == 0,
+            semantic_score=1.4,
+            supporting_ticket_count=3,
+            support_count=3,
+            direct_count=1,
+            implied_count=2,
+            best_support_score=0.8,
+            avg_support_score=0.7,
+            weighted_support=1.2,
+            supporting_ticket_ids=["H1", "H2", "H3", "H4"],
+            historical_reasons=[
+                "[IDMT-1 / direct] This is a long but compact analog reason about a similar workflow."
+                * 3,
+                "[IDMT-2 / implied] This is another analog reason about downstream work." * 3,
+                "[IDMT-3 / implied] Extra evidence should be trimmed." * 3,
+            ],
+            description="Detailed candidate description " * 20,
+        )
+        for idx in range(25)
+    ]
+
+    prompt = build_review_pool_candidate_prompt(
+        query_for_prompt="x" * 5000,
+        candidates=candidates,
+        final_output_count=20,
+        prompt_budget={
+            "idea_card_prompt_chars": 2200,
+            "candidate_description_chars": 160,
+            "analogs_per_candidate": 2,
+            "analog_chars": 140,
+            "historical_ticket_ids_per_candidate": 3,
+        },
+    )
+
+    assert len(prompt) < 14000

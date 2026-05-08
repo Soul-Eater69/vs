@@ -38,6 +38,7 @@ type Tab =
   | 'historicCandidates'
   | 'faissHits'
   | 'mergedCandidates'
+  | 'runtime'
   | 'reference'
   | 'raw';
 
@@ -109,8 +110,11 @@ interface PipelineResult {
   merged_candidate_value_streams?: Candidate[];
   historical_ticket_hits?: HistoricalTicketHit[];
   raw_response?: unknown;
+  review_pool_llm_output?: unknown;
   direct_llm_output?: unknown;
   historical_llm_output?: unknown;
+  rag_runtime_config?: Record<string, unknown>;
+  debug?: Record<string, unknown>;
   historical_excluded_ticket_ids?: string[];
   ground_truth?: string[];
   ground_truth_title?: string;
@@ -238,9 +242,9 @@ const STEP_DEFS = [
   { id: 'semantic',     stage: 'retrieve'   as PipelineStage, x: 430, y: 18,  icon: 'database' as Ico, title: 'VS Search',    subtitle: 'Condensed VS query' },
   { id: 'historical',   stage: 'retrieve'   as PipelineStage, x: 430, y: 122, icon: 'layers'   as Ico, title: 'Historical',   subtitle: 'Condensed history query' },
   { id: 'merge',        stage: 'merge'      as PipelineStage, x: 640, y: 70,  icon: 'grid'     as Ico, title: 'Merge',        subtitle: 'Rank candidates' },
-  { id: 'directLlm',    stage: 'llm_select' as PipelineStage, x: 850, y: 18,  icon: 'cpu'      as Ico, title: 'Direct LLM',   subtitle: 'Direct fit' },
-  { id: 'historicLlm',  stage: 'llm_select' as PipelineStage, x: 850, y: 122, icon: 'book'     as Ico, title: 'Historic LLM', subtitle: 'Pattern fit' },
-  { id: 'finalize',     stage: 'finalize'   as PipelineStage, x: 1075,y: 70,  icon: 'award'    as Ico, title: 'Finalize',     subtitle: 'Filter + rescue' },
+  { id: 'directLlm',    stage: 'llm_select' as PipelineStage, x: 850, y: 18,  icon: 'cpu'      as Ico, title: 'Review Pool LLM', subtitle: 'One global pass' },
+  { id: 'historicLlm',  stage: 'llm_select' as PipelineStage, x: 850, y: 122, icon: 'book'     as Ico, title: 'Evidence',        subtitle: 'Candidate blocks' },
+  { id: 'finalize',     stage: 'finalize'   as PipelineStage, x: 1075,y: 70,  icon: 'award'    as Ico, title: 'Finalize',        subtitle: 'Dedupe + debug' },
 ];
 
 const FLOW_EDGES_BASE: Edge[] = [
@@ -792,6 +796,58 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function RuntimeDebugPane({
+  runtime,
+  debug,
+  rawResponse,
+}: {
+  runtime?: Record<string, unknown>;
+  debug?: Record<string, unknown>;
+  rawResponse?: unknown;
+}) {
+  const raw = asRecord(rawResponse);
+  const runtimeConfig = (runtime ?? asRecord(debug?.rag_runtime_config) ?? {}) as Record<string, unknown>;
+  const promptDebug = (asRecord(debug?.prompt_debug) ?? asRecord(raw?.prompt_debug) ?? {}) as Record<string, unknown>;
+  const timing = (asRecord(debug?.timing_ms) ?? asRecord(raw?.timing_ms) ?? {}) as Record<string, unknown>;
+
+  const item = (label: string, value: unknown) => (
+    <div className="flex items-center justify-between gap-4 rounded border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900">
+      <span className="font-semibold text-zinc-600 dark:text-zinc-300">{label}</span>
+      <span className="font-mono text-zinc-800 dark:text-zinc-100">{String(value ?? '-')}</span>
+    </div>
+  );
+
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div className="space-y-2">
+        <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Runtime Config</div>
+        {item('Review Pool Size', runtimeConfig.final_output_count)}
+        {item('LLM Candidate Window', runtimeConfig.llm_candidate_window)}
+        {item('Semantic Fetch K', runtimeConfig.semantic_fetch_k)}
+        {item('Historical Ticket Fetch K', runtimeConfig.historical_ticket_fetch_k)}
+        {item(
+          'Lane Caps',
+          `merged ${runtimeConfig.max_semantic_plus_historical ?? '-'}, semantic ${runtimeConfig.max_semantic_only ?? '-'}, historical ${runtimeConfig.max_historical_only ?? '-'}`,
+        )}
+      </div>
+      <div className="space-y-2">
+        <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Prompt Debug</div>
+        {item('Prompt chars', promptDebug.prompt_chars)}
+        {item('Candidate count', promptDebug.candidate_count)}
+        {item('Idea card chars', promptDebug.idea_card_chars)}
+        {item('System prompt chars', promptDebug.system_prompt_chars)}
+      </div>
+      <div className="space-y-2">
+        <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Timing</div>
+        {item('Condense', `${timing.condense ?? '-'} ms`)}
+        {item('Retrieval', `${timing.retrieval ?? '-'} ms`)}
+        {item('Final LLM', `${timing.final_llm ?? '-'} ms`)}
+        {item('Total', `${timing.total ?? '-'} ms`)}
+      </div>
+    </div>
+  );
+}
+
 function llmRowName(row: Record<string, unknown>) {
   return textValue(row.entity_name ?? row.value_stream_name ?? row.name, 'Unnamed value stream');
 }
@@ -955,18 +1011,20 @@ function LlmPassCard({
 }
 
 function LlmPassesPane({
+  reviewPool,
   direct,
   historical,
   rawResponse,
   llmCandidates,
 }: {
+  reviewPool?: unknown;
   direct?: unknown;
   historical?: unknown;
   rawResponse?: unknown;
   llmCandidates?: Candidate[];
 }) {
   const raw = asRecord(rawResponse);
-  const reviewPoolOutput = raw?.single_review_pool_pass;
+  const reviewPoolOutput = reviewPool ?? raw?.single_review_pool_pass;
   const directOutput = direct ?? raw?.direct_pass;
   const historicalOutput = historical ?? raw?.historical_gap_pass;
   const fallback = splitLlmCandidates(llmCandidates);
@@ -1062,7 +1120,7 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  const maxCandidateCount = 50;
+  const maxCandidateCount = 25;
 
   const cands = useMemo(() => result?.candidate_value_streams ?? result?.candidates_used ?? [], [result]);
   const vsCandidates = useMemo(() => result?.semantic_candidate_value_streams ?? [], [result]);
@@ -1365,11 +1423,11 @@ export default function Home() {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Review Pool Size</span>
-                    <Pill tone="sky">{count}</Pill>
+                    <Pill tone="sky">Review Pool: {count}</Pill>
                   </div>
                   <input type="range" min={5} max={maxCandidateCount} value={count} onChange={e => setCount(+e.target.value)} className="w-full accent-hcsc dark:accent-teal-400" />
                   <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                    How many value streams to return for human review. The model may return fewer if evidence is not defensible.
+                    Choose how many final value streams you want in the human review pool. The backend will automatically decide retrieval breadth, historical search depth, and the LLM candidate window.
                   </p>
                 </div>
                 <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">
@@ -1463,18 +1521,20 @@ export default function Home() {
                   ) : (
                     <TabBtn active={tab === 'retrieval'} label="Retrieval" icon="database" count={cands.length} onClick={() => setTab('retrieval')} />
                   )}
+                  <TabBtn active={tab === 'runtime'}    label="Runtime"    icon="sliders"                                                  onClick={() => setTab('runtime')} />
                   <TabBtn active={tab === 'reference'}  label="Reference"  icon="book"      count={result.canonical_value_streams?.length} onClick={() => setTab('reference')} />
                   <TabBtn active={tab === 'raw'}        label="Raw LLM"    icon="terminal"                                                 onClick={() => setTab('raw')} />
                 </div>
 
                 {tab === 'selection'  && <SelectionPane  selected={result.selected_value_streams ?? []} rejected={result.rejected_candidates ?? []} />}
                 {tab === 'comparison' && <ComparisonPane selected={result.selected_value_streams ?? []} groundTruth={result.ground_truth} title={result.ground_truth_title} />}
-                {tab === 'llmPasses'  && <LlmPassesPane direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} llmCandidates={result.llm_candidates ?? result.candidates_used ?? []} />}
+                {tab === 'llmPasses'  && <LlmPassesPane reviewPool={result.review_pool_llm_output} direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} llmCandidates={result.llm_candidates ?? result.candidates_used ?? []} />}
                 {tab === 'retrieval'  && <RetrievalPane  candidates={cands} />}
                 {tab === 'vsCandidates'       && <RetrievalPane candidates={vsCandidates} emptyText="No semantic VS candidates retrieved yet." />}
                 {tab === 'historicCandidates' && <RetrievalPane candidates={historicCandidates} emptyText="No historic candidates recovered yet." />}
                 {tab === 'faissHits'          && <FaissHitsPane hits={faissHits} emptyText="No IDMT ticket hits recovered from FAISS yet." />}
                 {tab === 'mergedCandidates'   && <RetrievalPane candidates={mergedCandidates} emptyText="No merged candidates available yet." />}
+                {tab === 'runtime'    && <RuntimeDebugPane runtime={result.rag_runtime_config} debug={result.debug} rawResponse={result.raw_response} />}
                 {tab === 'reference'  && <ReferencePane  canonical={result.canonical_value_streams} />}
                 {tab === 'raw'        && <RawPane        raw={result.raw_response} />}
               </Section>

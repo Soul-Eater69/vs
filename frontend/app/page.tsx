@@ -242,21 +242,18 @@ const STEP_DEFS = [
   { id: 'semantic',     stage: 'retrieve'   as PipelineStage, x: 430, y: 18,  icon: 'database' as Ico, title: 'VS Search',    subtitle: 'Condensed VS query' },
   { id: 'historical',   stage: 'retrieve'   as PipelineStage, x: 430, y: 122, icon: 'layers'   as Ico, title: 'Historical',   subtitle: 'Condensed history query' },
   { id: 'merge',        stage: 'merge'      as PipelineStage, x: 640, y: 70,  icon: 'grid'     as Ico, title: 'Merge',        subtitle: 'Rank candidates' },
-  { id: 'directLlm',    stage: 'llm_select' as PipelineStage, x: 850, y: 18,  icon: 'cpu'      as Ico, title: 'Review Pool LLM', subtitle: 'One global pass' },
-  { id: 'historicLlm',  stage: 'llm_select' as PipelineStage, x: 850, y: 122, icon: 'book'     as Ico, title: 'Evidence',        subtitle: 'Candidate blocks' },
+  { id: 'reviewPoolLlm',stage: 'llm_select' as PipelineStage, x: 850, y: 70,  icon: 'cpu'      as Ico, title: 'Review Pool LLM', subtitle: 'One global pass' },
   { id: 'finalize',     stage: 'finalize'   as PipelineStage, x: 1075,y: 70,  icon: 'award'    as Ico, title: 'Finalize',        subtitle: 'Dedupe + debug' },
 ];
 
 const FLOW_EDGES_BASE: Edge[] = [
-  { id: 'e1', source: 'extract',     target: 'condense',    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e2', source: 'condense',    target: 'semantic',    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e3', source: 'condense',    target: 'historical',  markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e4', source: 'semantic',    target: 'merge',       markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e5', source: 'historical',  target: 'merge',       markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e6', source: 'merge',       target: 'directLlm',   markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e7', source: 'merge',       target: 'historicLlm', markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e8', source: 'directLlm',   target: 'finalize',    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
-  { id: 'e9', source: 'historicLlm', target: 'finalize',    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e1', source: 'extract',       target: 'condense',      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e2', source: 'condense',      target: 'semantic',      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e3', source: 'condense',      target: 'historical',    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e4', source: 'semantic',      target: 'merge',         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e5', source: 'historical',    target: 'merge',         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e6', source: 'merge',         target: 'reviewPoolLlm', markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
+  { id: 'e7', source: 'reviewPoolLlm', target: 'finalize',      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 } },
 ];
 
 const PIPELINE_SEQ: PipelineStage[] = ['extract', 'condense', 'retrieve', 'merge', 'llm_select', 'finalize'];
@@ -796,6 +793,16 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+const TIMING_ROW_ORDER = ['extract', 'condense', 'retrieval', 'merge', 'final_llm', 'total'];
+const TIMING_LABELS: Record<string, string> = {
+  extract: 'Extract',
+  condense: 'Condense',
+  retrieval: 'Retrieval',
+  merge: 'Merge',
+  final_llm: 'Final LLM',
+  total: 'Total',
+};
+
 function RuntimeDebugPane({
   runtime,
   debug,
@@ -839,10 +846,14 @@ function RuntimeDebugPane({
       </div>
       <div className="space-y-2">
         <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Timing</div>
-        {item('Condense', `${timing.condense ?? '-'} ms`)}
-        {item('Retrieval', `${timing.retrieval ?? '-'} ms`)}
-        {item('Final LLM', `${timing.final_llm ?? '-'} ms`)}
-        {item('Total', `${timing.total ?? '-'} ms`)}
+        {Object.keys(timing).length === 0
+          ? item('No timing data', '-')
+          : TIMING_ROW_ORDER
+              .filter((key) => key in timing)
+              .concat(Object.keys(timing).filter((key) => !TIMING_ROW_ORDER.includes(key)))
+              .map((key) => (
+                <div key={key}>{item(TIMING_LABELS[key] ?? key, `${timing[key] ?? '-'} ms`)}</div>
+              ))}
       </div>
     </div>
   );

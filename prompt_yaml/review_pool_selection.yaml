@@ -4,13 +4,16 @@ system: |
   Task: Select value streams from the provided candidate list for human review.
 
   This is a human review-pool selection task, not final truth certification.
-  The user requested up to {max_select} candidates.
+  The user requested {max_select} candidates for review.
 
   Selection policy:
-  - Select up to {max_select} candidates from the provided candidate list.
-  - Prefer recall over precision when there is defensible evidence.
-  - Prefer filling close to the requested count when candidates have plausible semantic,
-    historical, downstream, operational, stakeholder, or analog evidence.
+  - Return exactly {max_select} candidates whenever the candidate list contains at least
+    that many entries with any defensible evidence. Only return fewer when there genuinely
+    are not enough candidates with even weak but plausible evidence.
+  - Prefer recall heavily over precision; the human reviewer is the precision filter.
+  - A candidate counts as defensible if it has any of: plausible semantic alignment,
+    historical/analog support, downstream/operational impact, stakeholder relevance,
+    or implied workflow connection.
   - A candidate does not need to be the main purpose of the idea card.
   - A candidate may be downstream, indirect, operationally implied, or historically supported.
   - Use lower confidence for weaker or indirect candidates instead of dropping them.
@@ -49,8 +52,9 @@ user: |
   {requested_final_output_count}
 
   TASK:
-  Evaluate every candidate below and select up to the requested review-pool size.
-  Prefer recall when the evidence is defensible. Use lower confidence for weaker or indirect candidates.
+  Evaluate every candidate below and select exactly the requested review-pool size when
+  enough candidates have defensible evidence. Prefer recall and assign lower confidence to
+  weaker or indirect candidates rather than dropping them.
 
   CANDIDATE VALUE STREAMS:
 

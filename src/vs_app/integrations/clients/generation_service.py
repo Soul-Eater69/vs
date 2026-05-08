@@ -92,6 +92,7 @@ class GenerationService:
         *,
         context: str = "",
         system_prompt: str = "",
+        reasoning_effort: str | None = None,
     ) -> Any:
         """Generate directly into a Pydantic schema using LangChain structured output."""
         if context:
@@ -107,4 +108,7 @@ class GenerationService:
             output_schema,
             method="function_calling",
         )
-        return structured_llm.invoke(messages)
+        invoke_kwargs: dict[str, Any] = {}
+        if reasoning_effort:
+            invoke_kwargs["extra_body"] = build_extra_body(reasoning_effort=reasoning_effort)
+        return structured_llm.invoke(messages, **invoke_kwargs)

@@ -71,6 +71,7 @@ def generate_review_pool_value_streams(
         query=prompt,
         output_schema=SelectionResult,
         system_prompt=system_prompt,
+        reasoning_effort="low",
     )
     llm_elapsed_ms = round((perf_counter() - llm_started) * 1000)
 
@@ -83,6 +84,7 @@ def generate_review_pool_value_streams(
     ]
 
     selected = _merge_selected([], list(parsed.get("selected_value_streams") or []))[:requested]
+    selected = _backfill_to_requested(selected, candidates, requested)
     rejected = _pass_rejected_candidates(
         selected=selected,
         candidates=candidates,
@@ -512,6 +514,59 @@ def _pass_rejected_candidates(
             out["reason"] = "Not selected by the direct LLM pass."
         rejected.append(out)
     return rejected
+
+
+def _backfill_to_requested(
+    selected: List[dict],
+    candidates: List[dict],
+    requested: int,
+) -> List[dict]:
+    target = min(requested, len(candidates))
+    if len(selected) >= target:
+        return selected
+
+    selected_keys: set[str] = set()
+    for row in selected:
+        selected_keys.update(_selection_keys(row))
+
+    ordered = _backfill_order(candidates)
+    out = list(selected)
+    for candidate in ordered:
+        if len(out) >= target:
+            break
+        if selected_keys.intersection(_selection_keys(candidate)):
+            continue
+        filler = _to_pass_candidate(candidate)
+        filler["confidence"] = 0.30
+        filler["reason"] = _business_reason_for_candidate(
+            candidate,
+            fallback="Added to fill the requested review pool size; reviewer should validate fit.",
+        )
+        out.append(filler)
+        selected_keys.update(_selection_keys(candidate))
+
+    return out
+
+
+def _backfill_order(candidates: List[dict]) -> List[dict]:
+    lane_priority = {
+        "semantic_plus_historical": 0,
+        "semantic_only": 1,
+        "historical_only": 2,
+    }
+    return sorted(
+        list(candidates),
+        key=lambda row: (
+            lane_priority.get(
+                str(row.get("lane") or row.get("candidate_lane") or "").strip(),
+                9,
+            ),
+            -float(row.get("ranking_score", 0.0) or 0.0),
+            -float(row.get("semantic_score", 0.0) or 0.0),
+            -float(row.get("best_support_score", 0.0) or 0.0),
+            -int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0),
+        ),
+    )
 
 
 def _missed_strong_candidates(candidates: List[dict], selected: List[dict]) -> List[dict]:

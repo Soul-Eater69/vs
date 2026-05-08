@@ -249,11 +249,22 @@ def _policy_with_total_cap(policy: CandidateWindowPolicy, total: int) -> Candida
 
 
 def _sort_semantic_plus_historical(row: dict) -> tuple:
+    # Blend semantic + historical signals so a candidate with strong historical evidence
+    # isn't buried under a marginally-better-semantic one that has only 1 hit. The whole
+    # point of this lane is "best of both" — the sort should reflect that.
+    semantic = _float(row.get("semantic_score"))
+    hits = int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0)
+    best_support = _float(row.get("best_support_score"))
+    # Saturate at 10 hits (diminishing returns) and scale to roughly the same magnitude
+    # as semantic_score so a 10+ hit candidate gets a meaningful boost without dominating.
+    historical_boost = min(1.0, hits / 10.0) * 0.20 + best_support * 0.15
+    blended = semantic + historical_boost
     return (
-        -_float(row.get("semantic_score")),
-        -_float(row.get("best_support_score")),
+        -blended,
+        -semantic,
+        -best_support,
         -_float(row.get("weighted_support", row.get("weighted_support_count"))),
-        -int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0),
+        -hits,
         str(row.get("entity_name") or "").lower(),
     )
 

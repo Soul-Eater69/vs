@@ -115,6 +115,11 @@ def main() -> int:
         faiss_dir=faiss_dir,
         azure_index_name=args.historical_azure_index_name,
     )
+    file_ticket_ids = load_ticket_ids_file(args.ticket_ids_file)
+    combined_ticket_ids: list[str] | None = None
+    if args.ticket_ids or file_ticket_ids:
+        combined_ticket_ids = list(args.ticket_ids or []) + file_ticket_ids
+
     items = discover_items(
         idea_cards_dir=idea_cards_dir,
         ground_truth_by_ticket=ground_truth_by_ticket,
@@ -122,7 +127,7 @@ def main() -> int:
         seed=args.seed,
         shuffle=not args.no_shuffle,
         require_ground_truth=not args.allow_missing_ground_truth,
-        ticket_ids=args.ticket_ids,
+        ticket_ids=combined_ticket_ids,
         min_ground_truth_streams=args.min_ground_truth_streams,
     )
 
@@ -191,8 +196,10 @@ def main() -> int:
     }
 
     json_path = output_dir / args.json_name
+    jsonl_path = output_dir / args.jsonl_name
     csv_path = output_dir / args.csv_name
     write_json(json_path, payload)
+    write_jsonl(jsonl_path, results)
     write_csv(csv_path, results)
 
     sweep_summary_path = None
@@ -201,8 +208,9 @@ def main() -> int:
         write_json(sweep_summary_path, summarize_by_output_count(results))
 
     print_summary(summary)
-    print(f"Wrote JSON: {json_path}")
-    print(f"Wrote CSV:  {csv_path}")
+    print(f"Wrote JSON:  {json_path}")
+    print(f"Wrote JSONL: {jsonl_path}")
+    print(f"Wrote CSV:   {csv_path}")
     if sweep_summary_path is not None:
         print(f"Wrote sweep summary: {sweep_summary_path}")
     return 0
@@ -233,6 +241,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", default="output/rag_eval")
     parser.add_argument("--json-name", default="rag_batch_eval.json")
+    parser.add_argument(
+        "--jsonl-name",
+        default="rag_batch_eval.jsonl",
+        help="Per-row JSONL output (one result per line). Easier to grep/jq than the bundled JSON.",
+    )
     parser.add_argument("--csv-name", default="rag_batch_eval.csv")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument(
@@ -323,7 +336,30 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional explicit ticket IDs to evaluate. File stems must match these IDs.",
     )
+    parser.add_argument(
+        "--ticket-ids-file",
+        default=None,
+        help=(
+            "Path to a text file with one ticket ID per line. Combined with --ticket-ids if both "
+            "are provided. Lines starting with # and blank lines are ignored."
+        ),
+    )
     return parser.parse_args()
+
+
+def load_ticket_ids_file(path: str | None) -> list[str]:
+    if not path:
+        return []
+    file_path = Path(path)
+    if not file_path.exists():
+        raise SystemExit(f"--ticket-ids-file not found: {file_path}")
+    ids: list[str] = []
+    for raw_line in file_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        ids.append(line)
+    return ids
 
 
 def apply_eval_llm_defaults() -> None:
@@ -929,6 +965,14 @@ def serialize_result(row: TicketMetrics) -> dict[str, Any]:
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
+
+
+def write_jsonl(path: Path, results: list[TicketMetrics]) -> None:
+    """One result per line — easier to grep/jq and stream-process than the bundled JSON."""
+    with path.open("w", encoding="utf-8") as fh:
+        for row in results:
+            fh.write(json.dumps(serialize_result(row), ensure_ascii=False))
+            fh.write("\n")
 
 
 def write_csv(path: Path, results: list[TicketMetrics]) -> None:

@@ -7,6 +7,22 @@ from typing import Iterable
 logger = logging.getLogger(__name__)
 
 
+# Streams that historically show up as false positives because they have broad
+# wording overlap with many idea cards (analytics, governance, generic care, claim
+# adjudication, prescription fulfillment, etc.). We don't ban them — strong evidence
+# can still surface them — but we apply a sort penalty so they don't crowd out
+# stream-specific candidates in the lane caps.
+GENERIC_OR_RISKY_STREAMS = {
+    "discover business insights",
+    "promote community health",
+    "administer quality management program",
+    "receive care",
+    "adjudicate claim",
+    "fill and manage prescriptions",
+    "manage producer operations",
+}
+
+
 @dataclass(frozen=True)
 class CandidateWindowPolicy:
     max_semantic_plus_historical: int = 8
@@ -259,6 +275,9 @@ def _sort_semantic_plus_historical(row: dict) -> tuple:
     # as semantic_score so a 10+ hit candidate gets a meaningful boost without dominating.
     historical_boost = min(1.0, hits / 10.0) * 0.20 + best_support * 0.15
     blended = semantic + historical_boost
+    # Small penalty for known-generic streams when their historical evidence is weak.
+    if _norm_name(str(row.get("entity_name") or "")) in GENERIC_OR_RISKY_STREAMS and hits < 3:
+        blended -= 0.20
     return (
         -blended,
         -semantic,
@@ -270,8 +289,11 @@ def _sort_semantic_plus_historical(row: dict) -> tuple:
 
 
 def _sort_semantic_only(row: dict) -> tuple:
+    name = _norm_name(str(row.get("entity_name") or ""))
+    penalty = 0.25 if name in GENERIC_OR_RISKY_STREAMS else 0.0
+    semantic = _float(row.get("semantic_score")) - penalty
     return (
-        -_float(row.get("semantic_score")),
+        -semantic,
         str(row.get("entity_name") or "").lower(),
     )
 

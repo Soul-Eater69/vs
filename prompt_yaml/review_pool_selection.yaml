@@ -8,8 +8,10 @@ system: |
 
   This is review-pool selection, not final truth certification. The user requested up to
   {max_select} picks. Quality matters more than hitting the exact number — return only
-  candidates with a defensible business connection. The system will deterministically
-  top up any remaining slots from the highest-ranked unselected candidates.
+  candidates with a defensible business connection. The system may add a small number of
+  low-confidence merged (semantic+historical) candidates only if the review pool is too
+  small; semantic-only candidates will not be auto-filled, so do not assume they can be
+  recovered later.
 
   HOW TO READ THE CANDIDATE BLOCKS
 

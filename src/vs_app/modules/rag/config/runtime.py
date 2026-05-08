@@ -34,8 +34,17 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     # historical tickets, so we need a wide net to surface 2-3 evidence hits.
     historical_ticket_fetch_k = min(60, max(35, math.ceil(requested * 2.5)))
 
-    max_semantic_plus_historical = min(18, max(6, math.ceil(llm_candidate_window * 0.45)))
-    max_historical_only = min(12, max(4, math.floor(llm_candidate_window * 0.27)))
+    # Most true positives live in the merged (semantic+historical) lane, so we
+    # protect that lane first. Semantic-only is the riskiest lane (this is where
+    # most false positives came from in evaluation), so we keep it small.
+    max_semantic_plus_historical = min(
+        llm_candidate_window,
+        max(requested + 6, math.ceil(llm_candidate_window * 0.75)),
+    )
+    max_historical_only = min(
+        5,
+        max(2, math.floor(llm_candidate_window * 0.15)),
+    )
     max_semantic_only = max(
         0,
         llm_candidate_window - max_semantic_plus_historical - max_historical_only,

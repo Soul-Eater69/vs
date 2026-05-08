@@ -117,7 +117,14 @@ def generate_review_pool_value_streams(
         )
 
     selected = selected[:requested]
-    selected = _backfill_to_requested(selected, candidates, requested)
+    # Mark LLM picks before any backfill runs.
+    for row in selected:
+        row.setdefault("selection_source", "llm_pick")
+    selected = _safe_backfill_review_pool(
+        selected=selected,
+        candidates=candidates,
+        min_target=min(requested, 8),
+    )
     rejected = _pass_rejected_candidates(
         selected=selected,
         candidates=candidates,
@@ -571,32 +578,48 @@ def _build_selected_row(
     }
 
 
-def _backfill_to_requested(
+def _safe_backfill_review_pool(
+    *,
     selected: List[dict],
     candidates: List[dict],
-    requested: int,
+    min_target: int,
 ) -> List[dict]:
-    target = min(requested, len(candidates))
-    if len(selected) >= target:
+    """Top up the review pool only when it is too small, and only with safer picks.
+
+    Unlike a full backfill to the requested count, this caps at `min_target` and only
+    pulls from `semantic_plus_historical` candidates with either a decent semantic
+    score or repeated historical evidence. This avoids padding the pool with weak
+    semantic-only candidates that pulled precision down in evaluation.
+    """
+    if len(selected) >= min_target:
         return selected
 
     selected_keys: set[str] = set()
     for row in selected:
         selected_keys.update(_selection_keys(row))
 
-    ordered = _backfill_order(candidates)
     out = list(selected)
-    for candidate in ordered:
-        if len(out) >= target:
+    for candidate in _backfill_order(candidates):
+        if len(out) >= min_target:
             break
         if selected_keys.intersection(_selection_keys(candidate)):
             continue
-        filler = _to_pass_candidate(candidate)
-        filler["confidence"] = 0.30
-        filler["reason"] = _business_reason_for_candidate(
+
+        lane = str(candidate.get("lane") or candidate.get("candidate_lane") or "")
+        if lane != "semantic_plus_historical":
+            continue
+
+        semantic_score = float(candidate.get("semantic_score", 0.0) or 0.0)
+        hits = int(candidate.get("supporting_ticket_count", candidate.get("support_count", 0)) or 0)
+        if semantic_score < 1.05 and hits < 3:
+            continue
+
+        filler = _build_selected_row(
             candidate,
-            fallback="Added to fill the requested review pool size; reviewer should validate fit.",
+            confidence=0.35,
+            llm_reason="Added as a low-confidence review candidate based on combined semantic and historical evidence.",
         )
+        filler["selection_source"] = "safe_backfill"
         out.append(filler)
         selected_keys.update(_selection_keys(candidate))
 

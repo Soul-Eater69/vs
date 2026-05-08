@@ -1,0 +1,18 @@
+from __future__ import annotations
+
+from vs_app.modules.rag.config.runtime import derive_rag_runtime_config
+
+
+def test_runtime_config_for_review_pool_20() -> None:
+    cfg = derive_rag_runtime_config(20)
+
+    assert cfg.final_output_count == 20
+    assert cfg.semantic_fetch_k == 40
+    assert cfg.historical_ticket_fetch_k == 25
+    assert cfg.llm_candidate_window == 25
+    assert (
+        cfg.max_semantic_plus_historical
+        + cfg.max_semantic_only
+        + cfg.max_historical_only
+        == 25
+    )

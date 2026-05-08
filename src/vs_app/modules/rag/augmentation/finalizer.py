@@ -9,10 +9,121 @@ from typing import Iterable, List
 from .prompt_context import (
     build_direct_candidate_prompt,
     build_historical_gap_prompt,
+    build_review_pool_candidate_prompt,
+    build_review_pool_system_prompt,
     build_system_prompt,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def generate_review_pool_value_streams(
+    query_for_prompt: str,
+    llm_candidates: List[dict],
+    final_output_count: int,
+    prompt_budget: dict | None = None,
+) -> dict:
+    from time import perf_counter
+
+    from ..ranking.reranker import sanitize_selected
+    from vs_app.integrations.clients.generation_service import GenerationService
+    from vs_app.modules.prompts.loader import SelectionResult
+
+    started = perf_counter()
+    requested = max(1, int(final_output_count or 12))
+    candidates = list(llm_candidates or [])
+    max_select = min(requested, len(candidates))
+
+    if not candidates:
+        return {
+            "selected_value_streams": [],
+            "llm_selected_value_streams": [],
+            "rescued_confirmed_merged_value_streams": [],
+            "rescued_historical_gap_fill_value_streams": [],
+            "dropped_historical_gap_fill_value_streams": [],
+            "raw_response": {
+                "selected_value_streams": [],
+                "requested_final_output_count": requested,
+                "selection_budget": {"max_select": 0, "candidate_count": 0},
+                "single_review_pool_pass": _empty_pass(),
+                "missed_strong_candidates": [],
+                "prompt_debug": {
+                    "prompt_chars": 0,
+                    "system_prompt_chars": 0,
+                    "candidate_count": 0,
+                    "idea_card_chars": len(query_for_prompt or ""),
+                },
+                "timing_ms": {"final_llm": 0, "total": 0},
+            },
+            "candidates_used": [],
+        }
+
+    prompt = build_review_pool_candidate_prompt(
+        query_for_prompt=query_for_prompt,
+        candidates=candidates,
+        final_output_count=requested,
+        prompt_budget=prompt_budget or {},
+    )
+    system_prompt = build_review_pool_system_prompt(max_select=max_select)
+
+    llm_started = perf_counter()
+    result = GenerationService().generate_structured(
+        query=prompt,
+        output_schema=SelectionResult,
+        system_prompt=system_prompt,
+    )
+    llm_elapsed_ms = round((perf_counter() - llm_started) * 1000)
+
+    parsed = result.model_dump() if hasattr(result, "model_dump") else {"selected_value_streams": []}
+    parsed = sanitize_selected(parsed, candidates)
+    candidates_by_key = _candidate_lookup(candidates)
+    parsed["selected_value_streams"] = [
+        _rewrite_score_reason(row, _candidate_for_selection(row, candidates_by_key))
+        for row in parsed.get("selected_value_streams", [])
+    ]
+
+    selected = _merge_selected([], list(parsed.get("selected_value_streams") or []))[:requested]
+    rejected = _pass_rejected_candidates(
+        selected=selected,
+        candidates=candidates,
+        prompt_kind="review_pool",
+    )
+    raw_response = {
+        "selected_value_streams": selected,
+        "requested_final_output_count": requested,
+        "selection_budget": {
+            "max_select": max_select,
+            "candidate_count": len(candidates),
+        },
+        "single_review_pool_pass": {
+            "selected_value_streams": selected,
+            "candidate_count": len(candidates),
+            "selection_limits": {"max_select": max_select},
+            "candidates_passed": [_to_pass_candidate(row) for row in candidates],
+            "rejected_candidates": rejected,
+        },
+        "missed_strong_candidates": _missed_strong_candidates(candidates, selected),
+        "prompt_debug": {
+            "prompt_chars": len(prompt),
+            "system_prompt_chars": len(system_prompt),
+            "candidate_count": len(candidates),
+            "idea_card_chars": len(query_for_prompt or ""),
+        },
+        "timing_ms": {
+            "final_llm": llm_elapsed_ms,
+            "total": round((perf_counter() - started) * 1000),
+        },
+    }
+
+    return {
+        "selected_value_streams": selected,
+        "llm_selected_value_streams": selected,
+        "rescued_confirmed_merged_value_streams": [],
+        "rescued_historical_gap_fill_value_streams": [],
+        "dropped_historical_gap_fill_value_streams": [],
+        "raw_response": raw_response,
+        "candidates_used": candidates,
+    }
 
 
 def generate_value_streams(
@@ -384,13 +495,55 @@ def _pass_rejected_candidates(
         if selected_keys.intersection(_selection_keys(candidate)):
             continue
         out = _to_pass_candidate(candidate)
-        out["reason"] = (
-            "Not selected by the historical LLM pass."
-            if prompt_kind == "historical_gap"
-            else "Not selected by the direct LLM pass."
-        )
+        if prompt_kind == "historical_gap":
+            out["reason"] = "Not selected by the historical LLM pass."
+        elif prompt_kind == "review_pool":
+            out["reason"] = "Not selected by the single review-pool LLM pass."
+        else:
+            out["reason"] = "Not selected by the direct LLM pass."
         rejected.append(out)
     return rejected
+
+
+def _missed_strong_candidates(candidates: List[dict], selected: List[dict]) -> List[dict]:
+    selected_keys = set()
+    for row in selected:
+        selected_keys.update(_selection_keys(row))
+
+    missed: List[dict] = []
+    for candidate in candidates:
+        if selected_keys.intersection(_selection_keys(candidate)):
+            continue
+
+        lane = str(candidate.get("lane") or candidate.get("candidate_lane") or "")
+        semantic_score = float(candidate.get("semantic_score", 0.0) or 0.0)
+        supporting_count = int(
+            candidate.get("supporting_ticket_count", candidate.get("support_count", 0)) or 0
+        )
+        best_support_score = float(candidate.get("best_support_score", 0.0) or 0.0)
+
+        is_strong = (
+            lane == "semantic_plus_historical"
+            or semantic_score >= 1.20
+            or supporting_count >= 5
+            or best_support_score >= 0.70
+        )
+        if not is_strong:
+            continue
+
+        missed.append(
+            {
+                "entity_id": candidate.get("entity_id"),
+                "entity_name": candidate.get("entity_name"),
+                "lane": lane,
+                "semantic_score": semantic_score,
+                "supporting_ticket_count": supporting_count,
+                "best_support_score": best_support_score,
+                "reason": "Sent to LLM but not selected by single review-pool pass.",
+            }
+        )
+
+    return missed
 
 
 def _candidate_lookup(candidates: List[dict]) -> dict[str, dict]:

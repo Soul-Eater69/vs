@@ -14,12 +14,13 @@ class ValueStreamRagRequest(BaseModel):
     semantic_fetch_k: int = 40
     historical_ticket_fetch_k: int = 35
     llm_candidate_window: int = 30
-    final_output_count: int | None = None
+    final_output_count: int = 12
     use_llm_finalizer: bool = True
     exclude_source_ticket_from_historical: bool = True
 
     @model_validator(mode="after")
     def validate_query_input(self) -> "ValueStreamRagRequest":
-        if self.ticket_id or self.idea_card_text:
-            return self
-        raise ValueError("At least one of ticket_id or idea_card_text must be provided.")
+        if not (self.ticket_id or self.idea_card_text):
+            raise ValueError("At least one of ticket_id or idea_card_text must be provided.")
+        self.final_output_count = min(25, max(1, int(self.final_output_count or 12)))
+        return self

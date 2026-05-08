@@ -4,7 +4,9 @@ import asyncio
 import inspect
 import json
 import os
+from dataclasses import asdict
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -25,9 +27,7 @@ _HISTORICAL_AZURE_INDEX = os.environ.get(
     "idp_idmt_data",
 )
 _GROUND_TRUTH_SOURCE = os.environ.get("RAG_GROUND_TRUTH_SOURCE", "azure")
-_CONDENSE_TIMEOUT_SECONDS = float(os.environ.get("RAG_CONDENSE_TIMEOUT_SECONDS", "45"))
-_DEFAULT_SEMANTIC_FETCH_K = int(os.environ.get("RAG_SEMANTIC_FETCH_K", "40"))
-_DEFAULT_HISTORICAL_TICKET_FETCH_K = int(os.environ.get("RAG_HISTORICAL_TICKET_FETCH_K", "35"))
+_CONDENSE_TIMEOUT_SECONDS = float(os.environ.get("RAG_CONDENSE_TIMEOUT_SECONDS", "8"))
 
 
 def _sse(event: str, data: dict) -> str:
@@ -124,19 +124,20 @@ async def predict_value_streams_stream(
             CandidateWindowPolicy,
             merge_candidate_sources,
         )
-        from vs_app.modules.rag.augmentation.finalizer import generate_value_streams
         from vs_app.modules.rag.fingerprints import build_rag_debug_fingerprints
+        from vs_app.modules.rag.config.runtime import derive_rag_runtime_config
 
         try:
-            semantic_fetch_k = min(max(1, request.semantic_fetch_k or _DEFAULT_SEMANTIC_FETCH_K), 50)
-            historical_ticket_fetch_k = min(
-                max(1, request.historical_ticket_fetch_k or _DEFAULT_HISTORICAL_TICKET_FETCH_K),
-                40,
-            )
+            total_started = perf_counter()
+            timing_ms: dict[str, int] = {}
+            runtime_config = derive_rag_runtime_config(request.final_output_count)
+            semantic_fetch_k = min(max(1, runtime_config.semantic_fetch_k), 50)
+            historical_ticket_fetch_k = min(max(1, runtime_config.historical_ticket_fetch_k), 40)
             faiss_dir = str(_FAISS_DIR)
 
             # Step 1: Extract
             yield _sse("step", {"step": "extract", "label": f"Reading {request.ticket_id or 'idea card'}..."})
+            step_started = perf_counter()
             if request.idea_card_text:
                 raw_text = request.idea_card_text
             elif request.ticket_id:
@@ -148,9 +149,11 @@ async def predict_value_streams_stream(
                 )
             else:
                 raise ValueError("No idea card text or ticket ID provided")
+            timing_ms["extract"] = round((perf_counter() - step_started) * 1000)
 
             # Step 2: Condense once. The same condensed query feeds semantic VS and historical retrieval.
             yield _sse("step", {"step": "condense", "label": "Condensing idea card for retrieval..."})
+            step_started = perf_counter()
             cleaned_query = await asyncio.to_thread(clean_ppt_text, raw_text)
             query_for_prompt, warnings = await _condense_or_fallback(
                 condense_idea_card,
@@ -158,9 +161,11 @@ async def predict_value_streams_stream(
                 cleaned_query,
             )
             retrieval_query = query_for_prompt or cleaned_query
+            timing_ms["condense"] = round((perf_counter() - step_started) * 1000)
 
             # Step 3: Semantic VS + historical FAISS both use the condensed query.
             yield _sse("step", {"step": "semantic", "label": "Searching VS and history from condensed query..."})
+            step_started = perf_counter()
             exclude_ids = _source_ticket_exclusions(request)
             historical_kwargs = {
                 "historical_faiss_dir": faiss_dir,
@@ -186,26 +191,43 @@ async def predict_value_streams_stream(
             )
             semantic_candidates, historical = await asyncio.gather(semantic_task, historical_task)
             historical = filter_historical_result(historical, exclude_ids)
+            timing_ms["retrieval"] = round((perf_counter() - step_started) * 1000)
 
             # Step 4: Merge candidates
             yield _sse("step", {"step": "merge", "label": "Merging semantic and historical candidates..."})
+            step_started = perf_counter()
             augmented = merge_candidate_sources(
                 semantic_candidates,
                 historical.get("historical_value_stream_support", []),
-                policy=CandidateWindowPolicy(),
-                max_llm_candidates=request.llm_candidate_window,
+                policy=CandidateWindowPolicy(
+                    max_semantic_plus_historical=runtime_config.max_semantic_plus_historical,
+                    max_semantic_only=runtime_config.max_semantic_only,
+                    max_historical_only=runtime_config.max_historical_only,
+                    max_supporting_tickets_per_candidate=runtime_config.max_supporting_tickets_per_candidate,
+                ),
+                max_llm_candidates=runtime_config.llm_candidate_window,
             )
+            timing_ms["merge"] = round((perf_counter() - step_started) * 1000)
 
-            # Step 5: Direct + historical LLM selection run in parallel.
-            yield _sse("step", {"step": "llm_select", "label": "Running direct and historical LLM passes..."})
+            # Step 5: One global review-pool LLM selection.
+            yield _sse("step", {"step": "llm_select", "label": "Running review-pool LLM selection..."})
+            step_started = perf_counter()
+            from vs_app.modules.rag.augmentation.finalizer import generate_review_pool_value_streams
             generated = await asyncio.to_thread(
-                generate_value_streams,
+                generate_review_pool_value_streams,
                 query_for_prompt=retrieval_query,
                 llm_candidates=augmented["llm_candidates"],
-                auto_selected=augmented["auto_selected_value_streams"],
-                historical_ticket_hits=historical.get("historical_ticket_hits", []),
-                final_output_count=request.final_output_count,
+                final_output_count=runtime_config.final_output_count,
+                prompt_budget={
+                    "idea_card_prompt_chars": runtime_config.idea_card_prompt_chars,
+                    "candidate_description_chars": runtime_config.candidate_description_chars,
+                    "analogs_per_candidate": runtime_config.analogs_per_candidate,
+                    "analog_chars": runtime_config.analog_chars,
+                    "historical_ticket_ids_per_candidate": runtime_config.historical_ticket_ids_per_candidate,
+                },
             )
+            timing_ms["final_llm"] = round((perf_counter() - step_started) * 1000)
+            timing_ms["total"] = round((perf_counter() - total_started) * 1000)
 
             # Step 6: Final response assembly
             yield _sse("step", {"step": "finalize", "label": "Finalizing selections..."})
@@ -246,6 +268,7 @@ async def predict_value_streams_stream(
                 "llm_candidates": generated["candidates_used"],
                 "candidate_window_policy": augmented.get("candidate_window_policy", {}),
                 "candidate_window_counts": augmented.get("candidate_window_counts", {}),
+                "rag_runtime_config": asdict(runtime_config),
                 "historical_source": historical.get("historical_source", ""),
                 "raw_response": generated["raw_response"],
                 "direct_llm_output": (
@@ -264,7 +287,13 @@ async def predict_value_streams_stream(
                 },
                 "warnings": warnings,
                 "evidence": historical.get("historical_value_stream_support", []),
-                "debug": debug,
+                "debug": {
+                    **debug,
+                    "timing_ms": timing_ms,
+                    "prompt_debug": generated.get("raw_response", {}).get("prompt_debug", {}),
+                    "rag_runtime_config": asdict(runtime_config),
+                    "candidate_window_counts": augmented.get("candidate_window_counts", {}),
+                },
                 "historical_excluded_ticket_ids": exclude_ids or [],
                 "ground_truth": _ground_truth_for_ticket(request.ticket_id),
             }

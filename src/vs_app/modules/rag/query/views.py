@@ -35,6 +35,9 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
     from vs_app.integrations.clients.llm import IDPChatOpenAI, build_extra_body
 
     cleaned = clean_opt_text(raw_text)
+    if len(cleaned) <= max_chars:
+        return cleaned[:max_chars]
+
     prompt = build_structured_summary_prompt(ticket_id="QUERY", text=cleaned[:8000])
     model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-mini-idp")
     kwargs = {"model": model}

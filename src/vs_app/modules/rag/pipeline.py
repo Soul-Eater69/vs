@@ -20,11 +20,18 @@ def select_value_streams(
     exclude_ticket_ids: Optional[List[str]] = None,
 ) -> dict:
     from .augmentation.candidate_merger import CandidateWindowPolicy, merge_candidate_sources
-    from .augmentation.finalizer import generate_value_streams
+    from .augmentation.finalizer import generate_review_pool_value_streams
+    from .config.runtime import derive_rag_runtime_config
     from .fingerprints import build_rag_debug_fingerprints
     from .query.views import clean_ppt_text, condense_idea_card
     from .retrieval.historical_retriever import filter_historical_result, retrieve_historical_support
     from .retrieval.semantic_retriever import retrieve_semantic_candidates
+
+    runtime_config = derive_rag_runtime_config(final_output_count)
+    if final_output_count is not None:
+        semantic_fetch_k = runtime_config.semantic_fetch_k
+        historical_ticket_fetch_k = runtime_config.historical_ticket_fetch_k
+        llm_candidate_window = runtime_config.llm_candidate_window
 
     top_k = min(max(1, semantic_fetch_k), 50)
     max_ticket_hits = min(max(1, historical_ticket_fetch_k), 40)
@@ -56,15 +63,27 @@ def select_value_streams(
     augmented = merge_candidate_sources(
         semantic_candidates,
         historical.get("historical_value_stream_support", []),
-        policy=CandidateWindowPolicy(),
+        policy=CandidateWindowPolicy(
+            max_semantic_plus_historical=runtime_config.max_semantic_plus_historical,
+            max_semantic_only=runtime_config.max_semantic_only,
+            max_historical_only=runtime_config.max_historical_only,
+            max_supporting_tickets_per_candidate=runtime_config.max_supporting_tickets_per_candidate,
+        )
+        if final_output_count is not None
+        else CandidateWindowPolicy(),
         max_llm_candidates=llm_candidate_window,
     )
-    generated = generate_value_streams(
+    generated = generate_review_pool_value_streams(
         query_for_prompt=retrieval_query,
         llm_candidates=augmented["llm_candidates"],
-        auto_selected=augmented["auto_selected_value_streams"],
-        historical_ticket_hits=historical.get("historical_ticket_hits", []),
-        final_output_count=final_output_count,
+        final_output_count=runtime_config.final_output_count,
+        prompt_budget={
+            "idea_card_prompt_chars": runtime_config.idea_card_prompt_chars,
+            "candidate_description_chars": runtime_config.candidate_description_chars,
+            "analogs_per_candidate": runtime_config.analogs_per_candidate,
+            "analog_chars": runtime_config.analog_chars,
+            "historical_ticket_ids_per_candidate": runtime_config.historical_ticket_ids_per_candidate,
+        },
     )
     raw_response = generated["raw_response"]
     debug = build_rag_debug_fingerprints(
@@ -77,6 +96,9 @@ def select_value_streams(
         llm_selected=generated["llm_selected_value_streams"],
         final_selected=generated["selected_value_streams"],
     )
+    debug["rag_runtime_config"] = runtime_config.__dict__
+    debug["prompt_debug"] = raw_response.get("prompt_debug", {}) if isinstance(raw_response, dict) else {}
+    debug["candidate_window_counts"] = augmented.get("candidate_window_counts", {})
     return {
         "selected_value_streams": generated["selected_value_streams"],
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],
@@ -103,6 +125,7 @@ def select_value_streams(
         "llm_candidates": generated["candidates_used"],
         "candidate_window_policy": augmented.get("candidate_window_policy", {}),
         "candidate_window_counts": augmented.get("candidate_window_counts", {}),
+        "rag_runtime_config": runtime_config.__dict__,
         "historical_source": historical.get("historical_source", ""),
         "raw_response": raw_response,
         "direct_llm_output": (

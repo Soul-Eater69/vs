@@ -48,7 +48,7 @@ def test_condensed_query_feeds_semantic_and_historical_retrieval(monkeypatch) ->
         },
     )
     monkeypatch.setattr(
-        "vs_app.modules.rag.augmentation.finalizer.generate_value_streams",
+        "vs_app.modules.rag.augmentation.finalizer.generate_review_pool_value_streams",
         lambda **kwargs: {
             "selected_value_streams": [],
             "llm_selected_value_streams": [],

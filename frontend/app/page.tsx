@@ -772,7 +772,12 @@ function splitLlmCandidates(candidates?: Candidate[]) {
   const historical: Record<string, unknown>[] = [];
   for (const candidate of candidates ?? []) {
     const row = candidate as Record<string, unknown>;
-    if (candidateLane(row) === 'historical_only') historical.push(row);
+    const lane = candidateLane(row);
+    const isHistoricalOnly =
+      lane === 'historical_only'
+      || lane === 'historical_recall'
+      || (Boolean(row.from_historical) && !Boolean(row.from_semantic));
+    if (isHistoricalOnly) historical.push(row);
     else direct.push(row);
   }
   return { direct, historical };
@@ -831,7 +836,7 @@ function LlmPassRow({
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {bucket && <Pill tone={bucketTone(bucket)}>{bucket === 'semantic_plus_historical' ? 'merged' : bucket.replace(/_/g, ' ')}</Pill>}
-        {lane && <Pill tone={lane === 'historical_only' ? 'amber' : lane === 'semantic_plus_historical' ? 'green' : 'sky'}>{lane.replace(/_/g, ' ')}</Pill>}
+        {lane && <Pill tone={lane === 'historical_only' || lane === 'historical_recall' ? 'amber' : lane === 'semantic_plus_historical' || lane === 'confirmed_direct' ? 'green' : 'sky'}>{lane.replace(/_/g, ' ')}</Pill>}
         {statusReason && <Pill tone="neutral">{statusReasonLabel(statusReason) ?? statusReason}</Pill>}
         {rankingScore > 0 && <Pill tone="green">rank {rankingScore.toFixed(3)}</Pill>}
         {semanticScore > 0 && <Pill tone="sky">semantic {semanticScore.toFixed(3)}</Pill>}
@@ -911,7 +916,7 @@ function LlmPassCard({
           <Pill tone="sky">{passed.length} passed</Pill>
           <Pill tone="green">{selected.length} selected</Pill>
           <Pill tone="red">{rejected.length} rejected</Pill>
-          {maxSelect > 0 && <Pill tone="neutral">limit {minSelect}-{maxSelect}</Pill>}
+          {maxSelect > 0 && <Pill tone="neutral">limit {minSelect > 0 ? `${minSelect}-` : ''}{maxSelect}</Pill>}
         </div>
       </div>
 
@@ -961,9 +966,23 @@ function LlmPassesPane({
   llmCandidates?: Candidate[];
 }) {
   const raw = asRecord(rawResponse);
+  const reviewPoolOutput = raw?.single_review_pool_pass;
   const directOutput = direct ?? raw?.direct_pass;
   const historicalOutput = historical ?? raw?.historical_gap_pass;
   const fallback = splitLlmCandidates(llmCandidates);
+
+  if (reviewPoolOutput != null) {
+    return (
+      <div className="grid grid-cols-1 gap-4">
+        <LlmPassCard
+          title="Review Pool LLM"
+          subtitle="Single global adjudication across semantic, merged, and historic candidates"
+          raw={reviewPoolOutput}
+          fallbackPassed={(llmCandidates ?? []) as unknown as Record<string, unknown>[]}
+        />
+      </div>
+    );
+  }
 
   if (directOutput == null && historicalOutput == null) {
     return <Empty text="No direct or historical LLM pass output was returned for this run." />;
@@ -1138,9 +1157,6 @@ export default function Home() {
 
     try {
       const body: Record<string, unknown> = {
-        semantic_fetch_k: 40,
-        historical_ticket_fetch_k: 35,
-        llm_candidate_window: 30,
         final_output_count: count,
         use_llm_finalizer: true,
         exclude_source_ticket_from_historical: excludeSourceTicketFromHistorical,
@@ -1348,12 +1364,12 @@ export default function Home() {
               <div className="space-y-4">
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Final Output Count</span>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Review Pool Size</span>
                     <Pill tone="sky">{count}</Pill>
                   </div>
                   <input type="range" min={5} max={maxCandidateCount} value={count} onChange={e => setCount(+e.target.value)} className="w-full accent-hcsc dark:accent-teal-400" />
                   <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                    Retrieval uses fixed defaults: 40 semantic candidates, 35 historical tickets, and a 30-candidate LLM window.
+                    How many value streams to return for human review. The model may return fewer if evidence is not defensible.
                   </p>
                 </div>
                 <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">

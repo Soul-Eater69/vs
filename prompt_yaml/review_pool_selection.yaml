@@ -41,7 +41,7 @@ system: |
     downstream operation, or analog pattern).
   - Do not cite scores, ranks, support counts, similarity values, or lane names.
 
-  Output only data matching the provided schema (picks: list of {entity_id, confidence, reason}).
+  Output only data matching the provided schema. Each pick has entity_id, confidence, and reason.
 
 user: |
   IDEA CARD SUMMARY:

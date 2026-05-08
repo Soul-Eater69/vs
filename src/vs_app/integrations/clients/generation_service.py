@@ -94,7 +94,21 @@ class GenerationService:
         system_prompt: str = "",
         reasoning_effort: str | None = None,
     ) -> Any:
-        """Generate directly into a Pydantic schema using LangChain structured output."""
+        """Generate directly into a Pydantic schema using LangChain structured output.
+
+        Uses include_raw=True so a malformed/partial tool call from the gateway does
+        not raise — instead we get {"raw": AIMessage, "parsed": Model | None,
+        "parsing_error": Exception | None}. If parsing fails, we salvage the tool-call
+        args manually and coerce them into the schema, and only fall back to an empty
+        instance if every salvage path fails. This is critical for review-pool selection
+        where an exception would error the whole pipeline; with this wrapper the worst
+        case is a low pick count that the deterministic backfill then tops up.
+        """
+        import json
+        import logging as _logging
+
+        _local_logger = _logging.getLogger(__name__)
+
         if context:
             user_content = f"Context:\n{context}\n\nQuestion: {query}"
         else:
@@ -110,5 +124,45 @@ class GenerationService:
         structured_llm = llm.with_structured_output(
             output_schema,
             method="function_calling",
+            include_raw=True,
         )
-        return structured_llm.invoke(messages)
+        envelope = structured_llm.invoke(messages)
+
+        # When include_raw=True langchain returns a dict, not the model directly.
+        if isinstance(envelope, dict):
+            parsed = envelope.get("parsed")
+            if parsed is not None:
+                return parsed
+
+            raw = envelope.get("raw")
+            parsing_error = envelope.get("parsing_error")
+            _local_logger.warning(
+                "generate_structured: parsing_error=%s; attempting manual salvage from tool_calls",
+                parsing_error,
+            )
+
+            tool_calls = getattr(raw, "tool_calls", None) or []
+            for call in tool_calls:
+                args = call.get("args") if isinstance(call, dict) else None
+                if isinstance(args, dict):
+                    try:
+                        return output_schema(**args)
+                    except Exception:
+                        continue
+
+            content = getattr(raw, "content", "") or ""
+            if isinstance(content, str) and content.strip():
+                start, end = content.find("{"), content.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    try:
+                        return output_schema(**json.loads(content[start : end + 1]))
+                    except Exception:
+                        pass
+
+            _local_logger.warning(
+                "generate_structured: manual salvage failed; returning empty %s",
+                output_schema.__name__,
+            )
+            return output_schema()
+
+        return envelope

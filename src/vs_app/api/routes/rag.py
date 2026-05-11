@@ -16,6 +16,10 @@ from vs_app.api.dependencies import ApiContainer, get_container
 from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
+from vs_app.modules.rag.augmentation.foundational_signals import (
+    annotate_foundational_signals,
+    foundational_signal_names,
+)
 from vs_app.modules.rag.service import ValueStreamRagCommand
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -209,6 +213,15 @@ async def predict_value_streams_stream(
                 ),
                 max_llm_candidates=runtime_config.llm_candidate_window,
             )
+            foundational_signals = foundational_signal_names(retrieval_query)
+            augmented["llm_candidates"] = annotate_foundational_signals(
+                augmented["llm_candidates"],
+                retrieval_query,
+            )
+            augmented["merged_candidates"] = annotate_foundational_signals(
+                augmented["merged_candidates"],
+                retrieval_query,
+            )
             timing_ms["merge"] = round((perf_counter() - step_started) * 1000)
 
             # Step 5: One global review-pool LLM selection.
@@ -285,6 +298,7 @@ async def predict_value_streams_stream(
                 "llm_candidates": generated["candidates_used"],
                 "candidate_window_policy": augmented.get("candidate_window_policy", {}),
                 "candidate_window_counts": augmented.get("candidate_window_counts", {}),
+                "foundational_signals": foundational_signals,
                 "rag_runtime_config": asdict(runtime_config),
                 "historical_source": historical.get("historical_source", ""),
                 "raw_response": raw_response,
@@ -303,6 +317,7 @@ async def predict_value_streams_stream(
                     "prompt_debug": generated.get("raw_response", {}).get("prompt_debug", {}),
                     "rag_runtime_config": asdict(runtime_config),
                     "candidate_window_counts": augmented.get("candidate_window_counts", {}),
+                    "foundational_signals": foundational_signals,
                 },
                 "historical_excluded_ticket_ids": exclude_ids or [],
                 "ground_truth": _ground_truth_for_ticket(request.ticket_id),

@@ -128,6 +128,30 @@ system: |
        confidence.
      - Do not collapse foundational streams into one another just because they are related.
 
+  FOUNDATIONAL SIGNAL PRIORITY
+
+  Some candidate blocks may contain:
+
+  Foundational signal: exact match to "..."
+  Foundational signal: alias match to "..."
+
+  This means the candidate directly matches a value stream, alias, or operational example
+  listed in the idea card. Treat this as strong current-card evidence.
+
+  Rules:
+  - Foundational-signal candidates should normally be included unless the candidate evidence
+    clearly contradicts the idea card.
+  - Foundational-signal candidates should outrank adjacent candidates that do not have a
+    foundational signal.
+  - Do not skip a foundational candidate just because another related upstream/downstream
+    candidate was selected.
+  - If the card is narrow and only a few foundational signals are present, prefer those
+    anchors over broad adjacent streams.
+  - If a foundational-signal candidate is indirect or downstream, include it with lower
+    confidence rather than dropping it.
+  - Do not hardcode any stream as always true. Foundational signal is current-card evidence,
+    not an auto-select rule.
+
   OPERATIONAL CHAIN RULES
 
   Do not treat value streams in the same operational chain as duplicates.
@@ -194,6 +218,11 @@ system: |
 
   Be careful with broad/generic streams. Select them only when the card or analog evidence
   directly supports the stream's core function.
+
+  For narrow idea cards with only 1-3 strong foundational streams, do not expand into
+  adjacent commercial, IT, compliance, reporting, engagement, invoice, producer, workforce,
+  or reconciliation streams unless the candidate has a foundational signal, explicit
+  current-card evidence, or direct/coherent analog evidence.
 
   - Align and Execute IT Strategy:
     Select only for actual IT strategy execution, technology/data strategy, IT operating

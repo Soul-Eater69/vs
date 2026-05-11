@@ -522,6 +522,9 @@ def _to_pass_candidate(row: dict) -> dict:
         "avg_support_score": row.get("avg_support_score"),
         "from_semantic": row.get("from_semantic"),
         "from_historical": row.get("from_historical"),
+        "foundational_signal": bool(row.get("foundational_signal")),
+        "foundational_match_text": row.get("foundational_match_text"),
+        "foundational_match_type": row.get("foundational_match_type"),
         "supporting_ticket_ids": list(row.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(row.get("supporting_chunk_ids") or [])[:5],
         "historical_reasons": list(row.get("historical_reasons") or [])[:3],
@@ -571,6 +574,9 @@ def _build_selected_row(
         "confidence": max(0.0, min(1.0, confidence)),
         "reason": reason,
         "selection_source": "llm_pick",
+        "foundational_signal": bool(candidate.get("foundational_signal")),
+        "foundational_match_text": candidate.get("foundational_match_text"),
+        "foundational_match_type": candidate.get("foundational_match_type"),
         "supporting_ticket_ids": list(candidate.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(candidate.get("supporting_chunk_ids") or [])[:5],
     }
@@ -664,6 +670,7 @@ def _missed_strong_candidates(candidates: List[dict], selected: List[dict]) -> L
 
         is_strong = (
             lane == "semantic_plus_historical"
+            or bool(candidate.get("foundational_signal"))
             or semantic_score >= 1.20
             or supporting_count >= 5
             or best_support_score >= 0.70
@@ -679,6 +686,9 @@ def _missed_strong_candidates(candidates: List[dict], selected: List[dict]) -> L
                 "semantic_score": semantic_score,
                 "supporting_ticket_count": supporting_count,
                 "best_support_score": best_support_score,
+                "foundational_signal": bool(candidate.get("foundational_signal")),
+                "foundational_match_text": candidate.get("foundational_match_text"),
+                "foundational_match_type": candidate.get("foundational_match_type"),
                 "reason": "Sent to LLM but not selected by single review-pool pass.",
             }
         )

@@ -44,6 +44,7 @@ class ValueStreamRagResult:
     historical_value_stream_support: list[dict]
     candidate_value_streams: list[dict]
     llm_candidates: list[dict]
+    foundational_signals: list[str]
     historical_source: str
     raw_response: Any
     review_pool_llm_output: Any
@@ -236,6 +237,7 @@ class ValueStreamRagService:
             historical_value_stream_support=list(payload.get("historical_value_stream_support", []) or []),
             candidate_value_streams=list(payload.get("candidate_value_streams", []) or []),
             llm_candidates=list(payload.get("llm_candidates", []) or []),
+            foundational_signals=list(payload.get("foundational_signals", []) or []),
             historical_source=str(payload.get("historical_source", "") or ""),
             raw_response=payload.get("raw_response"),
             review_pool_llm_output=payload.get("review_pool_llm_output"),

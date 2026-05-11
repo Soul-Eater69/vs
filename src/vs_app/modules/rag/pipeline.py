@@ -26,6 +26,10 @@ def select_value_streams(
 ) -> dict:
     from .augmentation.candidate_merger import CandidateWindowPolicy, merge_candidate_sources
     from .augmentation.finalizer import generate_review_pool_value_streams
+    from .augmentation.foundational_signals import (
+        annotate_foundational_signals,
+        foundational_signal_names,
+    )
     from .config.runtime import derive_rag_runtime_config
     from .fingerprints import build_rag_debug_fingerprints
     from .query.views import clean_ppt_text, condense_idea_card
@@ -79,6 +83,15 @@ def select_value_streams(
         else CandidateWindowPolicy(),
         max_llm_candidates=llm_candidate_window,
     )
+    foundational_signals = foundational_signal_names(retrieval_query)
+    augmented["llm_candidates"] = annotate_foundational_signals(
+        augmented["llm_candidates"],
+        retrieval_query,
+    )
+    augmented["merged_candidates"] = annotate_foundational_signals(
+        augmented["merged_candidates"],
+        retrieval_query,
+    )
     finalizer_started = perf_counter()
     generated = generate_review_pool_value_streams(
         query_for_prompt=retrieval_query,
@@ -116,6 +129,7 @@ def select_value_streams(
     debug["rag_runtime_config"] = runtime_config_dict
     debug["prompt_debug"] = raw_response.get("prompt_debug", {}) if isinstance(raw_response, dict) else {}
     debug["candidate_window_counts"] = augmented.get("candidate_window_counts", {})
+    debug["foundational_signals"] = foundational_signals
     return {
         "selected_value_streams": generated["selected_value_streams"],
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],
@@ -142,6 +156,7 @@ def select_value_streams(
         "llm_candidates": generated["candidates_used"],
         "candidate_window_policy": augmented.get("candidate_window_policy", {}),
         "candidate_window_counts": augmented.get("candidate_window_counts", {}),
+        "foundational_signals": foundational_signals,
         "rag_runtime_config": runtime_config_dict,
         "historical_source": historical.get("historical_source", ""),
         "raw_response": raw_response,
@@ -222,6 +237,7 @@ def run_historical_rag_pipeline(
         "historical_value_stream_support": result.get("historical_value_stream_support", []),
         "candidate_value_streams": result.get("candidate_value_streams", []),
         "llm_candidates": result.get("llm_candidates", []),
+        "foundational_signals": result.get("foundational_signals", []),
         "historical_source": result.get("historical_source", ""),
         "raw_response": result.get("raw_response"),
         "review_pool_llm_output": result.get("review_pool_llm_output"),

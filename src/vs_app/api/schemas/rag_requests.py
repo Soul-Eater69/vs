@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class ValueStreamRagRequest(BaseModel):
     ticket_id: str | None = None
     idea_card_text: str | None = None
     source: Literal["jira"] | None = None
+    foundational_value_streams_raw: list[str] = Field(default_factory=list)
+    foundational_value_streams_canonical: list[str] = Field(default_factory=list)
+    foundational_value_stream_entity_ids: list[str] = Field(default_factory=list)
     top_k_historical: int = 20
     top_k_value_streams: int = 20
     semantic_fetch_k: int = 40

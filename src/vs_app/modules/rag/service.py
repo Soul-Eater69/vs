@@ -18,6 +18,9 @@ class ValueStreamRagCommand:
     historical_search_backend: str | None = None
     historical_azure_index_name: str | None = None
     allowed_value_stream_names: list[str] | None = None
+    foundational_value_streams_raw: list[str] | None = None
+    foundational_value_streams_canonical: list[str] | None = None
+    foundational_value_stream_entity_ids: list[str] | None = None
     use_llm_finalizer: bool = True
     top_k_historical: int | None = None
     top_k_value_streams: int | None = None
@@ -45,6 +48,7 @@ class ValueStreamRagResult:
     candidate_value_streams: list[dict]
     llm_candidates: list[dict]
     foundational_signals: list[str]
+    foundational_signal_source: str
     historical_source: str
     raw_response: Any
     review_pool_llm_output: Any
@@ -119,6 +123,9 @@ class ValueStreamRagService:
             historical_ticket_fetch_k=command.historical_ticket_fetch_k,
             llm_candidate_window=command.llm_candidate_window,
             final_output_count=command.final_output_count,
+            foundational_value_streams_raw=command.foundational_value_streams_raw,
+            foundational_value_streams_canonical=command.foundational_value_streams_canonical,
+            foundational_value_stream_entity_ids=command.foundational_value_stream_entity_ids,
         )
 
     async def _run_composed_flow(self, command: ValueStreamRagCommand) -> dict:
@@ -171,6 +178,8 @@ class ValueStreamRagService:
         payload.setdefault("historical_value_stream_support", list(historical_support or []))
         payload.setdefault("candidate_value_streams", list(merged or []))
         payload.setdefault("llm_candidates", [])
+        payload.setdefault("foundational_signals", [])
+        payload.setdefault("foundational_signal_source", "none")
         payload.setdefault("historical_source", "composed")
         payload.setdefault("raw_response", None)
         payload.setdefault("review_pool_llm_output", None)
@@ -238,6 +247,7 @@ class ValueStreamRagService:
             candidate_value_streams=list(payload.get("candidate_value_streams", []) or []),
             llm_candidates=list(payload.get("llm_candidates", []) or []),
             foundational_signals=list(payload.get("foundational_signals", []) or []),
+            foundational_signal_source=str(payload.get("foundational_signal_source", "") or ""),
             historical_source=str(payload.get("historical_source", "") or ""),
             raw_response=payload.get("raw_response"),
             review_pool_llm_output=payload.get("review_pool_llm_output"),

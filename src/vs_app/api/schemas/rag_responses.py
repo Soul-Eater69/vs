@@ -21,6 +21,7 @@ class ValueStreamRagResponse(BaseModel):
     candidate_value_streams: list[dict] = Field(default_factory=list)
     llm_candidates: list[dict] = Field(default_factory=list)
     foundational_signals: list[str] = Field(default_factory=list)
+    foundational_signal_source: str = ""
     historical_source: str = ""
     raw_response: Any = None
     review_pool_llm_output: Any = None
@@ -66,6 +67,7 @@ class ValueStreamRagResponse(BaseModel):
             candidate_value_streams=list(getattr(result, "candidate_value_streams", []) or []),
             llm_candidates=list(getattr(result, "llm_candidates", []) or []),
             foundational_signals=list(getattr(result, "foundational_signals", []) or []),
+            foundational_signal_source=str(getattr(result, "foundational_signal_source", "") or ""),
             historical_source=str(getattr(result, "historical_source", "") or ""),
             raw_response=getattr(result, "raw_response", None),
             review_pool_llm_output=getattr(result, "review_pool_llm_output", None),

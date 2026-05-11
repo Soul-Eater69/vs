@@ -99,6 +99,7 @@ class TicketMetrics:
     selection_source_llm_pick: int = 0
     selection_source_safe_backfill: int = 0
     foundational_signals: list[str] | None = None
+    foundational_signal_source: str = ""
     foundational_signal_count: int = 0
     foundational_candidate_count: int = 0
     selected_foundational_count: int = 0
@@ -734,11 +735,15 @@ def evaluate_one(
     output_count_mode: str = "fixed",
     gt_buffer: int = 0,
 ) -> TicketMetrics:
-    from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
+    from vs_app.integrations.files.idea_card_extractor import (
+        build_foundational_metadata,
+        extract_idea_card_text,
+    )
     from vs_app.modules.rag.pipeline import select_value_streams
 
     start = time.perf_counter()
     text = extract_idea_card_text(input_path=item.path)
+    foundational_metadata = build_foundational_metadata(text)
     exclude_ids = [item.ticket_id] if exclude_source_ticket else None
 
     payload = select_value_streams(
@@ -749,6 +754,13 @@ def evaluate_one(
         historical_search_backend=historical_search_backend,
         historical_azure_index_name=historical_azure_index_name,
         exclude_ticket_ids=exclude_ids,
+        foundational_value_streams_raw=foundational_metadata.get("foundational_value_streams_raw"),
+        foundational_value_streams_canonical=foundational_metadata.get(
+            "foundational_value_streams_canonical"
+        ),
+        foundational_value_stream_entity_ids=foundational_metadata.get(
+            "foundational_value_stream_entity_ids"
+        ),
     )
     elapsed = time.perf_counter() - start
 
@@ -806,6 +818,7 @@ def evaluate_one(
         selection_source_llm_pick=int(source_counts.get("llm_pick") or 0),
         selection_source_safe_backfill=int(source_counts.get("safe_backfill") or 0),
         foundational_signals=list(payload.get("foundational_signals", []) or []),
+        foundational_signal_source=str(payload.get("foundational_signal_source") or ""),
         foundational_signal_count=len(payload.get("foundational_signals", []) or []),
         foundational_candidate_count=int(foundational["foundational_candidate_count"]),
         selected_foundational_count=int(foundational["selected_foundational_count"]),
@@ -1092,6 +1105,7 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "selection_source_llm_pick",
         "selection_source_safe_backfill",
         "foundational_signal_count",
+        "foundational_signal_source",
         "foundational_candidate_count",
         "selected_foundational_count",
         "foundational_recall",

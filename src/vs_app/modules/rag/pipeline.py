@@ -23,11 +23,15 @@ def select_value_streams(
     historical_azure_index_name: str | None = None,
     allowed_value_stream_names: Optional[List[str]] = None,
     exclude_ticket_ids: Optional[List[str]] = None,
+    foundational_value_streams_raw: Optional[List[str]] = None,
+    foundational_value_streams_canonical: Optional[List[str]] = None,
+    foundational_value_stream_entity_ids: Optional[List[str]] = None,
 ) -> dict:
     from .augmentation.candidate_merger import CandidateWindowPolicy, merge_candidate_sources
     from .augmentation.finalizer import generate_review_pool_value_streams
     from .augmentation.foundational_signals import (
         annotate_foundational_signals,
+        foundational_signal_source,
         foundational_signal_names,
     )
     from .config.runtime import derive_rag_runtime_config
@@ -83,14 +87,33 @@ def select_value_streams(
         else CandidateWindowPolicy(),
         max_llm_candidates=llm_candidate_window,
     )
-    foundational_signals = foundational_signal_names(retrieval_query)
+    foundational_source_raw = foundational_value_streams_raw or []
+    foundational_source_canonical = foundational_value_streams_canonical or []
+    foundational_source_ids = foundational_value_stream_entity_ids or []
+    foundational_signals = foundational_signal_names(
+        foundational_value_streams_canonical=foundational_source_canonical,
+        foundational_value_streams_raw=foundational_source_raw,
+        idea_text_fallback=cleaned_query,
+    )
+    foundational_source = foundational_signal_source(
+        foundational_value_streams_canonical=foundational_source_canonical,
+        foundational_value_stream_entity_ids=foundational_source_ids,
+        foundational_value_streams_raw=foundational_source_raw,
+        foundational_signals=foundational_signals,
+    )
     augmented["llm_candidates"] = annotate_foundational_signals(
         augmented["llm_candidates"],
-        retrieval_query,
+        foundational_value_streams_canonical=foundational_source_canonical,
+        foundational_value_stream_entity_ids=foundational_source_ids,
+        foundational_value_streams_raw=foundational_source_raw,
+        idea_text_fallback=cleaned_query,
     )
     augmented["merged_candidates"] = annotate_foundational_signals(
         augmented["merged_candidates"],
-        retrieval_query,
+        foundational_value_streams_canonical=foundational_source_canonical,
+        foundational_value_stream_entity_ids=foundational_source_ids,
+        foundational_value_streams_raw=foundational_source_raw,
+        idea_text_fallback=cleaned_query,
     )
     finalizer_started = perf_counter()
     generated = generate_review_pool_value_streams(
@@ -130,6 +153,7 @@ def select_value_streams(
     debug["prompt_debug"] = raw_response.get("prompt_debug", {}) if isinstance(raw_response, dict) else {}
     debug["candidate_window_counts"] = augmented.get("candidate_window_counts", {})
     debug["foundational_signals"] = foundational_signals
+    debug["foundational_signal_source"] = foundational_source
     return {
         "selected_value_streams": generated["selected_value_streams"],
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],
@@ -157,6 +181,7 @@ def select_value_streams(
         "candidate_window_policy": augmented.get("candidate_window_policy", {}),
         "candidate_window_counts": augmented.get("candidate_window_counts", {}),
         "foundational_signals": foundational_signals,
+        "foundational_signal_source": foundational_source,
         "rag_runtime_config": runtime_config_dict,
         "historical_source": historical.get("historical_source", ""),
         "raw_response": raw_response,
@@ -238,6 +263,7 @@ def run_historical_rag_pipeline(
         "candidate_value_streams": result.get("candidate_value_streams", []),
         "llm_candidates": result.get("llm_candidates", []),
         "foundational_signals": result.get("foundational_signals", []),
+        "foundational_signal_source": result.get("foundational_signal_source", ""),
         "historical_source": result.get("historical_source", ""),
         "raw_response": result.get("raw_response"),
         "review_pool_llm_output": result.get("review_pool_llm_output"),

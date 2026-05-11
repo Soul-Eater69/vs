@@ -1,123 +1,76 @@
 from __future__ import annotations
 
-import re
-
-
-FOUNDATIONAL_ALIAS_MAP: dict[str, list[str]] = {
-    "establish product offering": [
-        "Establish Product Offering",
-    ],
-    "order to cash": [
-        "Order to Cash for Group Coverage",
-    ],
-    "order to cash for group coverage": [
-        "Order to Cash for Group Coverage",
-    ],
-    "configure price and quote": [
-        "Configure, Price, and Quote",
-    ],
-    "manage leads and opportunities": [
-        "Manage Leads and Opportunities",
-    ],
-    "resolve request inquiry": [
-        "Resolve Request-Inquiry",
-    ],
-    "resolve request-inquiry": [
-        "Resolve Request-Inquiry",
-    ],
-    "perform engagement": [
-        "Perform Engagement",
-    ],
-    "manage member care": [
-        "Manage Member Care",
-    ],
-    "ensure payment integrity": [
-        "Ensure Payment Integrity",
-        "Issue Payment",
-        "Manage Invoice and Payment Receipt",
-    ],
-}
-
-
-FOUNDATIONAL_SIGNAL_DISPLAY: dict[str, str] = {
-    "establish product offering": "Establish Product Offering",
-    "order to cash": "Order to Cash",
-    "order to cash for group coverage": "Order to Cash for Group Coverage",
-    "configure price and quote": "Configure, Price and Quote",
-    "manage leads and opportunities": "Manage Leads and Opportunities",
-    "resolve request inquiry": "Resolve Request Inquiry",
-    "resolve request-inquiry": "Resolve Request-Inquiry",
-    "perform engagement": "Perform Engagement",
-    "manage member care": "Manage Member Care",
-    "ensure payment integrity": "Ensure Payment Integrity",
-}
-
-
-def normalize_text(value: str) -> str:
-    text = (value or "").lower()
-    text = text.replace("&", " and ")
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    return " ".join(text.split())
-
-
-def _contains_phrase(text_norm: str, phrase_norm: str) -> bool:
-    if not text_norm or not phrase_norm:
-        return False
-    return f" {phrase_norm} " in f" {text_norm} "
-
-
-def extract_foundational_signals(idea_text: str) -> list[str]:
-    """Extract foundational/current-card value-stream signals from idea text.
-
-    This uses conservative phrase matching against known value-stream aliases.
-    It is deterministic and does not auto-select anything.
-    """
-    text_norm = normalize_text(idea_text)
-    if not text_norm:
-        return []
-
-    found: list[str] = []
-    seen: set[str] = set()
-
-    for signal in FOUNDATIONAL_ALIAS_MAP:
-        signal_norm = normalize_text(signal)
-        if _contains_phrase(text_norm, signal_norm) and signal_norm not in seen:
-            seen.add(signal_norm)
-            found.append(FOUNDATIONAL_SIGNAL_DISPLAY.get(signal_norm, signal))
-
-    return found
+from vs_app.integrations.files.idea_card_extractor import extract_candidate_value_stream_mentions
+from vs_app.modules.value_streams.canonical import (
+    canonicalize_foundational_mentions,
+    normalize_vs_name,
+)
 
 
 def annotate_foundational_signals(
     candidates: list[dict],
-    idea_text: str,
+    *,
+    foundational_value_streams_canonical: list[str] | None = None,
+    foundational_value_stream_entity_ids: list[str] | None = None,
+    foundational_value_streams_raw: list[str] | None = None,
+    idea_text_fallback: str | None = None,
 ) -> list[dict]:
-    """Annotate candidates that match foundational/current-card signals.
+    """Annotate candidates that match ingestion-provided foundational streams.
 
-    This does not auto-select and does not change candidate lane. It only adds
-    metadata consumed by the Review Pool LLM prompt and UI/debug.
+    Priority:
+    1. Match by entity_id when provided.
+    2. Match by canonical value-stream name.
+    3. Fallback to canonicalizing raw mentions.
+    4. Optional text fallback only when no metadata exists.
+
+    This function does not auto-select. It only adds prompt/debug metadata.
     """
-    signals = extract_foundational_signals(idea_text)
-    candidate_to_signal: dict[str, tuple[str, str]] = {}
+    ids = {
+        str(value or "").strip().lower()
+        for value in (foundational_value_stream_entity_ids or [])
+        if str(value or "").strip()
+    }
+    canonical_names = {
+        normalize_vs_name(value)
+        for value in (foundational_value_streams_canonical or [])
+        if str(value or "").strip()
+    }
 
-    for signal in signals:
-        signal_norm = normalize_text(signal)
-        canonical_names = FOUNDATIONAL_ALIAS_MAP.get(signal_norm) or []
+    raw_to_canonical: dict[str, tuple[str, str]] = {}
 
-        for canonical_name in canonical_names:
-            canonical_norm = normalize_text(canonical_name)
-            match_type = "exact" if canonical_norm == signal_norm else "alias"
-            candidate_to_signal[canonical_norm] = (signal, match_type)
+    for value in foundational_value_streams_canonical or []:
+        norm = normalize_vs_name(value)
+        if norm:
+            raw_to_canonical[norm] = (str(value).strip(), "canonical")
+
+    if not canonical_names and foundational_value_streams_raw:
+        for item in canonicalize_foundational_mentions(foundational_value_streams_raw):
+            norm = normalize_vs_name(item.canonical_name)
+            canonical_names.add(norm)
+            raw_to_canonical[norm] = (item.raw, item.match_type)
+
+    if not canonical_names and not ids and idea_text_fallback:
+        raw_mentions = extract_text_fallback_mentions(idea_text_fallback)
+        for item in canonicalize_foundational_mentions(raw_mentions):
+            norm = normalize_vs_name(item.canonical_name)
+            canonical_names.add(norm)
+            raw_to_canonical[norm] = (item.raw, item.match_type)
 
     annotated: list[dict] = []
     for row in candidates:
         out = dict(row)
-        name_norm = normalize_text(str(row.get("entity_name") or ""))
+        entity_id = str(row.get("entity_id") or "").strip().lower()
+        name = str(row.get("entity_name") or "").strip()
+        name_norm = normalize_vs_name(name)
 
-        if name_norm in candidate_to_signal:
-            signal_text, match_type = candidate_to_signal[name_norm]
+        if entity_id and entity_id in ids:
             out["foundational_signal"] = True
-            out["foundational_match_text"] = signal_text
+            out["foundational_match_text"] = name
+            out["foundational_match_type"] = "entity_id"
+        elif name_norm in canonical_names:
+            match_text, match_type = raw_to_canonical.get(name_norm, (name, "canonical"))
+            out["foundational_signal"] = True
+            out["foundational_match_text"] = match_text
             out["foundational_match_type"] = match_type
         else:
             out.setdefault("foundational_signal", False)
@@ -127,5 +80,53 @@ def annotate_foundational_signals(
     return annotated
 
 
-def foundational_signal_names(idea_text: str) -> list[str]:
-    return extract_foundational_signals(idea_text)
+def foundational_signal_names(
+    *,
+    foundational_value_streams_canonical: list[str] | None = None,
+    foundational_value_streams_raw: list[str] | None = None,
+    idea_text_fallback: str | None = None,
+) -> list[str]:
+    if foundational_value_streams_canonical:
+        return list(dict.fromkeys(foundational_value_streams_canonical))
+
+    raw_mentions = list(foundational_value_streams_raw or [])
+    if not raw_mentions and idea_text_fallback:
+        raw_mentions = extract_text_fallback_mentions(idea_text_fallback)
+
+    return list(
+        dict.fromkeys(
+            item.canonical_name for item in canonicalize_foundational_mentions(raw_mentions)
+        )
+    )
+
+
+def foundational_signal_source(
+    *,
+    foundational_value_streams_canonical: list[str] | None = None,
+    foundational_value_stream_entity_ids: list[str] | None = None,
+    foundational_value_streams_raw: list[str] | None = None,
+    foundational_signals: list[str] | None = None,
+) -> str:
+    has_metadata = any(
+        [
+            foundational_value_streams_canonical,
+            foundational_value_stream_entity_ids,
+            foundational_value_streams_raw,
+        ]
+    )
+    if has_metadata:
+        return "ingestion_metadata"
+    if foundational_signals:
+        return "text_fallback"
+    return "none"
+
+
+def extract_text_fallback_mentions(text: str) -> list[str]:
+    """Temporary backward-compatible fallback.
+
+    Do not grow alias logic here. Pull likely mention strings from raw text, then
+    delegate canonicalization to the shared value-stream resolver.
+    """
+    if not text:
+        return []
+    return extract_candidate_value_stream_mentions(text)

@@ -15,9 +15,11 @@ from fastapi.responses import StreamingResponse
 from vs_app.api.dependencies import ApiContainer, get_container
 from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
+from vs_app.integrations.files.idea_card_extractor import build_foundational_metadata
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
 from vs_app.modules.rag.augmentation.foundational_signals import (
     annotate_foundational_signals,
+    foundational_signal_source,
     foundational_signal_names,
 )
 from vs_app.modules.rag.service import ValueStreamRagCommand
@@ -98,6 +100,24 @@ def _source_ticket_exclusions(request: ValueStreamRagRequest) -> list[str] | Non
     return [request.ticket_id]
 
 
+def _foundational_metadata_from_request(request: ValueStreamRagRequest, raw_text: str) -> dict:
+    if (
+        request.foundational_value_streams_raw
+        or request.foundational_value_streams_canonical
+        or request.foundational_value_stream_entity_ids
+    ):
+        return {
+            "foundational_value_streams_raw": list(request.foundational_value_streams_raw or []),
+            "foundational_value_streams_canonical": list(
+                request.foundational_value_streams_canonical or []
+            ),
+            "foundational_value_stream_entity_ids": list(
+                request.foundational_value_stream_entity_ids or []
+            ),
+        }
+    return build_foundational_metadata(raw_text)
+
+
 async def _condense_or_fallback(condense_idea_card, raw_text: str, cleaned_query: str) -> tuple[str, list[str]]:
     warnings: list[str] = []
     try:
@@ -155,6 +175,7 @@ async def predict_value_streams_stream(
                 )
             else:
                 raise ValueError("No idea card text or ticket ID provided")
+            foundational_metadata = _foundational_metadata_from_request(request, raw_text)
             timing_ms["extract"] = round((perf_counter() - step_started) * 1000)
 
             # Step 2: Condense once. The same condensed query feeds semantic VS and historical retrieval.
@@ -213,14 +234,37 @@ async def predict_value_streams_stream(
                 ),
                 max_llm_candidates=runtime_config.llm_candidate_window,
             )
-            foundational_signals = foundational_signal_names(retrieval_query)
+            foundational_raw = list(foundational_metadata.get("foundational_value_streams_raw") or [])
+            foundational_canonical = list(
+                foundational_metadata.get("foundational_value_streams_canonical") or []
+            )
+            foundational_ids = list(
+                foundational_metadata.get("foundational_value_stream_entity_ids") or []
+            )
+            foundational_signals = foundational_signal_names(
+                foundational_value_streams_canonical=foundational_canonical,
+                foundational_value_streams_raw=foundational_raw,
+                idea_text_fallback=cleaned_query,
+            )
+            foundational_source = foundational_signal_source(
+                foundational_value_streams_canonical=foundational_canonical,
+                foundational_value_stream_entity_ids=foundational_ids,
+                foundational_value_streams_raw=foundational_raw,
+                foundational_signals=foundational_signals,
+            )
             augmented["llm_candidates"] = annotate_foundational_signals(
                 augmented["llm_candidates"],
-                retrieval_query,
+                foundational_value_streams_canonical=foundational_canonical,
+                foundational_value_stream_entity_ids=foundational_ids,
+                foundational_value_streams_raw=foundational_raw,
+                idea_text_fallback=cleaned_query,
             )
             augmented["merged_candidates"] = annotate_foundational_signals(
                 augmented["merged_candidates"],
-                retrieval_query,
+                foundational_value_streams_canonical=foundational_canonical,
+                foundational_value_stream_entity_ids=foundational_ids,
+                foundational_value_streams_raw=foundational_raw,
+                idea_text_fallback=cleaned_query,
             )
             timing_ms["merge"] = round((perf_counter() - step_started) * 1000)
 
@@ -299,6 +343,7 @@ async def predict_value_streams_stream(
                 "candidate_window_policy": augmented.get("candidate_window_policy", {}),
                 "candidate_window_counts": augmented.get("candidate_window_counts", {}),
                 "foundational_signals": foundational_signals,
+                "foundational_signal_source": foundational_source,
                 "rag_runtime_config": asdict(runtime_config),
                 "historical_source": historical.get("historical_source", ""),
                 "raw_response": raw_response,
@@ -318,6 +363,7 @@ async def predict_value_streams_stream(
                     "rag_runtime_config": asdict(runtime_config),
                     "candidate_window_counts": augmented.get("candidate_window_counts", {}),
                     "foundational_signals": foundational_signals,
+                    "foundational_signal_source": foundational_source,
                 },
                 "historical_excluded_ticket_ids": exclude_ids or [],
                 "ground_truth": _ground_truth_for_ticket(request.ticket_id),
@@ -339,6 +385,7 @@ async def predict_value_streams(
     request: ValueStreamRagRequest,
     container: ApiContainer = Depends(get_container),
 ) -> ValueStreamRagResponse:
+    foundational_metadata = _foundational_metadata_from_request(request, request.idea_card_text or "")
     command = ValueStreamRagCommand(
         ticket_id=request.ticket_id,
         idea_card_text=request.idea_card_text,
@@ -350,6 +397,13 @@ async def predict_value_streams(
         historical_ticket_fetch_k=request.historical_ticket_fetch_k,
         llm_candidate_window=request.llm_candidate_window,
         final_output_count=request.final_output_count,
+        foundational_value_streams_raw=foundational_metadata.get("foundational_value_streams_raw"),
+        foundational_value_streams_canonical=foundational_metadata.get(
+            "foundational_value_streams_canonical"
+        ),
+        foundational_value_stream_entity_ids=foundational_metadata.get(
+            "foundational_value_stream_entity_ids"
+        ),
         historical_search_backend=_HISTORICAL_BACKEND,
         historical_azure_index_name=_HISTORICAL_AZURE_INDEX,
         use_llm_finalizer=request.use_llm_finalizer,

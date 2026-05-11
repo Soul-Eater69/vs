@@ -1,7 +1,10 @@
+import inspect
+
 from vs_app.modules.rag.augmentation.foundational_signals import (
     annotate_foundational_signals,
     foundational_signal_names,
 )
+import vs_app.modules.rag.augmentation.foundational_signals as foundational_module
 from vs_app.modules.rag.augmentation.prompt_context import format_review_pool_candidate_blocks
 from vs_app.modules.value_streams.canonical import (
     canonicalize_value_stream_name,
@@ -71,6 +74,27 @@ def test_order_to_cash_does_not_need_raw_text() -> None:
     )
 
     assert annotated[0]["foundational_signal"] is True
+
+
+def test_text_fallback_uses_shared_canonical_resolver() -> None:
+    candidates = [
+        {"entity_name": "Order to Cash for Group Coverage"},
+    ]
+
+    annotated = annotate_foundational_signals(
+        candidates,
+        idea_text_fallback="Foundational Value Streams: Order to Cash",
+    )
+
+    assert annotated[0]["foundational_signal"] is True
+    assert annotated[0]["foundational_match_text"] == "Order to Cash"
+
+
+def test_rag_foundational_signals_has_no_alias_map() -> None:
+    source = inspect.getsource(foundational_module)
+
+    assert "FOUNDATIONAL_ALIAS_MAP" not in source
+    assert "DOMAIN_SIGNAL_EXPANSIONS" not in source
 
 
 def test_exact_foundational_signal_is_printed_in_review_pool_candidate_block() -> None:

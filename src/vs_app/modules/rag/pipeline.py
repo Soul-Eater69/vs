@@ -26,6 +26,7 @@ def select_value_streams(
     foundational_value_streams_raw: Optional[List[str]] = None,
     foundational_value_streams_canonical: Optional[List[str]] = None,
     foundational_value_stream_entity_ids: Optional[List[str]] = None,
+    foundational_value_stream_matches: Optional[List[dict]] = None,
 ) -> dict:
     from .augmentation.candidate_merger import CandidateWindowPolicy, merge_candidate_sources
     from .augmentation.finalizer import generate_review_pool_value_streams
@@ -90,6 +91,7 @@ def select_value_streams(
     foundational_source_raw = foundational_value_streams_raw or []
     foundational_source_canonical = foundational_value_streams_canonical or []
     foundational_source_ids = foundational_value_stream_entity_ids or []
+    foundational_matches = list(foundational_value_stream_matches or [])
     foundational_signals = foundational_signal_names(
         foundational_value_streams_canonical=foundational_source_canonical,
         foundational_value_streams_raw=foundational_source_raw,
@@ -154,6 +156,7 @@ def select_value_streams(
     debug["candidate_window_counts"] = augmented.get("candidate_window_counts", {})
     debug["foundational_signals"] = foundational_signals
     debug["foundational_signal_source"] = foundational_source
+    debug["foundational_value_stream_matches"] = foundational_matches
     return {
         "selected_value_streams": generated["selected_value_streams"],
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],
@@ -182,6 +185,7 @@ def select_value_streams(
         "candidate_window_counts": augmented.get("candidate_window_counts", {}),
         "foundational_signals": foundational_signals,
         "foundational_signal_source": foundational_source,
+        "foundational_value_stream_matches": foundational_matches,
         "rag_runtime_config": runtime_config_dict,
         "historical_source": historical.get("historical_source", ""),
         "raw_response": raw_response,
@@ -264,6 +268,7 @@ def run_historical_rag_pipeline(
         "llm_candidates": result.get("llm_candidates", []),
         "foundational_signals": result.get("foundational_signals", []),
         "foundational_signal_source": result.get("foundational_signal_source", ""),
+        "foundational_value_stream_matches": result.get("foundational_value_stream_matches", []),
         "historical_source": result.get("historical_source", ""),
         "raw_response": result.get("raw_response"),
         "review_pool_llm_output": result.get("review_pool_llm_output"),

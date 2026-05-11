@@ -107,15 +107,12 @@ def foundational_signal_source(
     foundational_value_streams_raw: list[str] | None = None,
     foundational_signals: list[str] | None = None,
 ) -> str:
-    has_metadata = any(
-        [
-            foundational_value_streams_canonical,
-            foundational_value_stream_entity_ids,
-            foundational_value_streams_raw,
-        ]
-    )
-    if has_metadata:
+    if foundational_value_streams_canonical or foundational_value_stream_entity_ids:
         return "ingestion_metadata"
+    if foundational_value_streams_raw and foundational_signals:
+        return "ingestion_metadata"
+    if foundational_value_streams_raw and not foundational_signals:
+        return "ingestion_metadata_empty"
     if foundational_signals:
         return "text_fallback"
     return "none"

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from pathlib import Path
 from pydantic import ValidationError
+from types import SimpleNamespace
 import asyncio
 import shutil
 
@@ -93,3 +94,37 @@ def test_condense_fallback_returns_cleaned_text_on_timeout(monkeypatch) -> None:
 
     assert condensed == "cleaned query"
     assert "using cleaned idea-card text" in warnings[0]
+
+
+def test_non_stream_ticket_only_builds_foundational_metadata_and_uses_raw_text(monkeypatch) -> None:
+    request = ValueStreamRagRequest(ticket_id="IDMT-1", final_output_count=5)
+    raw_text = "Foundational Value Streams: Order to Cash"
+    captured = {}
+
+    monkeypatch.setattr(
+        "vs_app.integrations.files.idea_card_extractor.extract_idea_card_text",
+        lambda **kwargs: raw_text,
+    )
+    monkeypatch.setattr(rag, "_ground_truth_for_ticket", lambda ticket_id: [])
+
+    class FakeRag:
+        async def analyze(self, command):
+            captured["command"] = command
+            return SimpleNamespace(
+                foundational_signals=list(command.foundational_value_streams_canonical or []),
+                foundational_signal_source="ingestion_metadata",
+                foundational_value_stream_matches=list(command.foundational_value_stream_matches or []),
+            )
+
+    response = asyncio.run(
+        rag.predict_value_streams(
+            request,
+            container=SimpleNamespace(rag=FakeRag()),
+        )
+    )
+
+    command = captured["command"]
+    assert command.idea_card_text == raw_text
+    assert "Order to Cash for Group Coverage" in command.foundational_value_streams_canonical
+    assert response.foundational_value_stream_matches[0]["raw"] == "Order to Cash"
+    assert response.foundational_value_stream_matches[0]["match_type"] == "alias"

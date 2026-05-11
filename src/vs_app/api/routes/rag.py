@@ -17,6 +17,7 @@ from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
 from vs_app.integrations.files.idea_card_extractor import build_foundational_metadata
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
+from vs_app.modules.value_streams.canonical import canonicalize_foundational_mentions
 from vs_app.modules.rag.augmentation.foundational_signals import (
     annotate_foundational_signals,
     foundational_signal_source,
@@ -106,16 +107,83 @@ def _foundational_metadata_from_request(request: ValueStreamRagRequest, raw_text
         or request.foundational_value_streams_canonical
         or request.foundational_value_stream_entity_ids
     ):
+        raw_values = list(request.foundational_value_streams_raw or [])
+        canonical_values = list(request.foundational_value_streams_canonical or [])
+        entity_ids = list(request.foundational_value_stream_entity_ids or [])
         return {
-            "foundational_value_streams_raw": list(request.foundational_value_streams_raw or []),
-            "foundational_value_streams_canonical": list(
-                request.foundational_value_streams_canonical or []
-            ),
-            "foundational_value_stream_entity_ids": list(
-                request.foundational_value_stream_entity_ids or []
+            "foundational_value_streams_raw": raw_values,
+            "foundational_value_streams_canonical": canonical_values,
+            "foundational_value_stream_entity_ids": entity_ids,
+            "foundational_value_stream_matches": _foundational_matches_from_metadata(
+                raw_values,
+                canonical_values,
+                entity_ids,
             ),
         }
     return build_foundational_metadata(raw_text)
+
+
+def _foundational_matches_from_metadata(
+    raw_values: list[str],
+    canonical_values: list[str],
+    entity_ids: list[str],
+) -> list[dict]:
+    matches: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    for item in canonicalize_foundational_mentions(raw_values):
+        key = (item.raw, item.canonical_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        matches.append(
+            {
+                "raw": item.raw,
+                "canonical_name": item.canonical_name,
+                "entity_id": item.entity_id,
+                "match_type": item.match_type,
+            }
+        )
+
+    for idx, canonical_name in enumerate(canonical_values):
+        clean = str(canonical_name or "").strip()
+        if not clean:
+            continue
+        key = (clean, clean)
+        if key in seen:
+            continue
+        seen.add(key)
+        matches.append(
+            {
+                "raw": clean,
+                "canonical_name": clean,
+                "entity_id": entity_ids[idx] if idx < len(entity_ids) else None,
+                "match_type": "canonical",
+            }
+        )
+
+    return matches
+
+
+def _raw_text_for_foundational_metadata(request: ValueStreamRagRequest) -> str:
+    raw_text = request.idea_card_text or ""
+    if raw_text or not request.ticket_id:
+        return raw_text
+
+    try:
+        from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
+
+        return extract_idea_card_text(
+            doc_id=request.ticket_id,
+            local_card_dir=_IDEA_CARDS_DIR,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not extract idea-card text for foundational metadata: ticket_id=%s error=%s",
+            request.ticket_id,
+            exc,
+        )
+        return ""
 
 
 async def _condense_or_fallback(condense_idea_card, raw_text: str, cleaned_query: str) -> tuple[str, list[str]]:
@@ -241,6 +309,9 @@ async def predict_value_streams_stream(
             foundational_ids = list(
                 foundational_metadata.get("foundational_value_stream_entity_ids") or []
             )
+            foundational_matches = list(
+                foundational_metadata.get("foundational_value_stream_matches") or []
+            )
             foundational_signals = foundational_signal_names(
                 foundational_value_streams_canonical=foundational_canonical,
                 foundational_value_streams_raw=foundational_raw,
@@ -344,6 +415,7 @@ async def predict_value_streams_stream(
                 "candidate_window_counts": augmented.get("candidate_window_counts", {}),
                 "foundational_signals": foundational_signals,
                 "foundational_signal_source": foundational_source,
+                "foundational_value_stream_matches": foundational_matches,
                 "rag_runtime_config": asdict(runtime_config),
                 "historical_source": historical.get("historical_source", ""),
                 "raw_response": raw_response,
@@ -364,6 +436,7 @@ async def predict_value_streams_stream(
                     "candidate_window_counts": augmented.get("candidate_window_counts", {}),
                     "foundational_signals": foundational_signals,
                     "foundational_signal_source": foundational_source,
+                    "foundational_value_stream_matches": foundational_matches,
                 },
                 "historical_excluded_ticket_ids": exclude_ids or [],
                 "ground_truth": _ground_truth_for_ticket(request.ticket_id),
@@ -385,10 +458,14 @@ async def predict_value_streams(
     request: ValueStreamRagRequest,
     container: ApiContainer = Depends(get_container),
 ) -> ValueStreamRagResponse:
-    foundational_metadata = _foundational_metadata_from_request(request, request.idea_card_text or "")
+    raw_text_for_foundational_metadata = _raw_text_for_foundational_metadata(request)
+    foundational_metadata = _foundational_metadata_from_request(
+        request,
+        raw_text_for_foundational_metadata,
+    )
     command = ValueStreamRagCommand(
         ticket_id=request.ticket_id,
-        idea_card_text=request.idea_card_text,
+        idea_card_text=request.idea_card_text or raw_text_for_foundational_metadata or None,
         source=request.source,
         fetch_count=max(request.top_k_historical, request.top_k_value_streams),
         top_k_historical=request.top_k_historical,
@@ -403,6 +480,9 @@ async def predict_value_streams(
         ),
         foundational_value_stream_entity_ids=foundational_metadata.get(
             "foundational_value_stream_entity_ids"
+        ),
+        foundational_value_stream_matches=foundational_metadata.get(
+            "foundational_value_stream_matches"
         ),
         historical_search_backend=_HISTORICAL_BACKEND,
         historical_azure_index_name=_HISTORICAL_AZURE_INDEX,

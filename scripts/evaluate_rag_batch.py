@@ -761,6 +761,9 @@ def evaluate_one(
         foundational_value_stream_entity_ids=foundational_metadata.get(
             "foundational_value_stream_entity_ids"
         ),
+        foundational_value_stream_matches=foundational_metadata.get(
+            "foundational_value_stream_matches"
+        ),
     )
     elapsed = time.perf_counter() - start
 

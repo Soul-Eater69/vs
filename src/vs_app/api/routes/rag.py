@@ -13,7 +13,6 @@ from vs_app.api.dependencies import ApiContainer, get_container
 from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
-from vs_app.modules.value_streams.canonical import canonicalize_foundational_mentions
 from vs_app.modules.rag.service import ValueStreamRagCommand
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -85,78 +84,6 @@ def _ground_truth_for_ticket(ticket_id: str | None) -> list[str]:
     return _ground_truth_from_azure(ticket_id)
 
 
-def _anchor_metadata_from_request(request: ValueStreamRagRequest) -> dict:
-    """Return only explicitly provided trusted anchors.
-
-    Do not infer anchors from current idea-card text. Linked child theme labels are
-    historical labels or evaluation ground truth, not prediction input.
-    """
-    raw_values = list(request.foundational_value_streams_raw or [])
-    canonical_values = list(request.foundational_value_streams_canonical or [])
-    entity_ids = list(request.foundational_value_stream_entity_ids or [])
-
-    if not (raw_values or canonical_values or entity_ids):
-        return {
-            "foundational_value_streams_raw": [],
-            "foundational_value_streams_canonical": [],
-            "foundational_value_stream_entity_ids": [],
-            "foundational_value_stream_matches": [],
-        }
-
-    return {
-        "foundational_value_streams_raw": raw_values,
-        "foundational_value_streams_canonical": canonical_values,
-        "foundational_value_stream_entity_ids": entity_ids,
-        "foundational_value_stream_matches": _anchor_matches_from_request_metadata(
-            raw_values,
-            canonical_values,
-            entity_ids,
-        ),
-    }
-
-
-def _anchor_matches_from_request_metadata(
-    raw_values: list[str],
-    canonical_values: list[str],
-    entity_ids: list[str],
-) -> list[dict]:
-    matches: list[dict] = []
-    seen: set[tuple[str, str]] = set()
-
-    for item in canonicalize_foundational_mentions(raw_values):
-        key = (item.raw, item.canonical_name)
-        if key in seen:
-            continue
-        seen.add(key)
-        matches.append(
-            {
-                "raw": item.raw,
-                "canonical_name": item.canonical_name,
-                "entity_id": item.entity_id,
-                "match_type": item.match_type,
-            }
-        )
-
-    for idx, canonical_name in enumerate(canonical_values):
-        clean = str(canonical_name or "").strip()
-        if not clean:
-            continue
-        key = (clean, clean)
-        if key in seen:
-            continue
-        seen.add(key)
-        matches.append(
-            {
-                "raw": clean,
-                "canonical_name": clean,
-                "entity_id": entity_ids[idx] if idx < len(entity_ids) else None,
-                "match_type": "canonical",
-            }
-        )
-
-    return matches
-
-
 def _idea_card_text_from_request(request: ValueStreamRagRequest) -> str:
     """Load the idea-card body used for prediction, without extracting labels."""
     raw_text = request.idea_card_text or ""
@@ -181,7 +108,6 @@ def _idea_card_text_from_request(request: ValueStreamRagRequest) -> str:
 
 def _command_from_request(request: ValueStreamRagRequest) -> ValueStreamRagCommand:
     idea_card_text = _idea_card_text_from_request(request)
-    anchor_metadata = _anchor_metadata_from_request(request)
     return ValueStreamRagCommand(
         ticket_id=request.ticket_id,
         idea_card_text=request.idea_card_text or idea_card_text or None,
@@ -189,16 +115,6 @@ def _command_from_request(request: ValueStreamRagRequest) -> ValueStreamRagComma
         historical_ticket_fetch_k=request.historical_ticket_fetch_k,
         llm_candidate_window=request.llm_candidate_window,
         final_output_count=request.final_output_count,
-        foundational_value_streams_raw=anchor_metadata.get("foundational_value_streams_raw"),
-        foundational_value_streams_canonical=anchor_metadata.get(
-            "foundational_value_streams_canonical"
-        ),
-        foundational_value_stream_entity_ids=anchor_metadata.get(
-            "foundational_value_stream_entity_ids"
-        ),
-        foundational_value_stream_matches=anchor_metadata.get(
-            "foundational_value_stream_matches"
-        ),
         historical_search_backend=_HISTORICAL_BACKEND,
         historical_azure_index_name=_HISTORICAL_AZURE_INDEX,
         exclude_source_ticket_from_historical=request.exclude_source_ticket_from_historical,

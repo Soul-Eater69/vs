@@ -12,7 +12,6 @@ from evaluate_rag_batch import (
     compute_metrics,
     discover_items,
     dynamic_output_count,
-    foundational_metrics,
     is_transient_gateway_error,
     load_ground_truth_from_azure,
     resolve_final_output_count,
@@ -50,29 +49,6 @@ def test_tiered_output_count_uses_small_gt_sensitive_buffer() -> None:
         min_output_count=8,
         max_output_count=25,
     ) == 3
-
-
-def test_foundational_metrics_reports_selected_and_missed_candidates() -> None:
-    metrics = foundational_metrics(
-        {
-            "selected_value_streams": [{"entity_name": "Order to Cash for Group Coverage"}],
-            "merged_candidate_value_streams": [
-                {
-                    "entity_name": "Order to Cash for Group Coverage",
-                    "foundational_signal": True,
-                },
-                {
-                    "entity_name": "Establish Product Offering",
-                    "foundational_signal": True,
-                },
-            ],
-        }
-    )
-
-    assert metrics["foundational_candidate_count"] == 2
-    assert metrics["selected_foundational_count"] == 1
-    assert metrics["missed_foundational_candidates"] == ["Establish Product Offering"]
-    assert metrics["foundational_recall"] == 0.5
 
 
 def test_discover_items_samples_matching_idea_cards_with_ground_truth() -> None:

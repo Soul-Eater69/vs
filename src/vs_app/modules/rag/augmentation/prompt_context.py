@@ -50,14 +50,6 @@ def format_review_pool_candidate_blocks(
             f"Lane: {lane}",
         ]
 
-        if row.get("foundational_signal"):
-            match_type = str(row.get("foundational_match_type") or "match").strip()
-            match_text = str(row.get("foundational_match_text") or "").strip()
-            if match_text:
-                lines.append(f'Trusted anchor signal: {match_type} match to "{match_text}"')
-            else:
-                lines.append("Trusted anchor signal: matched externally provided value-stream anchor")
-
         description = " ".join(str(row.get("description") or "").split())
         if description:
             lines.append(f"Description: {description[:desc_chars]}")

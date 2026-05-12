@@ -1,17 +1,17 @@
 # Value-Stream RAG Architecture
 
-This document describes the current value-stream prediction flow, the no-leakage
-boundary between prediction and ground truth, runtime thresholds, and the optional
-trusted-anchor mechanism.
+This document describes the current value-stream prediction flow and the boundary
+between prediction input, historical labels, and evaluation ground truth.
 
 ## Core Rule
 
 Current prediction must not extract value-stream labels from the current idea-card
 text.
 
-Value streams come from:
+Prediction uses:
 
 ```text
+idea-card text
 semantic value-stream retrieval
 historical analog retrieval
 candidate merge
@@ -19,15 +19,15 @@ Review Pool LLM selection
 ```
 
 Historical labels from implemented-by child themes are used for historical indexing
-and evaluation ground truth. They are not prediction inputs for the same current
-ticket.
+and evaluation after prediction. They are not passed into the same ticket's
+prediction run.
 
 ## End-To-End Flow
 
 ```mermaid
 flowchart TD
     A[Jira historical ticket] --> B[Implemented-by child theme titles]
-    B --> C[Parse value-stream suffix]
+    B --> C[Parse suffix after source title]
     C --> D[Canonicalize with approved registry]
     D --> E[Historical summary index<br/>direct_vs_names, value_stream_names]
 
@@ -40,18 +40,11 @@ flowchart TD
     I --> K[Merge candidates by value-stream name]
     J --> K
     K --> L[Evidence-qualified LLM candidate window]
-
-    F --> M{Explicit trusted anchors?}
-    M -->|optional request metadata only| N[Annotate matching candidates]
-    M -->|none| L
-    L --> N
-
-    N --> O[Review Pool prompt]
-    O --> P[One structured LLM call]
-    P --> Q[Safe backfill if too few safer picks]
-    Q --> R[Selected value streams]
-
-    R --> S[Evaluation compares to ground truth<br/>after prediction]
+    L --> M[Review Pool prompt]
+    M --> N[One structured LLM call]
+    N --> O[Safe backfill if too few safer picks]
+    O --> P[Selected value streams]
+    P --> Q[Evaluation compares to ground truth<br/>after prediction]
 ```
 
 ## Historical Labels
@@ -66,7 +59,7 @@ Child theme title:
 CP 2025 Health Management & Advocacy: Digital GTM - Establish Product Offering
 ```
 
-The parser extracts the suffix after the source title:
+The parser extracts the value-stream suffix:
 
 ```json
 {
@@ -77,7 +70,7 @@ The parser extracts the suffix after the source title:
 }
 ```
 
-Those labels are stored in the historical index:
+Those labels are stored in historical documents:
 
 ```json
 {
@@ -86,45 +79,10 @@ Those labels are stored in the historical index:
 }
 ```
 
-They support historical analog retrieval and batch evaluation. They must not be
-passed into prediction for the same ticket.
-
-## Trusted Anchors
-
-The code still uses backward-compatible field names such as:
-
-```text
-foundational_signal
-foundational_value_streams_canonical
-foundational_value_stream_matches
-```
-
-Conceptually, these are now **trusted anchors**, not idea-card-derived signals.
-
-Trusted anchors are optional explicit metadata. They may come from:
-
-```text
-manual user override
-admin/debug testing
-external confirmed metadata
-```
-
-They do not come from scanning the current idea card.
-
-Candidate blocks display them as:
-
-```text
-Trusted anchor signal: canonical match to "Order to Cash for Group Coverage"
-Trusted anchor signal: entity_id match to "..."
-Trusted anchor signal: alias match to "Order to Cash"
-```
-
-Anchors are not auto-selection. They are strong context for the Review Pool LLM,
-which still checks business evidence.
+They support historical analog retrieval and batch evaluation. They are not request
+metadata for current prediction.
 
 ## Prediction Flow
-
-For a current idea card:
 
 ```text
 idea-card text
@@ -137,15 +95,13 @@ historical ticket retrieval
    ↓
 merge candidates
    ↓
-optional explicit trusted-anchor annotation
-   ↓
 one Review Pool LLM call
    ↓
 selected value streams
 ```
 
-No `build_foundational_metadata(raw idea-card text)` call exists in the normal
-prediction path.
+The candidate prompt contains only candidate identity, lane, description, semantic
+score, and historical evidence. It does not contain externally supplied label hints.
 
 ## Source Ownership
 
@@ -154,7 +110,6 @@ prediction path.
 | Raw idea-card body extraction | `integrations/files/idea_card_extractor.py` |
 | Historical child-theme suffix parsing | `ingestion/jira/value_stream_labels/theme_title_parser.py` |
 | Canonical value-stream mapping | `modules/value_streams/canonical.py` |
-| Optional trusted-anchor candidate annotation | `modules/rag/augmentation/foundational_signals.py` |
 | Retrieval, merge, finalizer orchestration | `modules/rag/pipeline.py` |
 | Runtime thresholds | `modules/rag/config/runtime.py` |
 | Candidate window lanes | `modules/rag/augmentation/candidate_merger.py` |
@@ -255,7 +210,7 @@ or:
 
 ## Evaluation
 
-Evaluation is deliberately post-prediction:
+Evaluation is post-prediction:
 
 ```text
 selected value streams
@@ -272,9 +227,6 @@ Prediction responses include:
 
 ```json
 {
-  "foundational_signals": [],
-  "foundational_signal_source": "none",
-  "foundational_value_stream_matches": [],
   "candidate_window_counts": {
     "semantic_plus_historical": 12,
     "semantic_only": 1,
@@ -287,12 +239,6 @@ Prediction responses include:
     "llm_candidate_window": 35
   }
 }
-```
-
-When explicit trusted anchors are provided, the source is:
-
-```text
-explicit_request_metadata
 ```
 
 `debug.fingerprints` tracks stable hashes of the query, retrieval sets, LLM

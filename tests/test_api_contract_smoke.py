@@ -43,6 +43,18 @@ def test_rag_request_clamps_final_output_count() -> None:
     assert ValueStreamRagRequest(idea_card_text="hello", final_output_count=0).final_output_count == 1
 
 
+def test_rag_request_rejects_label_injection_fields() -> None:
+    removed_field = "found" + "ational_" + "value_streams_canonical"
+    try:
+        ValueStreamRagRequest(
+            idea_card_text="hello",
+            **{removed_field: ["Order to Cash for Group Coverage"]},
+        )
+        raise AssertionError("Expected validation error")
+    except ValidationError:
+        pass
+
+
 def test_rag_api_defaults_historical_backend_and_truth_to_azure(monkeypatch) -> None:
     assert rag._HISTORICAL_BACKEND == "azure"
 
@@ -83,37 +95,9 @@ def test_idea_cards_list_and_text_extract(monkeypatch) -> None:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def test_idea_card_text_does_not_create_anchor_metadata() -> None:
-    request = ValueStreamRagRequest(
-        idea_card_text="Foundational Value Streams: Order to Cash",
-        final_output_count=5,
-    )
-
-    metadata = rag._anchor_metadata_from_request(request)
-
-    assert metadata["foundational_value_streams_raw"] == []
-    assert metadata["foundational_value_streams_canonical"] == []
-    assert metadata["foundational_value_stream_matches"] == []
-
-
-def test_explicit_anchor_metadata_is_allowed() -> None:
-    request = ValueStreamRagRequest(
-        idea_card_text="Some idea card text",
-        foundational_value_streams_canonical=["Order to Cash for Group Coverage"],
-        final_output_count=5,
-    )
-
-    metadata = rag._anchor_metadata_from_request(request)
-
-    assert metadata["foundational_value_streams_canonical"] == [
-        "Order to Cash for Group Coverage"
-    ]
-    assert metadata["foundational_value_stream_matches"][0]["match_type"] == "canonical"
-
-
-def test_non_stream_ticket_only_uses_raw_text_without_anchor_extraction(monkeypatch) -> None:
+def test_non_stream_ticket_only_uses_raw_text_without_label_extraction(monkeypatch) -> None:
     request = ValueStreamRagRequest(ticket_id="IDMT-1", final_output_count=5)
-    raw_text = "Foundational Value Streams: Order to Cash"
+    raw_text = "Idea card business text"
     captured = {}
 
     monkeypatch.setattr(
@@ -125,11 +109,7 @@ def test_non_stream_ticket_only_uses_raw_text_without_anchor_extraction(monkeypa
     class FakeRag:
         async def analyze(self, command):
             captured["command"] = command
-            return SimpleNamespace(
-                foundational_signals=list(command.foundational_value_streams_canonical or []),
-                foundational_signal_source="none",
-                foundational_value_stream_matches=list(command.foundational_value_stream_matches or []),
-            )
+            return SimpleNamespace()
 
     response = asyncio.run(
         rag.predict_value_streams(
@@ -140,6 +120,5 @@ def test_non_stream_ticket_only_uses_raw_text_without_anchor_extraction(monkeypa
 
     command = captured["command"]
     assert command.idea_card_text == raw_text
-    assert command.foundational_value_streams_canonical == []
-    assert command.foundational_value_stream_matches == []
-    assert response.foundational_value_stream_matches == []
+    assert not hasattr(command, "found" + "ational_" + "value_streams_canonical")
+    assert not hasattr(response, "found" + "ational_" + "value_stream_matches")

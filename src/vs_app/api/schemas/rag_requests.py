@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class ValueStreamRagRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     ticket_id: str | None = None
     idea_card_text: str | None = None
-    foundational_value_streams_raw: list[str] = Field(default_factory=list)
-    foundational_value_streams_canonical: list[str] = Field(default_factory=list)
-    foundational_value_stream_entity_ids: list[str] = Field(default_factory=list)
     semantic_fetch_k: int = 40
     historical_ticket_fetch_k: int = 35
     llm_candidate_window: int = 30

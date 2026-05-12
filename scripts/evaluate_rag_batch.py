@@ -98,13 +98,6 @@ class TicketMetrics:
     candidate_window_semantic_only: int = 0
     selection_source_llm_pick: int = 0
     selection_source_safe_backfill: int = 0
-    foundational_signals: list[str] | None = None
-    foundational_signal_source: str = ""
-    foundational_signal_count: int = 0
-    foundational_candidate_count: int = 0
-    selected_foundational_count: int = 0
-    missed_foundational_candidates: list[str] | None = None
-    foundational_recall: float | None = None
     error: str = ""
 
 
@@ -754,7 +747,6 @@ def evaluate_one(
     timing_ms = debug_fields["timing_ms"]
     window_counts = debug_fields["candidate_window_counts"]
     source_counts = count_selection_sources(selected_rows)
-    foundational = foundational_metrics(payload)
 
     return TicketMetrics(
         ticket_id=item.ticket_id,
@@ -797,13 +789,6 @@ def evaluate_one(
         candidate_window_semantic_only=int(window_counts.get("semantic_only") or 0),
         selection_source_llm_pick=int(source_counts.get("llm_pick") or 0),
         selection_source_safe_backfill=int(source_counts.get("safe_backfill") or 0),
-        foundational_signals=list(payload.get("foundational_signals", []) or []),
-        foundational_signal_source=str(payload.get("foundational_signal_source") or ""),
-        foundational_signal_count=len(payload.get("foundational_signals", []) or []),
-        foundational_candidate_count=int(foundational["foundational_candidate_count"]),
-        selected_foundational_count=int(foundational["selected_foundational_count"]),
-        missed_foundational_candidates=list(foundational["missed_foundational_candidates"]),
-        foundational_recall=foundational["foundational_recall"],
     )
 
 
@@ -885,51 +870,6 @@ def compute_metrics(predicted: Iterable[str], ground_truth: Iterable[str]) -> di
         "true_positives": sorted(truth_by_key[key] for key in true_positive_keys),
         "false_positives": sorted(predicted_by_key[key] for key in false_positive_keys),
         "false_negatives": sorted(truth_by_key[key] for key in false_negative_keys),
-    }
-
-
-def foundational_metrics(result: dict) -> dict:
-    selected = result.get("selected_value_streams") or []
-    merged = result.get("merged_candidate_value_streams") or []
-
-    foundational_candidates = [
-        row
-        for row in merged
-        if isinstance(row, dict) and row.get("foundational_signal")
-    ]
-
-    selected_keys = {
-        normalize_name(row.get("entity_name") or "")
-        for row in selected
-        if isinstance(row, dict)
-    }
-
-    foundational_names = [
-        row.get("entity_name")
-        for row in foundational_candidates
-        if row.get("entity_name")
-    ]
-
-    selected_foundational = [
-        name
-        for name in foundational_names
-        if normalize_name(name) in selected_keys
-    ]
-
-    missed_foundational = [
-        name
-        for name in foundational_names
-        if normalize_name(name) not in selected_keys
-    ]
-
-    denom = len(foundational_names)
-    recall = len(selected_foundational) / denom if denom else None
-
-    return {
-        "foundational_candidate_count": denom,
-        "selected_foundational_count": len(selected_foundational),
-        "missed_foundational_candidates": missed_foundational,
-        "foundational_recall": recall,
     }
 
 
@@ -1084,13 +1024,6 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "candidate_window_semantic_only",
         "selection_source_llm_pick",
         "selection_source_safe_backfill",
-        "foundational_signal_count",
-        "foundational_signal_source",
-        "foundational_candidate_count",
-        "selected_foundational_count",
-        "foundational_recall",
-        "foundational_signals",
-        "missed_foundational_candidates",
         "error",
     ]
     with path.open("w", encoding="utf-8", newline="") as fh:

@@ -29,8 +29,7 @@ system: |
 
   The idea card is the business input to interpret. Do not assume it contains
   value-stream labels, and do not infer hidden labels from it. Value-stream labels
-  come from the candidate list, historical analog evidence, and any explicit
-  trusted anchor signals already printed inside candidate blocks.
+  come from the candidate list and historical analog evidence.
 
   HOW TO READ CANDIDATES
 
@@ -68,7 +67,6 @@ system: |
 
   2. A candidate is defensible when it has at least one of:
      - clear current-card semantic alignment
-     - explicit trusted anchor signal in the candidate block
      - semantic_plus_historical lane support
      - repeated historical analog support
      - downstream operational impact
@@ -95,29 +93,6 @@ system: |
      - Be stricter with broad/generic streams.
      - If the semantic-only candidate has no operationally specific current-card evidence,
        reject it.
-
-  7. For trusted anchor signals:
-     - Use them only when the candidate block explicitly contains a trusted anchor signal.
-     - Do not infer anchor signals from the idea-card text.
-     - Anchor signals are not automatic truth; still check business evidence.
-
-  TRUSTED ANCHOR SIGNAL PRIORITY
-
-  Some candidate blocks may contain:
-
-  Trusted anchor signal: canonical match to "..."
-  Trusted anchor signal: entity_id match to "..."
-  Trusted anchor signal: alias match to "..."
-
-  This means external metadata explicitly provided this candidate as a trusted anchor.
-  This is optional and is not inferred from the idea-card text.
-
-  Rules:
-  - Use anchor signals only when they are present in candidate blocks.
-  - Do not assume the idea card contains value-stream labels.
-  - Do not infer anchor signals yourself.
-  - Anchor-signal candidates should outrank adjacent candidates without anchor signals.
-  - Anchor signals are not automatic truth; still check business evidence.
 
   OPERATIONAL CHAIN RULES
 
@@ -174,7 +149,7 @@ system: |
   - one is upstream and one is downstream
   - one is customer/member-facing and another is financial/operational
   - one is partner/provider/member workflow and another is product/commercial workflow
-  - one has a trusted anchor signal and another has downstream operational evidence
+  - one has direct current-card evidence and another has downstream operational evidence
 
   Pick only one when:
   - two candidates are simply alternate labels for the same work
@@ -188,8 +163,8 @@ system: |
 
   For narrow idea cards, do not expand into adjacent commercial, IT, compliance,
   reporting, engagement, invoice, producer, workforce, or reconciliation streams
-  unless the candidate has a trusted anchor signal, explicit current-card evidence,
-  or direct/coherent analog evidence.
+  unless the candidate has explicit current-card evidence or direct/coherent analog
+  evidence.
 
   - Align and Execute IT Strategy:
     Select only for actual IT strategy execution, technology/data strategy, IT operating
@@ -274,8 +249,7 @@ system: |
   CONFIDENCE GUIDANCE
 
   - 0.85-1.00:
-    Strong direct current-card fit, trusted anchor signal match, or multiple direct analogs
-    with clearly similar summaries.
+    Strong direct current-card fit or multiple direct analogs with clearly similar summaries.
 
   - 0.65-0.84:
     Meaningful fit with some indirectness, accepted alias match, or strong historical recovery
@@ -296,7 +270,7 @@ system: |
   - Good reason:
     "Supports downstream payment/refund issuance tied to the card's financial operations."
   - Good reason:
-    "Maps to the card's listed order-to-cash flow for making group coverage available."
+    "Supports making group coverage available through downstream order-to-cash operations."
   - Good reason:
     "Supports stakeholder outreach and follow-up needed for the listed engagement workflow."
   - Bad reason:
@@ -327,7 +301,6 @@ user: |
   to the idea card.
 
   Favor recall for:
-  - candidates with explicit trusted anchor signals
   - semantic_plus_historical candidates
   - historically supported downstream operational workflows
   - financial/order/payment/invoice/receipt workflows with candidate-level evidence
@@ -338,7 +311,6 @@ user: |
   - Do not treat related operational-chain streams as duplicates.
   - Financial/order/payment streams may co-exist when each has evidence.
   - Do not infer value-stream labels from idea-card text.
-  - Trusted anchor signals are meaningful only when already printed in candidate blocks.
   - Use low confidence rather than dropping a defensible indirect candidate.
   - Return at most the requested review-pool size.
 

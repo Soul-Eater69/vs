@@ -53,4 +53,4 @@ def test_candidate_prompt_has_no_anchor_signal_text() -> None:
     )
 
     assert "Found" + "ational signal" not in block
-    assert "Trusted " + "anchor signal" not in block
+    assert "Trusted " + "anchor " + "signal" not in block

@@ -27,34 +27,10 @@ system: |
 
   HOW TO READ THE IDEA CARD SUMMARY
 
-  The idea card may explicitly list foundational value streams, capability value
-  streams, operational value streams, or example value streams.
-
-  Treat those listed streams as strong current-card evidence.
-
-  Examples of foundational/current-card value-stream signals:
-  - Configure, Price and Quote
-  - Discover Business Insights
-  - Establish Product Offering
-  - Manage Leads and Opportunities
-  - Order to Cash
-  - Perform Engagement
-  - Operational Value Stream examples such as Manage Member Care, Ensure Payment
-    Integrity, Resolve Request Inquiry
-
-  These are not casual words. If the idea card lists them, treat them as business
-  anchors for selection.
-
-  Canonical name aliases:
-  - "Order to Cash" may map to "Order to Cash for Group Coverage".
-  - "Resolve Request Inquiry" may map to "Resolve Request-Inquiry".
-  - "Configure, Price and Quote" may map to "Configure, Price, and Quote".
-  - "Ensure Payment Integrity" is a payment-domain signal and may support payment,
-    invoice, receipt, refund, disbursement, or payment-integrity candidates when
-    candidate evidence also supports them.
-
-  Do not drop a foundational or operational-chain candidate only because another
-  related upstream/downstream stream was selected.
+  The idea card is the business input to interpret. Do not assume it contains
+  value-stream labels, and do not infer hidden labels from it. Value-stream labels
+  come from the candidate list, historical analog evidence, and any explicit
+  trusted anchor signals already printed inside candidate blocks.
 
   HOW TO READ CANDIDATES
 
@@ -92,8 +68,7 @@ system: |
 
   2. A candidate is defensible when it has at least one of:
      - clear current-card semantic alignment
-     - direct match to a foundational/current-card value-stream signal
-     - accepted canonical alias of a listed foundational/current-card signal
+     - explicit trusted anchor signal in the candidate block
      - semantic_plus_historical lane support
      - repeated historical analog support
      - downstream operational impact
@@ -118,39 +93,31 @@ system: |
   6. For semantic_only candidates:
      - Include only when the idea-card text itself strongly supports the stream.
      - Be stricter with broad/generic streams.
-     - If the semantic-only candidate is not directly listed in the idea card and has no
-       operationally specific evidence, reject it.
+     - If the semantic-only candidate has no operationally specific current-card evidence,
+       reject it.
 
-  7. For foundational/current-card signals:
-     - If a candidate directly matches a listed value stream or accepted alias, include it
-       unless contradicted.
-     - If a listed operational example maps closely to a candidate, include with appropriate
-       confidence.
-     - Do not collapse foundational streams into one another just because they are related.
+  7. For trusted anchor signals:
+     - Use them only when the candidate block explicitly contains a trusted anchor signal.
+     - Do not infer anchor signals from the idea-card text.
+     - Anchor signals are not automatic truth; still check business evidence.
 
-  FOUNDATIONAL SIGNAL PRIORITY
+  TRUSTED ANCHOR SIGNAL PRIORITY
 
   Some candidate blocks may contain:
 
-  Foundational signal: exact match to "..."
-  Foundational signal: alias match to "..."
+  Trusted anchor signal: canonical match to "..."
+  Trusted anchor signal: entity_id match to "..."
+  Trusted anchor signal: alias match to "..."
 
-  This means the candidate directly matches a value stream, alias, or operational example
-  listed in the idea card. Treat this as strong current-card evidence.
+  This means external metadata explicitly provided this candidate as a trusted anchor.
+  This is optional and is not inferred from the idea-card text.
 
   Rules:
-  - Foundational-signal candidates should normally be included unless the candidate evidence
-    clearly contradicts the idea card.
-  - Foundational-signal candidates should outrank adjacent candidates that do not have a
-    foundational signal.
-  - Do not skip a foundational candidate just because another related upstream/downstream
-    candidate was selected.
-  - If the card is narrow and only a few foundational signals are present, prefer those
-    anchors over broad adjacent streams.
-  - If a foundational-signal candidate is indirect or downstream, include it with lower
-    confidence rather than dropping it.
-  - Do not hardcode any stream as always true. Foundational signal is current-card evidence,
-    not an auto-select rule.
+  - Use anchor signals only when they are present in candidate blocks.
+  - Do not assume the idea card contains value-stream labels.
+  - Do not infer anchor signals yourself.
+  - Anchor-signal candidates should outrank adjacent candidates without anchor signals.
+  - Anchor signals are not automatic truth; still check business evidence.
 
   OPERATIONAL CHAIN RULES
 
@@ -207,7 +174,7 @@ system: |
   - one is upstream and one is downstream
   - one is customer/member-facing and another is financial/operational
   - one is partner/provider/member workflow and another is product/commercial workflow
-  - one appears as a foundational signal and another appears as a downstream operational signal
+  - one has a trusted anchor signal and another has downstream operational evidence
 
   Pick only one when:
   - two candidates are simply alternate labels for the same work
@@ -219,10 +186,10 @@ system: |
   Be careful with broad/generic streams. Select them only when the card or analog evidence
   directly supports the stream's core function.
 
-  For narrow idea cards with only 1-3 strong foundational streams, do not expand into
-  adjacent commercial, IT, compliance, reporting, engagement, invoice, producer, workforce,
-  or reconciliation streams unless the candidate has a foundational signal, explicit
-  current-card evidence, or direct/coherent analog evidence.
+  For narrow idea cards, do not expand into adjacent commercial, IT, compliance,
+  reporting, engagement, invoice, producer, workforce, or reconciliation streams
+  unless the candidate has a trusted anchor signal, explicit current-card evidence,
+  or direct/coherent analog evidence.
 
   - Align and Execute IT Strategy:
     Select only for actual IT strategy execution, technology/data strategy, IT operating
@@ -307,7 +274,7 @@ system: |
   CONFIDENCE GUIDANCE
 
   - 0.85-1.00:
-    Strong direct current-card fit, foundational signal match, or multiple direct analogs
+    Strong direct current-card fit, trusted anchor signal match, or multiple direct analogs
     with clearly similar summaries.
 
   - 0.65-0.84:
@@ -360,8 +327,7 @@ user: |
   to the idea card.
 
   Favor recall for:
-  - candidates directly listed in the idea card
-  - accepted aliases of listed value streams
+  - candidates with explicit trusted anchor signals
   - semantic_plus_historical candidates
   - historically supported downstream operational workflows
   - financial/order/payment/invoice/receipt workflows with candidate-level evidence
@@ -371,8 +337,8 @@ user: |
   Important:
   - Do not treat related operational-chain streams as duplicates.
   - Financial/order/payment streams may co-exist when each has evidence.
-  - Foundational value streams listed in the idea card are strong current-card signals.
-  - Operational Value Stream examples listed in the idea card are meaningful evidence.
+  - Do not infer value-stream labels from idea-card text.
+  - Trusted anchor signals are meaningful only when already printed in candidate blocks.
   - Use low confidence rather than dropping a defensible indirect candidate.
   - Return at most the requested review-pool size.
 

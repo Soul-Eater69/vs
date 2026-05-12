@@ -70,24 +70,24 @@ def test_order_to_cash_does_not_need_raw_text() -> None:
     annotated = annotate_foundational_signals(
         candidates,
         foundational_value_streams_canonical=["Order to Cash for Group Coverage"],
-        idea_text_fallback="No raw alias here",
     )
 
     assert annotated[0]["foundational_signal"] is True
 
 
-def test_text_fallback_uses_shared_canonical_resolver() -> None:
+def test_no_text_fallback_from_current_idea_card() -> None:
     candidates = [
         {"entity_name": "Order to Cash for Group Coverage"},
     ]
 
     annotated = annotate_foundational_signals(
         candidates,
-        idea_text_fallback="Foundational Value Streams: Order to Cash",
+        foundational_value_streams_canonical=[],
+        foundational_value_stream_entity_ids=[],
+        foundational_value_streams_raw=[],
     )
 
-    assert annotated[0]["foundational_signal"] is True
-    assert annotated[0]["foundational_match_text"] == "Order to Cash"
+    assert annotated[0]["foundational_signal"] is False
 
 
 def test_rag_foundational_signals_has_no_alias_map() -> None:
@@ -111,4 +111,4 @@ def test_exact_foundational_signal_is_printed_in_review_pool_candidate_block() -
 
     block = format_review_pool_candidate_blocks(candidates)
 
-    assert 'Foundational signal: canonical match to "Establish Product Offering"' in block
+    assert 'Trusted anchor signal: canonical match to "Establish Product Offering"' in block

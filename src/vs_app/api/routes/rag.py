@@ -12,7 +12,6 @@ from fastapi.responses import StreamingResponse
 from vs_app.api.dependencies import ApiContainer, get_container
 from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
-from vs_app.integrations.files.idea_card_extractor import build_foundational_metadata
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
 from vs_app.modules.value_streams.canonical import canonicalize_foundational_mentions
 from vs_app.modules.rag.service import ValueStreamRagCommand
@@ -86,29 +85,37 @@ def _ground_truth_for_ticket(ticket_id: str | None) -> list[str]:
     return _ground_truth_from_azure(ticket_id)
 
 
-def _foundational_metadata_from_request(request: ValueStreamRagRequest, raw_text: str) -> dict:
-    if (
-        request.foundational_value_streams_raw
-        or request.foundational_value_streams_canonical
-        or request.foundational_value_stream_entity_ids
-    ):
-        raw_values = list(request.foundational_value_streams_raw or [])
-        canonical_values = list(request.foundational_value_streams_canonical or [])
-        entity_ids = list(request.foundational_value_stream_entity_ids or [])
+def _anchor_metadata_from_request(request: ValueStreamRagRequest) -> dict:
+    """Return only explicitly provided trusted anchors.
+
+    Do not infer anchors from current idea-card text. Linked child theme labels are
+    historical labels or evaluation ground truth, not prediction input.
+    """
+    raw_values = list(request.foundational_value_streams_raw or [])
+    canonical_values = list(request.foundational_value_streams_canonical or [])
+    entity_ids = list(request.foundational_value_stream_entity_ids or [])
+
+    if not (raw_values or canonical_values or entity_ids):
         return {
-            "foundational_value_streams_raw": raw_values,
-            "foundational_value_streams_canonical": canonical_values,
-            "foundational_value_stream_entity_ids": entity_ids,
-            "foundational_value_stream_matches": _foundational_matches_from_metadata(
-                raw_values,
-                canonical_values,
-                entity_ids,
-            ),
+            "foundational_value_streams_raw": [],
+            "foundational_value_streams_canonical": [],
+            "foundational_value_stream_entity_ids": [],
+            "foundational_value_stream_matches": [],
         }
-    return build_foundational_metadata(raw_text)
+
+    return {
+        "foundational_value_streams_raw": raw_values,
+        "foundational_value_streams_canonical": canonical_values,
+        "foundational_value_stream_entity_ids": entity_ids,
+        "foundational_value_stream_matches": _anchor_matches_from_request_metadata(
+            raw_values,
+            canonical_values,
+            entity_ids,
+        ),
+    }
 
 
-def _foundational_matches_from_metadata(
+def _anchor_matches_from_request_metadata(
     raw_values: list[str],
     canonical_values: list[str],
     entity_ids: list[str],
@@ -150,7 +157,8 @@ def _foundational_matches_from_metadata(
     return matches
 
 
-def _raw_text_for_foundational_metadata(request: ValueStreamRagRequest) -> str:
+def _idea_card_text_from_request(request: ValueStreamRagRequest) -> str:
+    """Load the idea-card body used for prediction, without extracting labels."""
     raw_text = request.idea_card_text or ""
     if raw_text or not request.ticket_id:
         return raw_text
@@ -164,7 +172,7 @@ def _raw_text_for_foundational_metadata(request: ValueStreamRagRequest) -> str:
         )
     except Exception as exc:
         logger.warning(
-            "Could not extract idea-card text for foundational metadata: ticket_id=%s error=%s",
+            "Could not extract idea-card text: ticket_id=%s error=%s",
             request.ticket_id,
             exc,
         )
@@ -172,23 +180,23 @@ def _raw_text_for_foundational_metadata(request: ValueStreamRagRequest) -> str:
 
 
 def _command_from_request(request: ValueStreamRagRequest) -> ValueStreamRagCommand:
-    raw_text = _raw_text_for_foundational_metadata(request)
-    foundational_metadata = _foundational_metadata_from_request(request, raw_text)
+    idea_card_text = _idea_card_text_from_request(request)
+    anchor_metadata = _anchor_metadata_from_request(request)
     return ValueStreamRagCommand(
         ticket_id=request.ticket_id,
-        idea_card_text=request.idea_card_text or raw_text or None,
+        idea_card_text=request.idea_card_text or idea_card_text or None,
         semantic_fetch_k=request.semantic_fetch_k,
         historical_ticket_fetch_k=request.historical_ticket_fetch_k,
         llm_candidate_window=request.llm_candidate_window,
         final_output_count=request.final_output_count,
-        foundational_value_streams_raw=foundational_metadata.get("foundational_value_streams_raw"),
-        foundational_value_streams_canonical=foundational_metadata.get(
+        foundational_value_streams_raw=anchor_metadata.get("foundational_value_streams_raw"),
+        foundational_value_streams_canonical=anchor_metadata.get(
             "foundational_value_streams_canonical"
         ),
-        foundational_value_stream_entity_ids=foundational_metadata.get(
+        foundational_value_stream_entity_ids=anchor_metadata.get(
             "foundational_value_stream_entity_ids"
         ),
-        foundational_value_stream_matches=foundational_metadata.get(
+        foundational_value_stream_matches=anchor_metadata.get(
             "foundational_value_stream_matches"
         ),
         historical_search_backend=_HISTORICAL_BACKEND,

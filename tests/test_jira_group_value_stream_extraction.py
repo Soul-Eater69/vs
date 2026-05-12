@@ -6,6 +6,9 @@ from vs_app.ingestion.jira.value_stream_labels.theme_extraction import (
     extract_themes,
     resolve_value_streams,
 )
+from vs_app.ingestion.jira.value_stream_labels.theme_title_parser import (
+    parse_value_stream_from_theme_title,
+)
 from vs_app.ingestion.jira.value_stream_labels.value_stream_mapping import (
     resolve_theme_value_stream_mapping,
 )
@@ -71,6 +74,30 @@ def test_implemented_by_group_link_populates_value_stream_names() -> None:
     assert payload["jira_group_ids"] == ["GROUP-19626"]
     assert payload["value_stream_statuses"] == ["In Progress"]
     assert payload["value_stream_label_source"] == "jira_implemented_by_group_links"
+
+
+def test_parse_value_stream_from_theme_title() -> None:
+    parsed = parse_value_stream_from_theme_title(
+        source_title="CP 2025 Health Management & Advocacy: Digital GTM",
+        child_theme_title=(
+            "CP 2025 Health Management & Advocacy: Digital GTM "
+            "- Establish Product Offering"
+        ),
+    )
+
+    assert parsed is not None
+    assert parsed.raw_value_stream_suffix == "Establish Product Offering"
+    assert parsed.canonical_name == "Establish Product Offering"
+    assert parsed.match_type == "exact"
+
+
+def test_theme_parser_rejects_non_matching_prefix() -> None:
+    parsed = parse_value_stream_from_theme_title(
+        source_title="IDMT A",
+        child_theme_title="Different Parent - Establish Product Offering",
+    )
+
+    assert parsed is None
 
 
 def test_business_objective_group_link_is_not_extracted_as_theme() -> None:

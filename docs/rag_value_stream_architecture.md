@@ -1,93 +1,165 @@
 # Value-Stream RAG Architecture
 
-This document explains the current value-stream recommendation flow, including the
-foundational-signal metadata, retrieval/window thresholds, and final Review Pool LLM
-selection behavior.
+This document describes the current value-stream prediction flow, the no-leakage
+boundary between prediction and ground truth, runtime thresholds, and the optional
+trusted-anchor mechanism.
 
-## What Foundational Signal Means
+## Core Rule
 
-A **foundational signal** is a value stream that the idea card itself names as a
-current-card anchor, example, capability, or foundational/operational value stream.
+Current prediction must not extract value-stream labels from the current idea-card
+text.
 
-Example idea-card text:
+Value streams come from:
 
 ```text
-Foundational Value Streams: Order to Cash, Establish Product Offering
+semantic value-stream retrieval
+historical analog retrieval
+candidate merge
+Review Pool LLM selection
 ```
 
-Ingestion extracts those raw mentions and canonicalizes them:
-
-```json
-{
-  "raw": "Order to Cash",
-  "canonical_name": "Order to Cash for Group Coverage",
-  "entity_id": "...",
-  "match_type": "alias"
-}
-```
-
-RAG then annotates matching candidates:
-
-```json
-{
-  "entity_name": "Order to Cash for Group Coverage",
-  "foundational_signal": true,
-  "foundational_match_text": "Order to Cash",
-  "foundational_match_type": "alias"
-}
-```
-
-Important: foundational signal is **not auto-selection**. It is strong current-card
-evidence shown to the Review Pool LLM so it does not skip direct anchors in favor
-of adjacent streams.
+Historical labels from implemented-by child themes are used for historical indexing
+and evaluation ground truth. They are not prediction inputs for the same current
+ticket.
 
 ## End-To-End Flow
 
 ```mermaid
 flowchart TD
-    A[API request<br/>ticket_id or idea_card_text] --> B[Load raw idea-card text]
-    B --> C[Ingestion extractor<br/>extract foundational mentions]
-    C --> D[Shared canonical resolver<br/>approved registry + small overrides]
-    D --> E[Foundational metadata<br/>raw, canonical, entity IDs, matches]
+    A[Jira historical ticket] --> B[Implemented-by child theme titles]
+    B --> C[Parse value-stream suffix]
+    C --> D[Canonicalize with approved registry]
+    D --> E[Historical summary index<br/>direct_vs_names, value_stream_names]
 
-    B --> F[Clean idea-card text]
-    B --> G[Condense idea card<br/>max 3500 chars]
-    F --> H[Retrieval query]
-    G --> H
-
+    F[Current API request<br/>ticket_id or idea_card_text] --> G[Load idea-card body]
+    G --> H[Clean and condense idea-card text]
     H --> I[Semantic value-stream retrieval]
-    H --> J[Historical ticket retrieval]
+    H --> J[Historical analog retrieval]
+    E --> J
 
-    I --> K[Candidate merge]
+    I --> K[Merge candidates by value-stream name]
     J --> K
-    E --> L[Annotate candidates<br/>entity_id, canonical name, raw fallback]
-    K --> L
+    K --> L[Evidence-qualified LLM candidate window]
 
-    L --> M[Evidence-qualified LLM window]
-    M --> N[Review Pool prompt<br/>candidate blocks + foundational lines]
-    N --> O[One structured LLM call]
-    O --> P[Safe backfill if LLM returns too few safer picks]
-    P --> Q[Final selected value streams<br/>max = requested final_output_count]
+    F --> M{Explicit trusted anchors?}
+    M -->|optional request metadata only| N[Annotate matching candidates]
+    M -->|none| L
+    L --> N
 
-    Q --> R[Response + debug<br/>fingerprints, counts, runtime config]
+    N --> O[Review Pool prompt]
+    O --> P[One structured LLM call]
+    P --> Q[Safe backfill if too few safer picks]
+    Q --> R[Selected value streams]
+
+    R --> S[Evaluation compares to ground truth<br/>after prediction]
 ```
+
+## Historical Labels
+
+Historical ingestion may parse implemented-by child theme titles such as:
+
+```text
+Source title:
+CP 2025 Health Management & Advocacy: Digital GTM
+
+Child theme title:
+CP 2025 Health Management & Advocacy: Digital GTM - Establish Product Offering
+```
+
+The parser extracts the suffix after the source title:
+
+```json
+{
+  "raw_value_stream_suffix": "Establish Product Offering",
+  "canonical_name": "Establish Product Offering",
+  "entity_id": "VSR...",
+  "match_type": "exact"
+}
+```
+
+Those labels are stored in the historical index:
+
+```json
+{
+  "direct_vs_names": ["Establish Product Offering"],
+  "value_stream_names": ["Establish Product Offering"]
+}
+```
+
+They support historical analog retrieval and batch evaluation. They must not be
+passed into prediction for the same ticket.
+
+## Trusted Anchors
+
+The code still uses backward-compatible field names such as:
+
+```text
+foundational_signal
+foundational_value_streams_canonical
+foundational_value_stream_matches
+```
+
+Conceptually, these are now **trusted anchors**, not idea-card-derived signals.
+
+Trusted anchors are optional explicit metadata. They may come from:
+
+```text
+manual user override
+admin/debug testing
+external confirmed metadata
+```
+
+They do not come from scanning the current idea card.
+
+Candidate blocks display them as:
+
+```text
+Trusted anchor signal: canonical match to "Order to Cash for Group Coverage"
+Trusted anchor signal: entity_id match to "..."
+Trusted anchor signal: alias match to "Order to Cash"
+```
+
+Anchors are not auto-selection. They are strong context for the Review Pool LLM,
+which still checks business evidence.
+
+## Prediction Flow
+
+For a current idea card:
+
+```text
+idea-card text
+   ↓
+clean / condense text
+   ↓
+semantic VS retrieval
+   ↓
+historical ticket retrieval
+   ↓
+merge candidates
+   ↓
+optional explicit trusted-anchor annotation
+   ↓
+one Review Pool LLM call
+   ↓
+selected value streams
+```
+
+No `build_foundational_metadata(raw idea-card text)` call exists in the normal
+prediction path.
 
 ## Source Ownership
 
 | Concern | Owner |
 | --- | --- |
-| Raw idea-card text extraction | `integrations/files/idea_card_extractor.py` |
-| Raw foundational mention extraction | `integrations/files/idea_card_extractor.py` |
+| Raw idea-card body extraction | `integrations/files/idea_card_extractor.py` |
+| Historical child-theme suffix parsing | `ingestion/jira/value_stream_labels/theme_title_parser.py` |
 | Canonical value-stream mapping | `modules/value_streams/canonical.py` |
-| Candidate annotation only | `modules/rag/augmentation/foundational_signals.py` |
+| Optional trusted-anchor candidate annotation | `modules/rag/augmentation/foundational_signals.py` |
 | Retrieval, merge, finalizer orchestration | `modules/rag/pipeline.py` |
 | Runtime thresholds | `modules/rag/config/runtime.py` |
 | Candidate window lanes | `modules/rag/augmentation/candidate_merger.py` |
 | Review Pool prompt formatting | `modules/rag/augmentation/prompt_context.py` |
 | Final Review Pool LLM selection | `modules/rag/augmentation/finalizer.py` |
-
-RAG intentionally does not own alias dictionaries. It consumes metadata from
-ingestion and canonicalizes raw fallback mentions through the shared resolver.
 
 ## Runtime Thresholds
 
@@ -111,20 +183,16 @@ Runtime settings are derived from `final_output_count`.
 | Analog chars | `80` |
 | Historical ticket IDs per candidate | `2` |
 
-The output count controls final selection size and prompt/window sizing. Retrieval
-stays broad enough to preserve recall.
+Retrieval stays broad to preserve recall. Precision is controlled by candidate
+window gates, prompt evidence, and bounded final output count.
 
 ## Candidate Lanes
 
-Candidates are merged by normalized value-stream name and assigned one lane:
-
 | Lane | Meaning | Selection Behavior |
 | --- | --- | --- |
-| `semantic_plus_historical` | Found by semantic retrieval and supported by history | Highest priority; can fill the whole LLM window |
+| `semantic_plus_historical` | Found semantically and supported by historical analogs | Highest priority; can fill the whole LLM window |
 | `historical_only` | Supported by similar prior tickets but not semantic retrieval | Must pass historical quality gates and is cap-limited |
 | `semantic_only` | Found semantically but without historical support | Must pass high semantic score gates and is tightly cap-limited |
-
-## Candidate Quality Gates
 
 Historical-only candidates enter the LLM window only if any condition is true:
 
@@ -135,36 +203,16 @@ best_support_score >= 0.65
 weighted_support >= 0.6
 ```
 
-Semantic-only candidates enter the LLM window only if:
+Semantic-only candidates enter only if:
 
 ```text
 semantic_score >= 1.20
 ```
 
-Generic/risky semantic-only streams need a higher score:
+Generic/risky semantic-only streams need:
 
 ```text
 semantic_score >= 1.35
-```
-
-Generic/risky streams are not banned; they are penalized so they do not crowd out
-more specific evidence-backed candidates.
-
-## Foundational Annotation Priority
-
-`annotate_foundational_signals(...)` marks candidates in this order:
-
-1. Match candidate `entity_id` against foundational entity IDs.
-2. Match candidate canonical `entity_name` against foundational canonical names.
-3. Canonicalize raw foundational mentions through the shared resolver.
-4. Use text fallback only when no metadata exists.
-
-The prompt then includes lines like:
-
-```text
-Foundational signal: alias match to "Order to Cash"
-Foundational signal: canonical match to "Order to Cash for Group Coverage"
-Foundational signal: domain_signal match to "Ensure Payment Integrity"
 ```
 
 ## Review Pool LLM Selection
@@ -172,15 +220,12 @@ Foundational signal: domain_signal match to "Ensure Payment Integrity"
 The finalizer makes one structured LLM call:
 
 ```text
-input:  evidence-qualified candidate window
+input: evidence-qualified candidate window
 output: selected value streams, max final_output_count
 ```
 
-The LLM may reject candidates. It should normally include foundational-signal
-candidates unless the evidence contradicts the idea card.
-
 If the LLM returns too few picks, safe backfill may add low-confidence candidates
-only from `semantic_plus_historical` when they have enough evidence:
+only from `semantic_plus_historical` when:
 
 ```text
 semantic_score >= 1.05 OR supporting_ticket_count >= 3
@@ -192,15 +237,7 @@ Safe backfill is capped by:
 min_target = min(requested_output_count, 8)
 ```
 
-Backfilled rows are marked:
-
-```json
-{
-  "selection_source": "safe_backfill"
-}
-```
-
-LLM-selected rows are marked:
+Rows show their source:
 
 ```json
 {
@@ -208,22 +245,36 @@ LLM-selected rows are marked:
 }
 ```
 
-## Debug Output
-
-Responses include diagnostic fields for traceability:
+or:
 
 ```json
 {
-  "foundational_signals": ["Order to Cash for Group Coverage"],
-  "foundational_signal_source": "ingestion_metadata",
-  "foundational_value_stream_matches": [
-    {
-      "raw": "Order to Cash",
-      "canonical_name": "Order to Cash for Group Coverage",
-      "entity_id": "...",
-      "match_type": "alias"
-    }
-  ],
+  "selection_source": "safe_backfill"
+}
+```
+
+## Evaluation
+
+Evaluation is deliberately post-prediction:
+
+```text
+selected value streams
+   ↓
+compare to ground truth from historical labels
+```
+
+Batch eval does not pass current-ticket ground truth or idea-card-extracted labels
+into `select_value_streams(...)`.
+
+## Debug Output
+
+Prediction responses include:
+
+```json
+{
+  "foundational_signals": [],
+  "foundational_signal_source": "none",
+  "foundational_value_stream_matches": [],
   "candidate_window_counts": {
     "semantic_plus_historical": 12,
     "semantic_only": 1,
@@ -238,22 +289,27 @@ Responses include diagnostic fields for traceability:
 }
 ```
 
-`debug.fingerprints` also tracks stable hashes of the query, retrieval sets, LLM
-candidate window, LLM picks, and final selections. This helps compare runs without
-dumping huge payloads.
-
-## Design Intent
-
-The architecture is tuned for:
+When explicit trusted anchors are provided, the source is:
 
 ```text
-broad retrieval
-evidence-qualified candidate window
-metadata-first foundational annotation
-one Review Pool LLM call
-bounded final output count
+explicit_request_metadata
 ```
 
-The main precision guardrail is not narrower retrieval. It is stricter candidate
-windowing plus prompt-visible evidence so the LLM chooses current-card anchors
-before weak adjacent streams.
+`debug.fingerprints` tracks stable hashes of the query, retrieval sets, LLM
+candidate window, LLM picks, and final selections.
+
+## Correct Boundary
+
+```text
+Historical ingestion:
+  implemented-by child themes -> canonical value-stream labels -> historical index
+
+Current prediction:
+  idea-card text -> retrieval -> merge -> Review Pool LLM -> selected streams
+
+Evaluation:
+  selected streams -> compare against ground truth labels
+
+Theme creation:
+  selected stream -> "{IDMT title} - {Canonical Value Stream Name}"
+```

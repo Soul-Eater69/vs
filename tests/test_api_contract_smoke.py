@@ -83,7 +83,35 @@ def test_idea_cards_list_and_text_extract(monkeypatch) -> None:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def test_non_stream_ticket_only_builds_foundational_metadata_and_uses_raw_text(monkeypatch) -> None:
+def test_idea_card_text_does_not_create_anchor_metadata() -> None:
+    request = ValueStreamRagRequest(
+        idea_card_text="Foundational Value Streams: Order to Cash",
+        final_output_count=5,
+    )
+
+    metadata = rag._anchor_metadata_from_request(request)
+
+    assert metadata["foundational_value_streams_raw"] == []
+    assert metadata["foundational_value_streams_canonical"] == []
+    assert metadata["foundational_value_stream_matches"] == []
+
+
+def test_explicit_anchor_metadata_is_allowed() -> None:
+    request = ValueStreamRagRequest(
+        idea_card_text="Some idea card text",
+        foundational_value_streams_canonical=["Order to Cash for Group Coverage"],
+        final_output_count=5,
+    )
+
+    metadata = rag._anchor_metadata_from_request(request)
+
+    assert metadata["foundational_value_streams_canonical"] == [
+        "Order to Cash for Group Coverage"
+    ]
+    assert metadata["foundational_value_stream_matches"][0]["match_type"] == "canonical"
+
+
+def test_non_stream_ticket_only_uses_raw_text_without_anchor_extraction(monkeypatch) -> None:
     request = ValueStreamRagRequest(ticket_id="IDMT-1", final_output_count=5)
     raw_text = "Foundational Value Streams: Order to Cash"
     captured = {}
@@ -99,7 +127,7 @@ def test_non_stream_ticket_only_builds_foundational_metadata_and_uses_raw_text(m
             captured["command"] = command
             return SimpleNamespace(
                 foundational_signals=list(command.foundational_value_streams_canonical or []),
-                foundational_signal_source="ingestion_metadata",
+                foundational_signal_source="none",
                 foundational_value_stream_matches=list(command.foundational_value_stream_matches or []),
             )
 
@@ -112,6 +140,6 @@ def test_non_stream_ticket_only_builds_foundational_metadata_and_uses_raw_text(m
 
     command = captured["command"]
     assert command.idea_card_text == raw_text
-    assert "Order to Cash for Group Coverage" in command.foundational_value_streams_canonical
-    assert response.foundational_value_stream_matches[0]["raw"] == "Order to Cash"
-    assert response.foundational_value_stream_matches[0]["match_type"] == "alias"
+    assert command.foundational_value_streams_canonical == []
+    assert command.foundational_value_stream_matches == []
+    assert response.foundational_value_stream_matches == []

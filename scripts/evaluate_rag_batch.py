@@ -727,15 +727,11 @@ def evaluate_one(
     output_count_mode: str = "fixed",
     gt_buffer: int = 0,
 ) -> TicketMetrics:
-    from vs_app.integrations.files.idea_card_extractor import (
-        build_foundational_metadata,
-        extract_idea_card_text,
-    )
+    from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
     from vs_app.modules.rag.pipeline import select_value_streams
 
     start = time.perf_counter()
     text = extract_idea_card_text(input_path=item.path)
-    foundational_metadata = build_foundational_metadata(text)
     exclude_ids = [item.ticket_id] if exclude_source_ticket else None
 
     payload = select_value_streams(
@@ -745,16 +741,6 @@ def evaluate_one(
         historical_search_backend=historical_search_backend,
         historical_azure_index_name=historical_azure_index_name,
         exclude_ticket_ids=exclude_ids,
-        foundational_value_streams_raw=foundational_metadata.get("foundational_value_streams_raw"),
-        foundational_value_streams_canonical=foundational_metadata.get(
-            "foundational_value_streams_canonical"
-        ),
-        foundational_value_stream_entity_ids=foundational_metadata.get(
-            "foundational_value_stream_entity_ids"
-        ),
-        foundational_value_stream_matches=foundational_metadata.get(
-            "foundational_value_stream_matches"
-        ),
     )
     elapsed = time.perf_counter() - start
 

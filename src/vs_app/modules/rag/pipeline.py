@@ -90,7 +90,6 @@ def select_value_streams(
     foundational_signals = foundational_signal_names(
         foundational_value_streams_canonical=foundational_source_canonical,
         foundational_value_streams_raw=foundational_source_raw,
-        idea_text_fallback=cleaned_query,
     )
     foundational_source = foundational_signal_source(
         foundational_value_streams_canonical=foundational_source_canonical,
@@ -103,14 +102,12 @@ def select_value_streams(
         foundational_value_streams_canonical=foundational_source_canonical,
         foundational_value_stream_entity_ids=foundational_source_ids,
         foundational_value_streams_raw=foundational_source_raw,
-        idea_text_fallback=cleaned_query,
     )
     augmented["merged_candidates"] = annotate_foundational_signals(
         augmented["merged_candidates"],
         foundational_value_streams_canonical=foundational_source_canonical,
         foundational_value_stream_entity_ids=foundational_source_ids,
         foundational_value_streams_raw=foundational_source_raw,
-        idea_text_fallback=cleaned_query,
     )
     finalizer_started = perf_counter()
     generated = generate_review_pool_value_streams(

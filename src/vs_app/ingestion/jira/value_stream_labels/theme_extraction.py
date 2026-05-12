@@ -6,11 +6,16 @@ import logging
 from typing import Any, Dict, List
 
 from .helpers import clean_value_stream_name, nested_str_field
+from .theme_title_parser import parse_value_stream_from_theme_title
 
 logger = logging.getLogger(__name__)
 
 
-def extract_themes(issuelinks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def extract_themes(
+    issuelinks: List[Dict[str, Any]],
+    *,
+    source_title: str = "",
+) -> List[Dict[str, Any]]:
     """Extract themes from implementation-style issue links.
 
     Returns a list of theme dicts with keys: key, summary, summary_raw, status.
@@ -22,16 +27,16 @@ def extract_themes(issuelinks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         link_type = link.get("type", {}) or {}
 
         if _looks_like_implementation(link_type.get("outward")) and "outwardIssue" in link:
-            _append_theme(themes, seen, link["outwardIssue"])
+            _append_theme(themes, seen, link["outwardIssue"], source_title=source_title)
 
         if _looks_like_implementation(link_type.get("inward")) and "inwardIssue" in link:
-            _append_theme(themes, seen, link["inwardIssue"])
+            _append_theme(themes, seen, link["inwardIssue"], source_title=source_title)
 
         if _looks_like_implementation(link_type.get("name")):
             if "outwardIssue" in link:
-                _append_theme(themes, seen, link["outwardIssue"])
+                _append_theme(themes, seen, link["outwardIssue"], source_title=source_title)
             if "inwardIssue" in link:
-                _append_theme(themes, seen, link["inwardIssue"])
+                _append_theme(themes, seen, link["inwardIssue"], source_title=source_title)
 
     return themes
 
@@ -90,6 +95,8 @@ def _append_theme(
     themes: List[Dict[str, Any]],
     seen: set[tuple[str, str]],
     issue: Dict[str, Any],
+    *,
+    source_title: str = "",
 ) -> None:
     fields = issue.get("fields", {}) or {}
     issue_type = nested_str_field(fields, "issuetype", "name")
@@ -99,14 +106,27 @@ def _append_theme(
         return
 
     summary_raw = str(fields.get("summary") or "")
+    parsed = parse_value_stream_from_theme_title(
+        source_title=source_title,
+        child_theme_title=summary_raw,
+    )
     dedupe_key = (key, summary_raw)
     if dedupe_key in seen:
         return
     seen.add(dedupe_key)
-    themes.append({
+    theme = {
         "key": key,
-        "summary": clean_value_stream_name(summary_raw),
+        "summary": parsed.canonical_name if parsed else clean_value_stream_name(summary_raw),
         "summary_raw": summary_raw,
         "status": nested_str_field(fields, "status", "name"),
         "issue_type": issue_type,
-    })
+    }
+    if parsed:
+        theme.update(
+            {
+                "raw_value_stream_suffix": parsed.raw_value_stream_suffix,
+                "value_stream_entity_id": parsed.entity_id,
+                "value_stream_match_type": parsed.match_type,
+            }
+        )
+    themes.append(theme)

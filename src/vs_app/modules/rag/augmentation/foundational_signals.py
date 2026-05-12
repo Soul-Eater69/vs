@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from vs_app.integrations.files.idea_card_extractor import extract_candidate_value_stream_mentions
 from vs_app.modules.value_streams.canonical import (
     canonicalize_foundational_mentions,
     normalize_vs_name,
@@ -13,17 +12,16 @@ def annotate_foundational_signals(
     foundational_value_streams_canonical: list[str] | None = None,
     foundational_value_stream_entity_ids: list[str] | None = None,
     foundational_value_streams_raw: list[str] | None = None,
-    idea_text_fallback: str | None = None,
 ) -> list[dict]:
-    """Annotate candidates that match ingestion-provided foundational streams.
+    """Annotate candidates that match explicit trusted anchor metadata.
 
     Priority:
     1. Match by entity_id when provided.
     2. Match by canonical value-stream name.
-    3. Fallback to canonicalizing raw mentions.
-    4. Optional text fallback only when no metadata exists.
+    3. Canonicalize explicitly provided raw anchor mentions.
 
-    This function does not auto-select. It only adds prompt/debug metadata.
+    This function does not scan the current idea-card text and does not
+    auto-select. It only adds prompt/debug metadata.
     """
     ids = {
         str(value or "").strip().lower()
@@ -45,13 +43,6 @@ def annotate_foundational_signals(
 
     if not canonical_names and foundational_value_streams_raw:
         for item in canonicalize_foundational_mentions(foundational_value_streams_raw):
-            norm = normalize_vs_name(item.canonical_name)
-            canonical_names.add(norm)
-            raw_to_canonical[norm] = (item.raw, item.match_type)
-
-    if not canonical_names and not ids and idea_text_fallback:
-        raw_mentions = extract_text_fallback_mentions(idea_text_fallback)
-        for item in canonicalize_foundational_mentions(raw_mentions):
             norm = normalize_vs_name(item.canonical_name)
             canonical_names.add(norm)
             raw_to_canonical[norm] = (item.raw, item.match_type)
@@ -84,18 +75,17 @@ def foundational_signal_names(
     *,
     foundational_value_streams_canonical: list[str] | None = None,
     foundational_value_streams_raw: list[str] | None = None,
-    idea_text_fallback: str | None = None,
 ) -> list[str]:
     if foundational_value_streams_canonical:
         return list(dict.fromkeys(foundational_value_streams_canonical))
 
-    raw_mentions = list(foundational_value_streams_raw or [])
-    if not raw_mentions and idea_text_fallback:
-        raw_mentions = extract_text_fallback_mentions(idea_text_fallback)
+    if not foundational_value_streams_raw:
+        return []
 
     return list(
         dict.fromkeys(
-            item.canonical_name for item in canonicalize_foundational_mentions(raw_mentions)
+            item.canonical_name
+            for item in canonicalize_foundational_mentions(foundational_value_streams_raw)
         )
     )
 
@@ -108,22 +98,9 @@ def foundational_signal_source(
     foundational_signals: list[str] | None = None,
 ) -> str:
     if foundational_value_streams_canonical or foundational_value_stream_entity_ids:
-        return "ingestion_metadata"
+        return "explicit_request_metadata"
     if foundational_value_streams_raw and foundational_signals:
-        return "ingestion_metadata"
+        return "explicit_request_metadata"
     if foundational_value_streams_raw and not foundational_signals:
-        return "ingestion_metadata_empty"
-    if foundational_signals:
-        return "text_fallback"
+        return "explicit_request_metadata_empty"
     return "none"
-
-
-def extract_text_fallback_mentions(text: str) -> list[str]:
-    """Temporary backward-compatible fallback.
-
-    Do not grow alias logic here. Pull likely mention strings from raw text, then
-    delegate canonicalization to the shared value-stream resolver.
-    """
-    if not text:
-        return []
-    return extract_candidate_value_stream_mentions(text)

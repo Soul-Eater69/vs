@@ -32,7 +32,7 @@ def build_ticket_payload(
     attachments = list(fields.get("attachment", []) or [])
 
     issuelinks = fields.get("issuelinks", [])
-    themes = extract_themes(issuelinks)
+    themes = extract_themes(issuelinks, source_title=str(fields.get("summary") or ""))
     vs_data = resolve_value_streams(themes, issuelinks, llm_client=llm_client)
 
     return {

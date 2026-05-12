@@ -9,9 +9,6 @@ class ValueStreamRagResponse(BaseModel):
     selected_value_streams: list[dict] = Field(default_factory=list)
     auto_selected_value_streams: list[dict] = Field(default_factory=list)
     llm_selected_value_streams: list[dict] = Field(default_factory=list)
-    rescued_confirmed_merged_value_streams: list[dict] = Field(default_factory=list)
-    rescued_historical_gap_fill_value_streams: list[dict] = Field(default_factory=list)
-    dropped_historical_gap_fill_value_streams: list[dict] = Field(default_factory=list)
     rejected_candidates: list[dict] = Field(default_factory=list)
     semantic_candidate_value_streams: list[dict] = Field(default_factory=list)
     historical_candidate_value_streams: list[dict] = Field(default_factory=list)
@@ -26,8 +23,6 @@ class ValueStreamRagResponse(BaseModel):
     historical_source: str = ""
     raw_response: Any = None
     review_pool_llm_output: Any = None
-    direct_llm_output: Any = None
-    historical_llm_output: Any = None
     rag_runtime_config: dict[str, Any] = Field(default_factory=dict)
     query_preparation: dict[str, Any] = Field(default_factory=dict)
     warnings: list[Any] = Field(default_factory=list)
@@ -42,15 +37,6 @@ class ValueStreamRagResponse(BaseModel):
             selected_value_streams=list(getattr(result, "selected_value_streams", []) or []),
             auto_selected_value_streams=list(getattr(result, "auto_selected_value_streams", []) or []),
             llm_selected_value_streams=list(getattr(result, "llm_selected_value_streams", []) or []),
-            rescued_confirmed_merged_value_streams=list(
-                getattr(result, "rescued_confirmed_merged_value_streams", []) or []
-            ),
-            rescued_historical_gap_fill_value_streams=list(
-                getattr(result, "rescued_historical_gap_fill_value_streams", []) or []
-            ),
-            dropped_historical_gap_fill_value_streams=list(
-                getattr(result, "dropped_historical_gap_fill_value_streams", []) or []
-            ),
             rejected_candidates=list(getattr(result, "rejected_candidates", []) or []),
             semantic_candidate_value_streams=list(
                 getattr(result, "semantic_candidate_value_streams", []) or []
@@ -75,8 +61,6 @@ class ValueStreamRagResponse(BaseModel):
             historical_source=str(getattr(result, "historical_source", "") or ""),
             raw_response=getattr(result, "raw_response", None),
             review_pool_llm_output=getattr(result, "review_pool_llm_output", None),
-            direct_llm_output=getattr(result, "direct_llm_output", None),
-            historical_llm_output=getattr(result, "historical_llm_output", None),
             rag_runtime_config=dict(getattr(result, "rag_runtime_config", {}) or {}),
             query_preparation=dict(getattr(result, "query_preparation", {}) or {}),
             warnings=list(getattr(result, "warnings", []) or []),
@@ -85,4 +69,5 @@ class ValueStreamRagResponse(BaseModel):
             historical_excluded_ticket_ids=list(
                 getattr(result, "historical_excluded_ticket_ids", []) or []
             ),
+            ground_truth=list(getattr(result, "ground_truth", []) or []),
         )

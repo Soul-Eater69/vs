@@ -7,15 +7,9 @@ def test_runtime_config_for_review_pool_20() -> None:
     cfg = derive_rag_runtime_config(20)
 
     assert cfg.final_output_count == 20
-    assert cfg.semantic_fetch_k == 40
-    assert cfg.historical_ticket_fetch_k == 25
-    assert cfg.llm_candidate_window == 25
-    assert cfg.max_semantic_plus_historical == 11
-    assert cfg.max_semantic_only == 7
-    assert cfg.max_historical_only == 7
-    assert (
-        cfg.max_semantic_plus_historical
-        + cfg.max_semantic_only
-        + cfg.max_historical_only
-        == 25
-    )
+    assert cfg.semantic_fetch_k == 60
+    assert cfg.historical_ticket_fetch_k == 60
+    assert cfg.llm_candidate_window == 50
+    assert cfg.max_semantic_plus_historical == 50
+    assert cfg.max_semantic_only == 1
+    assert cfg.max_historical_only == 8

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
-import inspect
 import logging
 from time import perf_counter
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +12,6 @@ logger = logging.getLogger(__name__)
 def select_value_streams(
     query: str,
     *,
-    fetch_count: int = 12,
     semantic_fetch_k: int = 40,
     historical_ticket_fetch_k: int = 35,
     llm_candidate_window: int = 30,
@@ -21,7 +19,6 @@ def select_value_streams(
     historical_faiss_dir: str = "ticket_data/_faiss",
     historical_search_backend: str | None = None,
     historical_azure_index_name: str | None = None,
-    allowed_value_stream_names: Optional[List[str]] = None,
     exclude_ticket_ids: Optional[List[str]] = None,
     foundational_value_streams_raw: Optional[List[str]] = None,
     foundational_value_streams_canonical: Optional[List[str]] = None,
@@ -59,10 +56,8 @@ def select_value_streams(
             retrieve_semantic_candidates,
             retrieval_query,
             top_k=top_k,
-            allowed_value_stream_names=allowed_value_stream_names,
         )
         historical_future = executor.submit(
-            _retrieve_historical_support_compat,
             retrieve_historical_support,
             retrieval_query,
             historical_faiss_dir=historical_faiss_dir,
@@ -161,18 +156,6 @@ def select_value_streams(
         "selected_value_streams": generated["selected_value_streams"],
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],
         "llm_selected_value_streams": generated["llm_selected_value_streams"],
-        "rescued_confirmed_merged_value_streams": generated.get(
-            "rescued_confirmed_merged_value_streams",
-            [],
-        ),
-        "rescued_historical_gap_fill_value_streams": generated.get(
-            "rescued_historical_gap_fill_value_streams",
-            [],
-        ),
-        "dropped_historical_gap_fill_value_streams": generated.get(
-            "dropped_historical_gap_fill_value_streams",
-            [],
-        ),
         "rejected_candidates": [],
         "semantic_candidate_value_streams": semantic_candidates,
         "historical_candidate_value_streams": historical.get("historical_value_stream_support", []),
@@ -190,8 +173,6 @@ def select_value_streams(
         "historical_source": historical.get("historical_source", ""),
         "raw_response": raw_response,
         "review_pool_llm_output": review_pool_llm_output,
-        "direct_llm_output": review_pool_llm_output,
-        "historical_llm_output": None,
         "query_preparation": {
             "cleaned_query": cleaned_query,
             "query_for_prompt": query_for_prompt,
@@ -199,82 +180,4 @@ def select_value_streams(
         "warnings": [],
         "debug": debug,
         "historical_excluded_ticket_ids": list(exclude_ticket_ids or []),
-    }
-
-
-def _retrieve_historical_support_compat(
-    retrieve_historical_support,
-    query: str,
-    *,
-    historical_faiss_dir: str,
-    historical_search_backend: str | None = None,
-    historical_azure_index_name: str | None = None,
-    max_ticket_hits: int,
-    exclude_ticket_ids: Optional[List[str]] = None,
-) -> dict:
-    kwargs = {
-        "historical_faiss_dir": historical_faiss_dir,
-        "max_ticket_hits": max_ticket_hits,
-    }
-    if "historical_search_backend" in inspect.signature(retrieve_historical_support).parameters:
-        kwargs["historical_search_backend"] = historical_search_backend
-    if "historical_azure_index_name" in inspect.signature(retrieve_historical_support).parameters:
-        kwargs["historical_azure_index_name"] = historical_azure_index_name
-    if "exclude_ticket_ids" in inspect.signature(retrieve_historical_support).parameters:
-        kwargs["exclude_ticket_ids"] = exclude_ticket_ids
-    return retrieve_historical_support(query, **kwargs)
-
-
-def run_historical_rag_pipeline(
-    ppt_text: str,
-    *,
-    allowed_value_stream_names: Optional[List[str]] = None,
-    fetch_count: int = 12,
-    historical_faiss_dir: str = "ticket_data/_faiss",
-    historical_search_backend: str | None = None,
-    historical_azure_index_name: str | None = None,
-) -> Dict[str, Any]:
-    result = select_value_streams(
-        ppt_text,
-        fetch_count=fetch_count,
-        historical_faiss_dir=historical_faiss_dir,
-        historical_search_backend=historical_search_backend,
-        historical_azure_index_name=historical_azure_index_name,
-        allowed_value_stream_names=allowed_value_stream_names,
-    )
-    return {
-        "selected_value_streams": result.get("selected_value_streams", []),
-        "auto_selected_value_streams": result.get("auto_selected_value_streams", []),
-        "llm_selected_value_streams": result.get("llm_selected_value_streams", []),
-        "rescued_confirmed_merged_value_streams": result.get(
-            "rescued_confirmed_merged_value_streams",
-            [],
-        ),
-        "rescued_historical_gap_fill_value_streams": result.get(
-            "rescued_historical_gap_fill_value_streams",
-            [],
-        ),
-        "dropped_historical_gap_fill_value_streams": result.get(
-            "dropped_historical_gap_fill_value_streams",
-            [],
-        ),
-        "rejected_candidates": result.get("rejected_candidates", []),
-        "semantic_candidate_value_streams": result.get("semantic_candidate_value_streams", []),
-        "historical_candidate_value_streams": result.get("historical_candidate_value_streams", []),
-        "merged_candidate_value_streams": result.get("merged_candidate_value_streams", []),
-        "historical_ticket_hits": result.get("historical_ticket_hits", []),
-        "historical_value_stream_support": result.get("historical_value_stream_support", []),
-        "candidate_value_streams": result.get("candidate_value_streams", []),
-        "llm_candidates": result.get("llm_candidates", []),
-        "foundational_signals": result.get("foundational_signals", []),
-        "foundational_signal_source": result.get("foundational_signal_source", ""),
-        "foundational_value_stream_matches": result.get("foundational_value_stream_matches", []),
-        "historical_source": result.get("historical_source", ""),
-        "raw_response": result.get("raw_response"),
-        "review_pool_llm_output": result.get("review_pool_llm_output"),
-        "rag_runtime_config": result.get("rag_runtime_config", {}),
-        "query_preparation": result.get("query_preparation", {}),
-        "warnings": result.get("warnings", []),
-        "debug": result.get("debug", {}),
-        "historical_excluded_ticket_ids": result.get("historical_excluded_ticket_ids", []),
     }

@@ -83,19 +83,6 @@ def test_idea_cards_list_and_text_extract(monkeypatch) -> None:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def test_condense_fallback_returns_cleaned_text_on_timeout(monkeypatch) -> None:
-    async def run() -> tuple[str, list[str]]:
-        def slow_condense(_raw: str) -> str:
-            raise TimeoutError("slow")
-
-        return await rag._condense_or_fallback(slow_condense, "raw", "cleaned query")
-
-    condensed, warnings = asyncio.run(run())
-
-    assert condensed == "cleaned query"
-    assert "using cleaned idea-card text" in warnings[0]
-
-
 def test_non_stream_ticket_only_builds_foundational_metadata_and_uses_raw_text(monkeypatch) -> None:
     request = ValueStreamRagRequest(ticket_id="IDMT-1", final_output_count=5)
     raw_text = "Foundational Value Streams: Order to Cash"

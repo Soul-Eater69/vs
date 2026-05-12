@@ -152,7 +152,7 @@ def main() -> int:
     started = datetime.now(timezone.utc)
     print(
         f"Evaluating {len(items)} tickets with concurrency={args.concurrency}, "
-        f"top_k={args.fetch_count}, exclude_source={not args.include_source_ticket}, "
+        f"exclude_source={not args.include_source_ticket}, "
         f"min_truth_streams={args.min_ground_truth_streams}, "
         f"historical_backend={args.historical_search_backend}, "
         f"output_count_mode={args.output_count_mode}"
@@ -162,7 +162,6 @@ def main() -> int:
     results = run_batch(
         items,
         concurrency=args.concurrency,
-        fetch_count=args.fetch_count,
         historical_faiss_dir=str(faiss_dir),
         historical_search_backend=args.historical_search_backend,
         historical_azure_index_name=args.historical_azure_index_name,
@@ -187,7 +186,6 @@ def main() -> int:
         "ground_truth_source": args.ground_truth_source,
         "limit": args.limit,
         "concurrency": args.concurrency,
-        "fetch_count": args.fetch_count,
         "retries": args.retries,
         "retry_backoff_seconds": args.retry_backoff_seconds,
         "min_ground_truth_streams": args.min_ground_truth_streams,
@@ -274,7 +272,6 @@ def parse_args() -> argparse.Namespace:
         default=5.0,
         help="Initial per-ticket retry backoff for transient gateway failures.",
     )
-    parser.add_argument("--fetch-count", type=int, default=30)
     parser.add_argument(
         "--min-ground-truth-streams",
         type=int,
@@ -589,7 +586,6 @@ def run_batch(
     items: list[EvaluationItem],
     *,
     concurrency: int,
-    fetch_count: int,
     historical_faiss_dir: str,
     historical_search_backend: str | None,
     historical_azure_index_name: str | None,
@@ -638,7 +634,6 @@ def run_batch(
             executor.submit(
                 evaluate_one_with_retries,
                 item,
-                fetch_count=fetch_count,
                 historical_faiss_dir=historical_faiss_dir,
                 historical_search_backend=historical_search_backend,
                 historical_azure_index_name=historical_azure_index_name,
@@ -683,7 +678,6 @@ def run_batch(
 def evaluate_one_with_retries(
     item: EvaluationItem,
     *,
-    fetch_count: int,
     historical_faiss_dir: str,
     historical_search_backend: str | None,
     historical_azure_index_name: str | None,
@@ -700,7 +694,6 @@ def evaluate_one_with_retries(
         try:
             return evaluate_one(
                 item,
-                fetch_count=fetch_count,
                 historical_faiss_dir=historical_faiss_dir,
                 historical_search_backend=historical_search_backend,
                 historical_azure_index_name=historical_azure_index_name,
@@ -726,7 +719,6 @@ def evaluate_one_with_retries(
 def evaluate_one(
     item: EvaluationItem,
     *,
-    fetch_count: int,
     historical_faiss_dir: str,
     historical_search_backend: str | None,
     historical_azure_index_name: str | None,
@@ -748,7 +740,6 @@ def evaluate_one(
 
     payload = select_value_streams(
         text,
-        fetch_count=fetch_count,
         final_output_count=final_output_count,
         historical_faiss_dir=historical_faiss_dir,
         historical_search_backend=historical_search_backend,

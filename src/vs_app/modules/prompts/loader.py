@@ -1,6 +1,4 @@
-"""
-Prompt construction, loading, and LLM response JSON extraction.
-"""
+"""Prompt construction, loading, and LLM response JSON extraction."""
 
 from __future__ import annotations
 
@@ -14,8 +12,6 @@ from typing import Any, Dict
 import yaml
 
 from vs_app.shared.constants import PROMPT_YAML_DIR
-# Re-exported for backward compatibility — canonical home is .schemas
-from .schemas import SelectedValueStream, SelectionResult  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -83,62 +79,6 @@ def render_prompt(template: str, **kwargs: Any) -> str:
 
     normalized = re.sub(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}", replace, template)
     return normalized.format(**kwargs)
-
-
-def build_selection_system_prompt(min_select: int = 10, max_select: int = 14) -> str:
-    payload = _load_required_prompt_yaml("selection", ["system"])
-    return render_prompt(
-        str(payload["system"]),
-        min_select=min_select,
-        max_select=max_select,
-    )
-
-
-def build_plain_selection_prompt(query: str, context: str) -> str:
-    payload = _load_required_prompt_yaml("selection", ["user"])
-    return render_prompt(str(payload["user"]), query=query, context=context)
-
-
-def build_historical_selection_system_prompt(
-    min_select: int = 6,
-    max_select: int = 12,
-) -> str:
-    base_prompt = build_selection_system_prompt(
-        min_select=min_select,
-        max_select=max_select,
-    ).rstrip()
-    payload = _load_required_prompt_yaml("historical_rag_selection", ["system_extension"])
-    extension = str(payload["system_extension"]).strip()
-    return f"{base_prompt}\n\n{extension}" if extension else base_prompt
-
-
-def build_historical_selection_prompt(
-    query_for_prompt: str,
-    candidate_blocks: str,
-) -> str:
-    payload = _load_required_prompt_yaml("historical_rag_selection", ["user"])
-    return render_prompt(
-        str(payload["user"]),
-        query_for_prompt=query_for_prompt,
-        candidate_blocks=candidate_blocks,
-    )
-
-
-def build_historical_gap_selection_prompt(
-    *,
-    query_for_prompt: str,
-    precedent_context: str,
-    faiss_hit_context: str,
-    candidate_blocks: str,
-) -> str:
-    payload = _load_required_prompt_yaml("historical_gap_selection", ["user"])
-    return render_prompt(
-        str(payload["user"]),
-        query_for_prompt=query_for_prompt,
-        precedent_context=precedent_context,
-        faiss_hit_context=faiss_hit_context,
-        candidate_blocks=candidate_blocks,
-    )
 
 
 def build_review_pool_selection_system_prompt(max_select: int = 12) -> str:
@@ -214,19 +154,12 @@ def build_jira_value_stream_verifier_prompt(
 
 
 __all__ = [
-    "SelectionResult",
-    "SelectedValueStream",
     "build_historical_enrichment_prompt",
     "build_historical_enrichment_system_prompt",
-    "build_historical_gap_selection_prompt",
-    "build_historical_selection_prompt",
-    "build_historical_selection_system_prompt",
     "build_jira_value_stream_verifier_prompt",
     "build_jira_value_stream_verifier_system_prompt",
-    "build_plain_selection_prompt",
     "build_review_pool_selection_prompt",
     "build_review_pool_selection_system_prompt",
-    "build_selection_system_prompt",
     "build_value_stream_classification_prompt",
     "load_prompt_yaml",
     "render_prompt",

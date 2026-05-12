@@ -120,7 +120,7 @@ def test_review_pool_finalizer_removes_invented_output(monkeypatch) -> None:
     assert result["raw_response"]["single_review_pool_pass"]["rejected_candidates"][0]["entity_name"] == "Issue Payment"
 
 
-def test_review_pool_missed_strong_candidates_are_debug_only(monkeypatch) -> None:
+def test_review_pool_safe_backfills_strong_candidate_when_llm_returns_none(monkeypatch) -> None:
     class FakeGenerationService:
         def generate_structured(self, **kwargs):
             return _FakeResult([])
@@ -145,9 +145,10 @@ def test_review_pool_missed_strong_candidates_are_debug_only(monkeypatch) -> Non
         final_output_count=5,
     )
 
-    assert result["selected_value_streams"] == []
+    assert [row["entity_name"] for row in result["selected_value_streams"]] == ["Issue Payment"]
+    assert result["selected_value_streams"][0]["selection_source"] == "safe_backfill"
     missed = result["raw_response"]["missed_strong_candidates"]
-    assert [row["entity_name"] for row in missed] == ["Issue Payment"]
+    assert missed == []
 
 
 def test_review_pool_prompt_stays_compact() -> None:

@@ -6,8 +6,8 @@ One module per output domain; import from this package directly.
 from .summary import SummaryOutput
 from .value_stream import (
     InferenceType,
-    SelectedValueStream,
-    SelectionResult,
+    ReviewPoolPick,
+    ReviewPoolPickResult,
     VsClassificationItem,
     VsClassificationResult,
     VsVerifierMapping,
@@ -19,8 +19,8 @@ __all__ = [
     "SummaryOutput",
     # value_stream
     "InferenceType",
-    "SelectedValueStream",
-    "SelectionResult",
+    "ReviewPoolPick",
+    "ReviewPoolPickResult",
     "VsClassificationItem",
     "VsClassificationResult",
     "VsVerifierMapping",

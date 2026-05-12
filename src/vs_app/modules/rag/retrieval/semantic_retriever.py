@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from ..query.views import normalize_for_search
 logger = logging.getLogger(__name__)
@@ -15,18 +15,12 @@ def retrieve_semantic_candidates(
     query: str,
     *,
     top_k: int = 12,
-    allowed_value_stream_names: Optional[List[str]] = None,
     client: Any = None,
 ) -> List[dict]:
     if client is None:
         from vs_app.integrations.clients.azure_direct_client import AzureDirectSearchClient
 
         client = AzureDirectSearchClient()
-    allowed = {
-        normalize_for_search(str(name))
-        for name in (allowed_value_stream_names or [])
-        if str(name).strip()
-    }
 
     try:
         search_query = _semantic_search_query(query)
@@ -53,9 +47,6 @@ def retrieve_semantic_candidates(
             continue
 
         name_key = normalize_for_search(name)
-        if allowed and name_key not in allowed:
-            continue
-
         score = float(
             row.get("@search.reranker_score")
             if row.get("@search.reranker_score") is not None

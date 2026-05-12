@@ -27,6 +27,8 @@ class ValueStreamRagResponse(BaseModel):
     debug: dict[str, Any] = Field(default_factory=dict)
     historical_excluded_ticket_ids: list[str] = Field(default_factory=list)
     ground_truth: list[str] = Field(default_factory=list)
+    source_ticket_title: str = ""
+    theme_payloads: list[dict] = Field(default_factory=list)
 
     @classmethod
     def from_result(cls, result: object) -> "ValueStreamRagResponse":
@@ -62,4 +64,6 @@ class ValueStreamRagResponse(BaseModel):
                 getattr(result, "historical_excluded_ticket_ids", []) or []
             ),
             ground_truth=list(getattr(result, "ground_truth", []) or []),
+            source_ticket_title=str(getattr(result, "source_ticket_title", "") or ""),
+            theme_payloads=list(getattr(result, "theme_payloads", []) or []),
         )

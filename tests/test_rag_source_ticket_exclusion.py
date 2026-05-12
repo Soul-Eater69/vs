@@ -39,6 +39,7 @@ def test_source_ticket_exclusion_is_passed_to_pipeline() -> None:
     def pipeline_fn(query: str, **kwargs) -> dict:
         captured["query"] = query
         captured["exclude_ticket_ids"] = kwargs.get("exclude_ticket_ids")
+        captured["historical_search_backend"] = kwargs.get("historical_search_backend")
         payload = _minimal_payload()
         payload["historical_excluded_ticket_ids"] = list(kwargs.get("exclude_ticket_ids") or [])
         return payload
@@ -55,6 +56,7 @@ def test_source_ticket_exclusion_is_passed_to_pipeline() -> None:
 
     assert captured["query"] == "uploaded card text"
     assert captured["exclude_ticket_ids"] == ["IDMT-123"]
+    assert captured["historical_search_backend"] == "azure"
     assert result.historical_excluded_ticket_ids == ["IDMT-123"]
 
 

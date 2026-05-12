@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import os
 import re
@@ -13,6 +14,18 @@ from vs_app.modules.rag.query.retrieval_summary import (
 from vs_app.shared.text_cleaning import clean_extracted_text
 
 logger = logging.getLogger(__name__)
+
+_TITLE_HEADER_RE = re.compile(
+    r"^\s*(?:idea\s+card\s+title|idmt\s+title|title|summary)\s*:\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class PreparedIdeaCard:
+    source_ticket_title: str
+    cleaned_text: str
+    condensed_text: str
 
 
 def clean_opt_text(raw_text: str) -> str:
@@ -29,6 +42,50 @@ def normalize_for_search(text: Optional[str], max_chars: int = 2500) -> str:
     cleaned = re.sub(r"[^a-z0-9\n\.\,\/\-\&\$\+\ ]+", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned[:max_chars]
+
+
+def clean_title_part(value: str | None) -> str:
+    text = " ".join(str(value or "").split())
+    return text.strip(" -\t\r\n")
+
+
+def extract_source_ticket_title(raw_text: str | None, fallback: str | None = None) -> str:
+    """Extract only the source IDMT/idea-card title, never value-stream labels."""
+    text = str(raw_text or "")
+    for raw_line in text.splitlines()[:60]:
+        line = clean_title_part(raw_line)
+        if not line:
+            continue
+        match = _TITLE_HEADER_RE.match(line)
+        if match:
+            title = clean_title_part(match.group(1))
+            if title:
+                return title
+
+    for raw_line in text.splitlines()[:20]:
+        line = clean_title_part(raw_line)
+        if not line or ":" in line and len(line.split()) <= 2:
+            continue
+        if 2 <= len(line.split()) <= 18 and len(line) <= 160:
+            return line
+
+    return clean_title_part(fallback)
+
+
+def prepare_idea_card_for_rag(
+    raw_text: str,
+    *,
+    max_chars: int = 3500,
+    fallback_title: str | None = None,
+) -> PreparedIdeaCard:
+    cleaned = clean_ppt_text(raw_text)
+    condensed = condense_idea_card(raw_text, max_chars=max_chars)
+    title = extract_source_ticket_title(raw_text, fallback=fallback_title)
+    return PreparedIdeaCard(
+        source_ticket_title=title,
+        cleaned_text=cleaned,
+        condensed_text=condensed,
+    )
 
 
 def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:

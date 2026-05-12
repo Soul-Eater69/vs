@@ -5,6 +5,7 @@ from vs_app.modules.rag import pipeline
 
 def test_condensed_query_feeds_semantic_and_historical_retrieval(monkeypatch) -> None:
     calls: dict[str, str] = {}
+    progress: list[str] = []
 
     monkeypatch.setattr(
         "vs_app.modules.rag.query.views.clean_ppt_text",
@@ -61,13 +62,25 @@ def test_condensed_query_feeds_semantic_and_historical_retrieval(monkeypatch) ->
         lambda **kwargs: {},
     )
 
-    result = pipeline.select_value_streams("RAW QUERY")
+    result = pipeline.select_value_streams(
+        "RAW QUERY",
+        progress_callback=lambda step, label: progress.append(step),
+    )
 
     assert calls == {
         "semantic": "CONDENSED QUERY",
         "historical": "CONDENSED QUERY",
     }
     assert result["query_preparation"] == {
+        "source_ticket_title": "RAW QUERY",
         "cleaned_query": "CLEANED QUERY",
         "query_for_prompt": "CONDENSED QUERY",
     }
+    assert progress == [
+        "condense",
+        "semantic",
+        "historical",
+        "merge",
+        "llm_select",
+        "finalize",
+    ]

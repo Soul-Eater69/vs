@@ -88,6 +88,17 @@ interface SelectedVS {
 interface RejectedVS { entity_id: string; entity_name: string; reason: string }
 interface CanonicalVS { id: string; name: string; category: string }
 
+interface ThemePayload {
+  identity_key: string;
+  source_ticket_id: string;
+  source_ticket_title: string;
+  value_stream_entity_id?: string | null;
+  value_stream_name: string;
+  theme_title: string;
+  confidence?: number;
+  selection_source?: string;
+}
+
 interface HistoricalTicketHit {
   ticket_id: string;
   best_score?: number;
@@ -118,6 +129,8 @@ interface PipelineResult {
   historical_excluded_ticket_ids?: string[];
   ground_truth?: string[];
   ground_truth_title?: string;
+  source_ticket_title?: string;
+  theme_payloads?: ThemePayload[];
   source_doc_id?: string;
   canonical_value_streams?: CanonicalVS[];
 }
@@ -350,7 +363,15 @@ function Empty({ text }: { text: string }) {
 
 // --- Result panes ---------------------------------------------------------
 
-function SelectionPane({ selected, rejected }: { selected: SelectedVS[]; rejected: RejectedVS[] }) {
+function SelectionPane({
+  selected,
+  rejected,
+  themePayloads = [],
+}: {
+  selected: SelectedVS[];
+  rejected: RejectedVS[];
+  themePayloads?: ThemePayload[];
+}) {
   if (!selected.length && !rejected.length) return <Empty text="Run the pipeline to see AI selections." />;
   return (
     <div className="space-y-5">
@@ -358,6 +379,10 @@ function SelectionPane({ selected, rejected }: { selected: SelectedVS[]; rejecte
       <div className="space-y-2">
         {[...selected].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)).map((vs, i) => {
           const pct = Math.round((vs.confidence ?? 0) * 100);
+          const theme = themePayloads.find(t =>
+            (t.value_stream_entity_id && t.value_stream_entity_id === vs.entity_id)
+            || t.value_stream_name === vs.entity_name
+          );
           return (
             <div key={i} className="rounded-md border border-emerald-200 bg-emerald-50/80 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/30">
               <div className="flex items-start justify-between gap-3">
@@ -368,6 +393,14 @@ function SelectionPane({ selected, rejected }: { selected: SelectedVS[]; rejecte
                 <span className={`text-xs font-bold ${pct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : pct >= 50 ?
                   'text-amber-600 dark:text-amber-400' : 'text-red-500'}`}>{pct}%</span>
               </div>
+              {theme?.theme_title && (
+                <div className="mt-2 rounded border border-emerald-200 bg-white/70 px-2.5 py-2 text-xs text-zinc-700 dark:border-emerald-800 dark:bg-zinc-900/40 dark:text-zinc-200">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                    Jira Theme Title
+                  </div>
+                  <div className="font-medium">{theme.theme_title}</div>
+                </div>
+              )}
               <div className="mt-2 h-1.5 rounded-full bg-emerald-200/70 dark:bg-emerald-900/40">
                 <div className="h-full rounded-full bg-hcsc transition-all duration-700 dark:bg-emerald-400" style={{ width: `${pct}%` }} />
               </div>
@@ -1109,7 +1142,10 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [excludeSourceTicketFromHistorical, setExcludeSourceTicketFromHistorical] = useState(true);
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return localStorage.getItem('vs-theme') !== 'light';
+  });
 
   const [step, setStep] = useState<Step>('idle');
   const [stepLabel, setStepLabel] = useState('');
@@ -1121,10 +1157,8 @@ export default function Home() {
   const currentPipelineStepRef = useRef<Step>('idle');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load cards + theme
+  // Load cards
   useEffect(() => {
-    const savedTheme = localStorage.getItem('vs-theme');
-    if (savedTheme) setDark(savedTheme === 'dark');
     fetch(`${API}/api/idea-cards`)
       .then(r => r.json())
       .then(d => { setCards(d.cards ?? []); if (d.cards?.length) setSelectedCardDocId(d.cards[0].doc_id); })
@@ -1225,15 +1259,20 @@ export default function Home() {
     currentPipelineStepRef.current = 'idle';
 
     try {
+      const outputCount = Math.min(25, Math.max(1, count));
       const body: Record<string, unknown> = {
-        final_output_count: count,
-        use_llm_finalizer: true,
+        semantic_fetch_k: count,
+        historical_ticket_fetch_k: count,
+        final_output_count: outputCount,
         exclude_source_ticket_from_historical: excludeSourceTicketFromHistorical,
       };
       if (uploadedIdeaText.trim()) {
         body.idea_card_text = uploadedIdeaText.trim();
         if (selectedTicketId) body.ticket_id = selectedTicketId;
-      } else if (selectedTicketId) body.ticket_id = selectedTicketId;
+      } else if (selectedTicketId) {
+        body.ticket_id = selectedTicketId;
+        if (selectedCard?.display_name) body.source_ticket_title = selectedCard.display_name;
+      }
       else throw new Error('Select a Jira idea card or drop an extractable idea-card file.');
 
       const res = await fetch(`${API}/rag/value-streams/stream`, {
@@ -1294,7 +1333,7 @@ export default function Home() {
       setStep('error');
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [count, excludeSourceTicketFromHistorical, selectedTicketId, uploadedIdeaText]);
+  }, [count, excludeSourceTicketFromHistorical, selectedCard, selectedTicketId, uploadedIdeaText]);
 
   const busy = step !== 'idle' && step !== 'done' && step !== 'error';
   const card = selectedCard;
@@ -1537,7 +1576,18 @@ export default function Home() {
                   <TabBtn active={tab === 'raw'}        label="Raw LLM"    icon="terminal"                                                 onClick={() => setTab('raw')} />
                 </div>
 
-                {tab === 'selection'  && <SelectionPane  selected={result.selected_value_streams ?? []} rejected={result.rejected_candidates ?? []} />}
+                {result?.source_ticket_title && (
+                  <div className="mb-4 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                      Source Idea Card Title
+                    </div>
+                    <div className="mt-1 font-medium text-zinc-800 dark:text-zinc-100">
+                      {result.source_ticket_title}
+                    </div>
+                  </div>
+                )}
+
+                {tab === 'selection'  && <SelectionPane  selected={result.selected_value_streams ?? []} rejected={result.rejected_candidates ?? []} themePayloads={result?.theme_payloads ?? []} />}
                 {tab === 'comparison' && <ComparisonPane selected={result.selected_value_streams ?? []} groundTruth={result.ground_truth} title={result.ground_truth_title} />}
                 {tab === 'llmPasses'  && <LlmPassesPane reviewPool={result.review_pool_llm_output} direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} llmCandidates={result.llm_candidates ?? result.candidates_used ?? []} />}
                 {tab === 'retrieval'  && <RetrievalPane  candidates={cands} />}

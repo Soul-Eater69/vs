@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 import logging
 from time import perf_counter
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +17,16 @@ def select_value_streams(
     llm_candidate_window: int = 30,
     final_output_count: int | None = None,
     historical_faiss_dir: str = "ticket_data/_faiss",
-    historical_search_backend: str | None = None,
+    historical_search_backend: str | None = "azure",
     historical_azure_index_name: str | None = None,
     exclude_ticket_ids: Optional[List[str]] = None,
+    progress_callback: Callable[[str, str], None] | None = None,
 ) -> dict:
     from .augmentation.candidate_merger import CandidateWindowPolicy, merge_candidate_sources
     from .augmentation.finalizer import generate_review_pool_value_streams
     from .config.runtime import derive_rag_runtime_config
     from .fingerprints import build_rag_debug_fingerprints
-    from .query.views import clean_ppt_text, condense_idea_card
+    from .query.views import prepare_idea_card_for_rag
     from .retrieval.historical_retriever import filter_historical_result, retrieve_historical_support
     from .retrieval.semantic_retriever import retrieve_semantic_candidates
 
@@ -38,16 +39,20 @@ def select_value_streams(
 
     top_k = min(max(1, semantic_fetch_k), 50)
     max_ticket_hits = min(max(1, historical_ticket_fetch_k), 40)
-    cleaned_query = clean_ppt_text(query)
-    query_for_prompt = condense_idea_card(query, max_chars=3500)
+    _emit_progress(progress_callback, "condense", "Condensing idea card...")
+    prepared = prepare_idea_card_for_rag(query, max_chars=3500)
+    cleaned_query = prepared.cleaned_text
+    query_for_prompt = prepared.condensed_text
     retrieval_query = query_for_prompt or cleaned_query
 
     with ThreadPoolExecutor(max_workers=2) as executor:
+        _emit_progress(progress_callback, "semantic", "Searching value-stream catalog...")
         semantic_future = executor.submit(
             retrieve_semantic_candidates,
             retrieval_query,
             top_k=top_k,
         )
+        _emit_progress(progress_callback, "historical", "Searching historical analogs...")
         historical_future = executor.submit(
             retrieve_historical_support,
             retrieval_query,
@@ -61,6 +66,7 @@ def select_value_streams(
         historical = historical_future.result()
     historical = filter_historical_result(historical, exclude_ticket_ids)
 
+    _emit_progress(progress_callback, "merge", "Merging semantic and historical evidence...")
     augmented = merge_candidate_sources(
         semantic_candidates,
         historical.get("historical_value_stream_support", []),
@@ -75,6 +81,7 @@ def select_value_streams(
         max_llm_candidates=llm_candidate_window,
     )
     finalizer_started = perf_counter()
+    _emit_progress(progress_callback, "llm_select", "Running Review Pool LLM selection...")
     generated = generate_review_pool_value_streams(
         query_for_prompt=retrieval_query,
         llm_candidates=augmented["llm_candidates"],
@@ -111,6 +118,7 @@ def select_value_streams(
     debug["rag_runtime_config"] = runtime_config_dict
     debug["prompt_debug"] = raw_response.get("prompt_debug", {}) if isinstance(raw_response, dict) else {}
     debug["candidate_window_counts"] = augmented.get("candidate_window_counts", {})
+    _emit_progress(progress_callback, "finalize", "Finalizing selections...")
     return {
         "selected_value_streams": generated["selected_value_streams"],
         "auto_selected_value_streams": augmented["auto_selected_value_streams"],
@@ -130,6 +138,7 @@ def select_value_streams(
         "raw_response": raw_response,
         "review_pool_llm_output": review_pool_llm_output,
         "query_preparation": {
+            "source_ticket_title": prepared.source_ticket_title,
             "cleaned_query": cleaned_query,
             "query_for_prompt": query_for_prompt,
         },
@@ -137,3 +146,16 @@ def select_value_streams(
         "debug": debug,
         "historical_excluded_ticket_ids": list(exclude_ticket_ids or []),
     }
+
+
+def _emit_progress(
+    progress_callback: Callable[[str, str], None] | None,
+    step: str,
+    label: str,
+) -> None:
+    if progress_callback is None:
+        return
+    try:
+        progress_callback(step, label)
+    except Exception:
+        logger.debug("RAG progress callback failed", exc_info=True)

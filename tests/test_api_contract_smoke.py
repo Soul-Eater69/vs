@@ -41,6 +41,13 @@ def test_rag_public_schema_requires_query_input() -> None:
 def test_rag_request_clamps_final_output_count() -> None:
     assert ValueStreamRagRequest(idea_card_text="hello", final_output_count=100).final_output_count == 25
     assert ValueStreamRagRequest(idea_card_text="hello", final_output_count=0).final_output_count == 1
+    assert (
+        ValueStreamRagRequest(
+            idea_card_text="hello",
+            source_ticket_title="CP 2025 Health Management & Advocacy: Digital GTM",
+        ).source_ticket_title
+        == "CP 2025 Health Management & Advocacy: Digital GTM"
+    )
 
 
 def test_rag_request_rejects_label_injection_fields() -> None:
@@ -122,3 +129,75 @@ def test_non_stream_ticket_only_uses_raw_text_without_label_extraction(monkeypat
     assert command.idea_card_text == raw_text
     assert not hasattr(command, "found" + "ational_" + "value_streams_canonical")
     assert not hasattr(response, "found" + "ational_" + "value_stream_matches")
+
+
+def test_response_adds_theme_payloads_after_prediction(monkeypatch) -> None:
+    request = ValueStreamRagRequest(
+        ticket_id="IDMT-123",
+        idea_card_text="Idea text",
+        source_ticket_title="CP 2025 Health Management & Advocacy: Digital GTM",
+    )
+    monkeypatch.setattr(rag, "_ground_truth_for_ticket", lambda ticket_id: [])
+
+    result = SimpleNamespace(
+        selected_value_streams=[
+            {
+                "entity_id": "VSR00074590",
+                "entity_name": "Establish Product Offering",
+                "confidence": 0.82,
+                "selection_source": "llm_pick",
+            }
+        ],
+        query_preparation={"source_ticket_title": "Ignored because request wins"},
+    )
+
+    response = rag._response_from_result(result, request)
+
+    assert response.source_ticket_title == "CP 2025 Health Management & Advocacy: Digital GTM"
+    assert response.theme_payloads == [
+        {
+            "identity_key": "IDMT-123::vs_id::vsr00074590",
+            "source_ticket_id": "IDMT-123",
+            "source_ticket_title": "CP 2025 Health Management & Advocacy: Digital GTM",
+            "value_stream_entity_id": "VSR00074590",
+            "value_stream_name": "Establish Product Offering",
+            "theme_title": (
+                "CP 2025 Health Management & Advocacy: Digital GTM - "
+                "Establish Product Offering"
+            ),
+            "confidence": 0.82,
+            "selection_source": "llm_pick",
+        }
+    ]
+
+
+def test_stream_route_emits_pipeline_progress_events(monkeypatch) -> None:
+    request = ValueStreamRagRequest(idea_card_text="Idea card business text", final_output_count=5)
+    monkeypatch.setattr(rag, "_ground_truth_for_ticket", lambda ticket_id: [])
+
+    class FakeRag:
+        async def analyze(self, command):
+            assert command.progress_callback is not None
+            command.progress_callback("condense", "Condensing idea card...")
+            command.progress_callback("semantic", "Searching value-stream catalog...")
+            command.progress_callback("historical", "Searching historical analogs...")
+            command.progress_callback("merge", "Merging candidates...")
+            command.progress_callback("llm_select", "Running Review Pool LLM...")
+            command.progress_callback("finalize", "Finalizing selections...")
+            return SimpleNamespace()
+
+    async def collect_events() -> str:
+        response = await rag.predict_value_streams_stream(
+            request,
+            container=SimpleNamespace(rag=FakeRag()),
+        )
+        chunks: list[str] = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk))
+        return "".join(chunks)
+
+    body = asyncio.run(collect_events())
+
+    for step in ["extract", "condense", "semantic", "historical", "merge", "llm_select", "finalize"]:
+        assert f'"step": "{step}"' in body
+    assert 'event: result' in body

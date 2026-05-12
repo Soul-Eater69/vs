@@ -16,7 +16,7 @@ def retrieve_historical_support(
     query: str,
     *,
     historical_faiss_dir: str | Path = "ticket_data/_faiss",
-    historical_search_backend: str | None = None,
+    historical_search_backend: str | None = "azure",
     historical_azure_index_name: str | None = None,
     max_ticket_hits: int = 12,
     exclude_ticket_ids: Optional[Iterable[str]] = None,

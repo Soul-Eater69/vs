@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+ProgressCallback = Callable[[str, str], None]
+
 
 @dataclass(slots=True)
 class ValueStreamRagCommand:
@@ -12,13 +14,14 @@ class ValueStreamRagCommand:
     ticket_id: str | None = None
     idea_card_text: str | None = None
     historical_faiss_dir: str = "ticket_data/_faiss"
-    historical_search_backend: str | None = None
+    historical_search_backend: str | None = "azure"
     historical_azure_index_name: str | None = None
     semantic_fetch_k: int = 40
     historical_ticket_fetch_k: int = 35
     llm_candidate_window: int = 30
     final_output_count: int | None = None
     exclude_source_ticket_from_historical: bool = True
+    progress_callback: ProgressCallback | None = None
 
 
 @dataclass(slots=True)
@@ -68,16 +71,22 @@ class ValueStreamRagService:
 
         query = self._resolve_query(command)
         exclude_ids = _source_ticket_exclusions(command)
+        kwargs = {
+            "historical_faiss_dir": command.historical_faiss_dir,
+            "historical_search_backend": command.historical_search_backend,
+            "historical_azure_index_name": command.historical_azure_index_name,
+            "exclude_ticket_ids": exclude_ids,
+            "semantic_fetch_k": command.semantic_fetch_k,
+            "historical_ticket_fetch_k": command.historical_ticket_fetch_k,
+            "llm_candidate_window": command.llm_candidate_window,
+            "final_output_count": command.final_output_count,
+        }
+        if command.progress_callback is not None:
+            kwargs["progress_callback"] = command.progress_callback
+
         return (self.pipeline_fn or select_value_streams)(
             query,
-            historical_faiss_dir=command.historical_faiss_dir,
-            historical_search_backend=command.historical_search_backend,
-            historical_azure_index_name=command.historical_azure_index_name,
-            exclude_ticket_ids=exclude_ids,
-            semantic_fetch_k=command.semantic_fetch_k,
-            historical_ticket_fetch_k=command.historical_ticket_fetch_k,
-            llm_candidate_window=command.llm_candidate_window,
-            final_output_count=command.final_output_count,
+            **kwargs,
         )
 
     @staticmethod

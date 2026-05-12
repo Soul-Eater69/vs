@@ -14,6 +14,7 @@ from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
 from vs_app.modules.rag.service import ValueStreamRagCommand
+from vs_app.modules.themes.title_builder import build_theme_payloads
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 logger = logging.getLogger(__name__)
@@ -123,8 +124,21 @@ def _command_from_request(request: ValueStreamRagRequest) -> ValueStreamRagComma
 
 def _response_from_result(result: object, request: ValueStreamRagRequest) -> ValueStreamRagResponse:
     response = ValueStreamRagResponse.from_result(result)
+    source_ticket_title = (
+        request.source_ticket_title
+        or response.query_preparation.get("source_ticket_title")
+        or request.ticket_id
+        or ""
+    )
+    response.source_ticket_title = str(source_ticket_title or "").strip()
     if request.ticket_id:
         response.ground_truth = _ground_truth_for_ticket(request.ticket_id)
+    if request.ticket_id and response.source_ticket_title and response.selected_value_streams:
+        response.theme_payloads = build_theme_payloads(
+            source_ticket_id=request.ticket_id,
+            source_ticket_title=response.source_ticket_title,
+            selected_value_streams=response.selected_value_streams,
+        )
     return response
 
 
@@ -137,9 +151,36 @@ async def predict_value_streams_stream(
         try:
             yield _sse("step", {"step": "extract", "label": f"Reading {request.ticket_id or 'idea card'}..."})
             command = await asyncio.to_thread(_command_from_request, request)
-            yield _sse("step", {"step": "rag", "label": "Running shared RAG pipeline..."})
-            result = await container.rag.analyze(command)
-            yield _sse("step", {"step": "finalize", "label": "Finalizing selections..."})
+
+            loop = asyncio.get_running_loop()
+            progress_events: asyncio.Queue[tuple[str, dict]] = asyncio.Queue()
+
+            def progress_callback(step: str, label: str) -> None:
+                loop.call_soon_threadsafe(
+                    progress_events.put_nowait,
+                    ("step", {"step": step, "label": label}),
+                )
+
+            command.progress_callback = progress_callback
+
+            async def run_analysis():
+                return await asyncio.to_thread(
+                    lambda: asyncio.run(container.rag.analyze(command))
+                )
+
+            task = asyncio.create_task(run_analysis())
+            while not task.done():
+                try:
+                    event, data = await asyncio.wait_for(progress_events.get(), timeout=0.1)
+                    yield _sse(event, data)
+                except asyncio.TimeoutError:
+                    continue
+
+            while not progress_events.empty():
+                event, data = progress_events.get_nowait()
+                yield _sse(event, data)
+
+            result = await task
             yield _sse("result", _response_from_result(result, request).model_dump())
 
         except Exception as exc:

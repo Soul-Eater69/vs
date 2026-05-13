@@ -112,6 +112,22 @@ def test_non_stream_ticket_only_uses_raw_text_without_label_extraction(monkeypat
         lambda **kwargs: raw_text,
     )
     monkeypatch.setattr(rag, "_ground_truth_for_ticket", lambda ticket_id: [])
+    monkeypatch.setattr(
+        rag,
+        "predict_stages",
+        lambda **kwargs: {
+            "stage_predictions": [
+                {
+                    "value_stream_id": "VSR00074590",
+                    "value_stream_name": "Establish Product Offering",
+                    "stage_scope": "broad_or_unclear",
+                    "selected_stages": [],
+                    "reason": "test",
+                }
+            ],
+            "stage_candidate_debug": [],
+        },
+    )
 
     class FakeRag:
         async def analyze(self, command):
@@ -159,6 +175,7 @@ def test_response_adds_theme_payloads_after_prediction(monkeypatch) -> None:
             "identity_key": "IDMT-123::vs_id::vsr00074590",
             "source_ticket_id": "IDMT-123",
             "source_ticket_title": "CP 2025 Health Management & Advocacy: Digital GTM",
+            "theme_prefix": "CP 2025 Health Management & Advocacy: Digital GTM",
             "value_stream_entity_id": "VSR00074590",
             "value_stream_name": "Establish Product Offering",
             "theme_title": (
@@ -166,9 +183,11 @@ def test_response_adds_theme_payloads_after_prediction(monkeypatch) -> None:
                 "Establish Product Offering"
             ),
             "confidence": 0.82,
+            "title_source": "clean_source_ticket_title",
             "selection_source": "llm_pick",
         }
     ]
+    assert response.stage_predictions[0]["stage_scope"] == "broad_or_unclear"
 
 
 def test_stream_route_emits_pipeline_progress_events(monkeypatch) -> None:

@@ -139,6 +139,8 @@ def select_value_streams(
         "review_pool_llm_output": review_pool_llm_output,
         "query_preparation": {
             "source_ticket_title": prepared.source_ticket_title,
+            "theme_title_prefix": prepared.theme_title_prefix,
+            "theme_title_prefix_source": prepared.theme_title_prefix_source,
             "cleaned_query": cleaned_query,
             "query_for_prompt": query_for_prompt,
         },

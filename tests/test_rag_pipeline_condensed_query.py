@@ -12,8 +12,8 @@ def test_condensed_query_feeds_semantic_and_historical_retrieval(monkeypatch) ->
         lambda query: "CLEANED QUERY",
     )
     monkeypatch.setattr(
-        "vs_app.modules.rag.query.views.condense_idea_card",
-        lambda query, max_chars=3500: "CONDENSED QUERY",
+        "vs_app.modules.rag.query.views.condense_idea_card_with_metadata",
+        lambda query, max_chars=3500: ("CONDENSED QUERY", {}),
     )
 
     def fake_semantic(query, **kwargs):
@@ -73,6 +73,8 @@ def test_condensed_query_feeds_semantic_and_historical_retrieval(monkeypatch) ->
     }
     assert result["query_preparation"] == {
         "source_ticket_title": "RAW QUERY",
+        "theme_title_prefix": "RAW QUERY",
+        "theme_title_prefix_source": "clean_source_ticket_title",
         "cleaned_query": "CLEANED QUERY",
         "query_for_prompt": "CONDENSED QUERY",
     }

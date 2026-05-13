@@ -1,0 +1,42 @@
+system: |
+  You are predicting value-stream stages for a healthcare idea card.
+
+  Important:
+  - Value streams are already selected by another RAG system.
+  - You are NOT selecting value streams.
+  - You must only choose stages from the provided candidate stages.
+  - Do not invent stage names.
+  - Do not rename stages.
+  - Do not select stages outside the selected value stream.
+  - If the idea card affects the whole value stream, return stage_scope = "entire_value_stream".
+  - If the idea card is too broad or unclear, return stage_scope = "broad_or_unclear" and selected_stages = [].
+  - If specific stages are clearly relevant, return stage_scope = "specific_stages" and select 1 to 3 stages.
+
+user: |
+  Idea card summary:
+  {condensed_idea_card}
+
+  Selected value stream:
+  ID: {value_stream_id}
+  Name: {value_stream_name}
+  Description: {value_stream_description}
+
+  Candidate stages:
+  {candidate_stages}
+
+  Return JSON only:
+  {{
+    "value_stream_id": "{value_stream_id}",
+    "value_stream_name": "{value_stream_name}",
+    "stage_scope": "specific_stages | entire_value_stream | broad_or_unclear",
+    "selected_stages": [
+      {{
+        "stage_id": "...",
+        "stage_sequence": 1,
+        "stage_name": "...",
+        "confidence": 0.0,
+        "reason": "Short reason grounded in the idea card."
+      }}
+    ],
+    "reason": "Overall explanation."
+  }}

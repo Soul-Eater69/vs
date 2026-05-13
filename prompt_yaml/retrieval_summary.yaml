@@ -3,6 +3,9 @@ schema: |
     "summary_text": "4 to 6 dense, readable sentences describing the proposed business change, affected users/teams/populations, systems/products touched, operational work involved, and scope or scale when stated.",
     "business_problem": "Exactly one sentence describing the concrete pain point, gap, friction, compliance need, operational breakdown, or unmet workflow need.",
     "business_capability": "Exactly one sentence describing the process, workflow, product capability, or system-supported function being created or changed.",
+    "source_ticket_title": "Best source-exact parent Jira/idea-card title when present. Empty string if unavailable.",
+    "theme_title_prefix": "Best concise Jira child theme title prefix to use before ' - {Value Stream}'. Do not include a value stream name. Empty string if unavailable.",
+    "theme_title_prefix_source": "One of: parenthetical_product, clean_source_title, project_title, product_or_program_name, unavailable.",
     "stakeholders": ["Source-exact affected groups, member populations, providers, brokers, internal teams, regulatory bodies, or partner organizations. Empty array allowed when not present."],
     "systems_and_products": ["Source-exact named systems, applications, products, platforms, channels, or services. Empty array allowed when not present."],
     "key_terms": ["Source-exact domain terms, process names, healthcare programs, regulatory references, or operational entities not already captured above. Empty array allowed when not present."]
@@ -44,9 +47,15 @@ template: |
   - `systems_and_products` — prioritize precision. Include only source-exact named systems, applications, products, platforms, channels, or services.
   - `key_terms` — prioritize precision. Include only source-exact domain terms, process names, healthcare programs, regulatory references, or operational entities not already captured above.
 
+  - `source_ticket_title` - extract the parent Jira/idea-card/business case title when present. Prefer Jira summary/title or idea-card executive summary title. Do not use value-stream labels.
+  - `theme_title_prefix` - extract only the reusable prefix before ` - {{Value Stream}}` for deterministic child theme titles. You are not selecting value streams. Do not output full child theme titles. Do not include value-stream names such as Establish Product Offering, Order to Cash, or Manage Member Care.
+  - `theme_title_prefix_source` - use `parenthetical_product` when a source title ends with a product/program in parentheses, `clean_source_title` when using the source title with bracketed IDs removed, `project_title` or `product_or_program_name` when the prefix comes from a named project/product/program, otherwise `unavailable`.
+
   ## Rules
 
   - Use only the provided source text.
+  - For `theme_title_prefix`, if the source title contains a parenthetical product near the end, use that product; for example `CP 2025 National Network Product Tiering and Steerage (Coupe Health)` becomes `Coupe Health`.
+  - For `theme_title_prefix`, remove bracketed internal IDs; for example `CP 2025 Women's and Family Health [00014020]` becomes `CP 2025 Women's and Family Health`.
   - Do not invent, normalize, expand, or infer systems, stakeholders, regulations, workflows, acronyms, or business goals.
   - Preserve exact source wording and capitalization, including acronyms such as `MA`; do not expand or normalize them.
   - Empty arrays are allowed for `stakeholders`, `systems_and_products`, and `key_terms` when named values are not present.

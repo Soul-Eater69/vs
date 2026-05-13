@@ -41,6 +41,10 @@ CHAT_COMPLETION_PATH: str = os.environ.get("CHAT_COMPLETION_PATH", "/chat/comple
 # ---------------------------------------------------------------------------
 AZURE_SEARCH_ENDPOINT: str = os.environ.get("AZURE_SEARCH_ENDPOINT", "")
 AZURE_SEARCH_INDEX_NAME: str = os.environ.get("AZURE_SEARCH_INDEX_NAME", "value-streams")
+VALUE_STREAM_AZURE_SEARCH_INDEX_NAME: str = os.environ.get(
+    "VALUE_STREAM_AZURE_SEARCH_INDEX_NAME",
+    AZURE_SEARCH_INDEX_NAME,
+)
 HISTORICAL_AZURE_SEARCH_INDEX_NAME: str = os.environ.get(
     "HISTORICAL_AZURE_SEARCH_INDEX_NAME",
     "idp_idmt_data",

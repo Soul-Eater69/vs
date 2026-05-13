@@ -24,6 +24,8 @@ _TITLE_HEADER_RE = re.compile(
 @dataclass(frozen=True)
 class PreparedIdeaCard:
     source_ticket_title: str
+    theme_title_prefix: str
+    theme_title_prefix_source: str
     cleaned_text: str
     condensed_text: str
 
@@ -79,21 +81,37 @@ def prepare_idea_card_for_rag(
     fallback_title: str | None = None,
 ) -> PreparedIdeaCard:
     cleaned = clean_ppt_text(raw_text)
-    condensed = condense_idea_card(raw_text, max_chars=max_chars)
-    title = extract_source_ticket_title(raw_text, fallback=fallback_title)
+    condensed, metadata = condense_idea_card_with_metadata(raw_text, max_chars=max_chars)
+    title = clean_title_part(metadata.get("source_ticket_title")) or extract_source_ticket_title(
+        raw_text,
+        fallback=fallback_title,
+    )
+    prefix = clean_title_part(metadata.get("theme_title_prefix"))
+    prefix_source = clean_title_part(metadata.get("theme_title_prefix_source"))
+    if not prefix:
+        from vs_app.modules.themes.title_builder import resolve_theme_title_prefix
+
+        prefix, prefix_source = resolve_theme_title_prefix(title, None)
     return PreparedIdeaCard(
         source_ticket_title=title,
+        theme_title_prefix=prefix,
+        theme_title_prefix_source=prefix_source or "unavailable",
         cleaned_text=cleaned,
         condensed_text=condensed,
     )
 
 
 def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
+    condensed, _ = condense_idea_card_with_metadata(raw_text, max_chars=max_chars)
+    return condensed
+
+
+def condense_idea_card_with_metadata(raw_text: str, max_chars: int = 3500) -> tuple[str, dict]:
     from vs_app.integrations.clients.llm import IDPChatOpenAI, build_extra_body
 
     cleaned = clean_opt_text(raw_text)
     if len(cleaned) <= max_chars:
-        return cleaned[:max_chars]
+        return cleaned[:max_chars], {}
 
     prompt = build_structured_summary_prompt(ticket_id="QUERY", text=cleaned[:8000])
     model = os.environ.get("CONDENSE_LLM_MODEL", "gpt-5-mini-idp")
@@ -108,4 +126,4 @@ def condense_idea_card(raw_text: str, max_chars: int = 3500) -> str:
         logger=logger,
     )
     condensed = format_structured_summary_text(parsed, max_chars=max_chars)
-    return condensed.replace("\\n", "\n").replace("\\r", "")
+    return condensed.replace("\\n", "\n").replace("\\r", ""), parsed

@@ -14,7 +14,11 @@ from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
 from vs_app.modules.rag.service import ValueStreamRagCommand
-from vs_app.modules.themes.title_builder import build_theme_payloads
+from vs_app.modules.stages.pipeline import predict_stages
+from vs_app.modules.themes.title_builder import (
+    build_theme_payloads,
+    enrich_stage_predictions_with_titles,
+)
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 logger = logging.getLogger(__name__)
@@ -27,6 +31,10 @@ _HISTORICAL_AZURE_INDEX = os.environ.get(
     "idp_idmt_data",
 )
 _GROUND_TRUTH_SOURCE = os.environ.get("RAG_GROUND_TRUTH_SOURCE", "azure")
+_VALUE_STREAM_INDEX_NAME = os.environ.get(
+    "VALUE_STREAM_AZURE_SEARCH_INDEX_NAME",
+    os.environ.get("AZURE_SEARCH_INDEX_NAME", "value-streams"),
+)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -124,13 +132,16 @@ def _command_from_request(request: ValueStreamRagRequest) -> ValueStreamRagComma
 
 def _response_from_result(result: object, request: ValueStreamRagRequest) -> ValueStreamRagResponse:
     response = ValueStreamRagResponse.from_result(result)
+    query_preparation = response.query_preparation or {}
     source_ticket_title = (
         request.source_ticket_title
-        or response.query_preparation.get("source_ticket_title")
+        or query_preparation.get("source_ticket_title")
         or request.ticket_id
         or ""
     )
     response.source_ticket_title = str(source_ticket_title or "").strip()
+    response.theme_title_prefix = str(query_preparation.get("theme_title_prefix") or "").strip()
+    response.theme_title_prefix_source = str(query_preparation.get("theme_title_prefix_source") or "").strip()
     if request.ticket_id:
         response.ground_truth = _ground_truth_for_ticket(request.ticket_id)
     if request.ticket_id and response.source_ticket_title and response.selected_value_streams:
@@ -138,7 +149,33 @@ def _response_from_result(result: object, request: ValueStreamRagRequest) -> Val
             source_ticket_id=request.ticket_id,
             source_ticket_title=response.source_ticket_title,
             selected_value_streams=response.selected_value_streams,
+            theme_title_prefix=response.theme_title_prefix,
+            theme_title_prefix_source=response.theme_title_prefix_source,
         )
+        if response.theme_payloads:
+            first_theme = response.theme_payloads[0]
+            response.theme_title_prefix = str(first_theme.get("theme_prefix") or response.theme_title_prefix)
+            response.theme_title_prefix_source = str(
+                first_theme.get("title_source") or response.theme_title_prefix_source
+            )
+
+    if response.selected_value_streams:
+        condensed_idea_card = (
+            query_preparation.get("query_for_prompt")
+            or query_preparation.get("summary_text")
+            or request.idea_card_text
+            or ""
+        )
+        stage_result = predict_stages(
+            condensed_idea_card=str(condensed_idea_card),
+            selected_value_streams=response.selected_value_streams,
+            index_name=_VALUE_STREAM_INDEX_NAME,
+        )
+        response.stage_predictions = enrich_stage_predictions_with_titles(
+            stage_predictions=stage_result.get("stage_predictions", []),
+            theme_payloads=response.theme_payloads,
+        )
+        response.stage_candidate_debug = list(stage_result.get("stage_candidate_debug", []) or [])
     return response
 
 
@@ -181,7 +218,9 @@ async def predict_value_streams_stream(
                 yield _sse(event, data)
 
             result = await task
-            yield _sse("result", _response_from_result(result, request).model_dump())
+            yield _sse("step", {"step": "finalize", "label": "Selecting stages and Jira titles..."})
+            response = await asyncio.to_thread(_response_from_result, result, request)
+            yield _sse("result", response.model_dump())
 
         except Exception as exc:
             yield _sse("error", {"message": str(exc)})
@@ -200,4 +239,4 @@ async def predict_value_streams(
 ) -> ValueStreamRagResponse:
     command = _command_from_request(request)
     result = await container.rag.analyze(command)
-    return _response_from_result(result, request)
+    return await asyncio.to_thread(_response_from_result, result, request)

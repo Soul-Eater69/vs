@@ -92,11 +92,30 @@ interface ThemePayload {
   identity_key: string;
   source_ticket_id: string;
   source_ticket_title: string;
+  theme_prefix: string;
   value_stream_entity_id?: string | null;
   value_stream_name: string;
   theme_title: string;
   confidence?: number;
+  title_source?: string;
   selection_source?: string;
+}
+
+interface PredictedStage {
+  stage_id: string;
+  stage_sequence?: number;
+  stage_name: string;
+  stage_child_issue_title?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+interface StagePrediction {
+  value_stream_id: string;
+  value_stream_name: string;
+  stage_scope: 'specific_stages' | 'entire_value_stream' | 'broad_or_unclear';
+  selected_stages: PredictedStage[];
+  reason?: string;
 }
 
 interface HistoricalTicketHit {
@@ -130,7 +149,11 @@ interface PipelineResult {
   ground_truth?: string[];
   ground_truth_title?: string;
   source_ticket_title?: string;
+  theme_title_prefix?: string;
+  theme_title_prefix_source?: string;
   theme_payloads?: ThemePayload[];
+  stage_predictions?: StagePrediction[];
+  stage_candidate_debug?: Record<string, unknown>[];
   source_doc_id?: string;
   canonical_value_streams?: CanonicalVS[];
 }
@@ -367,10 +390,12 @@ function SelectionPane({
   selected,
   rejected,
   themePayloads = [],
+  stagePredictions = [],
 }: {
   selected: SelectedVS[];
   rejected: RejectedVS[];
   themePayloads?: ThemePayload[];
+  stagePredictions?: StagePrediction[];
 }) {
   if (!selected.length && !rejected.length) return <Empty text="Run the pipeline to see AI selections." />;
   return (
@@ -382,6 +407,10 @@ function SelectionPane({
           const theme = themePayloads.find(t =>
             (t.value_stream_entity_id && t.value_stream_entity_id === vs.entity_id)
             || t.value_stream_name === vs.entity_name
+          );
+          const stagePrediction = stagePredictions.find(p =>
+            p.value_stream_id === vs.entity_id
+            || p.value_stream_name === vs.entity_name
           );
           return (
             <div key={i} className="rounded-md border border-emerald-200 bg-emerald-50/80 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/30">
@@ -399,6 +428,11 @@ function SelectionPane({
                     Jira Theme Title
                   </div>
                   <div className="font-medium">{theme.theme_title}</div>
+                  {theme.title_source && (
+                    <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Prefix source: {theme.title_source.replace(/_/g, ' ')}
+                    </div>
+                  )}
                 </div>
               )}
               <div className="mt-2 h-1.5 rounded-full bg-emerald-200/70 dark:bg-emerald-900/40">
@@ -406,6 +440,37 @@ function SelectionPane({
               </div>
               {vs.reason && <p className="mt-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300 border-t
                 border-emerald-200/60 dark:border-emerald-800/40 pt-2">{vs.reason}</p>}
+              {stagePrediction && (
+                <div className="mt-3 rounded border border-zinc-200 bg-white/75 px-2.5 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                    Predicted Stages
+                  </div>
+                  {stagePrediction.stage_scope === 'broad_or_unclear' && (
+                    <div className="text-zinc-500 dark:text-zinc-400">Stage is not specific enough from the idea card.</div>
+                  )}
+                  {stagePrediction.stage_scope === 'entire_value_stream' && (
+                    <div className="text-zinc-500 dark:text-zinc-400">Impacts the full value stream.</div>
+                  )}
+                  {stagePrediction.stage_scope === 'specific_stages' && stagePrediction.selected_stages?.length > 0 && (
+                    <div className="space-y-2">
+                      {stagePrediction.selected_stages.map((stage) => (
+                        <div key={stage.stage_id} className="border-t border-zinc-200 pt-2 first:border-t-0 first:pt-0 dark:border-zinc-800">
+                          <div className="font-semibold">
+                            Stage {stage.stage_sequence ?? ''}: {stage.stage_name}
+                          </div>
+                          {stage.stage_child_issue_title && (
+                            <div className="mt-1">
+                              <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Jira Child Issue Title</div>
+                              <div className="font-medium">{stage.stage_child_issue_title}</div>
+                            </div>
+                          )}
+                          {stage.reason && <div className="mt-1 text-zinc-500 dark:text-zinc-400">{stage.reason}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1266,12 +1331,12 @@ export default function Home() {
         final_output_count: outputCount,
         exclude_source_ticket_from_historical: excludeSourceTicketFromHistorical,
       };
+      if (selectedCard?.display_name) body.source_ticket_title = selectedCard.display_name;
       if (uploadedIdeaText.trim()) {
         body.idea_card_text = uploadedIdeaText.trim();
         if (selectedTicketId) body.ticket_id = selectedTicketId;
       } else if (selectedTicketId) {
         body.ticket_id = selectedTicketId;
-        if (selectedCard?.display_name) body.source_ticket_title = selectedCard.display_name;
       }
       else throw new Error('Select a Jira idea card or drop an extractable idea-card file.');
 
@@ -1584,10 +1649,20 @@ export default function Home() {
                     <div className="mt-1 font-medium text-zinc-800 dark:text-zinc-100">
                       {result.source_ticket_title}
                     </div>
+                    {result.theme_title_prefix && (
+                      <div className="mt-2 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                          Theme Prefix
+                        </div>
+                        <div className="mt-1 font-medium text-zinc-800 dark:text-zinc-100">
+                          {result.theme_title_prefix}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {tab === 'selection'  && <SelectionPane  selected={result.selected_value_streams ?? []} rejected={result.rejected_candidates ?? []} themePayloads={result?.theme_payloads ?? []} />}
+                {tab === 'selection'  && <SelectionPane  selected={result.selected_value_streams ?? []} rejected={result.rejected_candidates ?? []} themePayloads={result?.theme_payloads ?? []} stagePredictions={result?.stage_predictions ?? []} />}
                 {tab === 'comparison' && <ComparisonPane selected={result.selected_value_streams ?? []} groundTruth={result.ground_truth} title={result.ground_truth_title} />}
                 {tab === 'llmPasses'  && <LlmPassesPane reviewPool={result.review_pool_llm_output} direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} llmCandidates={result.llm_candidates ?? result.candidates_used ?? []} />}
                 {tab === 'retrieval'  && <RetrievalPane  candidates={cands} />}

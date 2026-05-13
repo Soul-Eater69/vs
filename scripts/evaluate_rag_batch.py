@@ -50,6 +50,11 @@ EVAL_LLM_ENV_DEFAULTS = {
     "GENERATION_LLM_REASONING_EFFORT": "medium",
 }
 
+VALUE_STREAM_INDEX_NAME = os.environ.get(
+    "VALUE_STREAM_AZURE_SEARCH_INDEX_NAME",
+    os.environ.get("AZURE_SEARCH_INDEX_NAME", "value-streams"),
+)
+
 
 @dataclass(frozen=True)
 class EvaluationItem:
@@ -64,6 +69,9 @@ class TicketMetrics:
     file_name: str
     status: str
     elapsed_seconds: float
+    vs_seconds: float
+    stage_seconds: float
+    total_seconds: float
     precision: float
     recall: float
     f1: float
@@ -98,6 +106,15 @@ class TicketMetrics:
     candidate_window_semantic_only: int = 0
     selection_source_llm_pick: int = 0
     selection_source_safe_backfill: int = 0
+    include_stage_predictions: bool = False
+    stage_prediction_enabled: bool = False
+    stage_prediction_seconds: float = 0.0
+    missed_ground_truth_debug: list[dict[str, Any]] | None = None
+    missed_gt_names: list[str] | None = None
+    missed_gt_buckets: list[str] | None = None
+    missed_gt_sent_to_llm_count: int = 0
+    missed_gt_not_sent_to_llm_count: int = 0
+    missed_gt_not_retrieved_count: int = 0
     error: str = ""
 
 
@@ -139,6 +156,12 @@ def main() -> int:
             f"Warning: only {len(items)} cards found; requested around {args.warn_below}-{args.limit}.",
             file=sys.stderr,
         )
+    if args.include_stages:
+        print(
+            "Warning: stage prediction is enabled. Batch runtime will be slower, "
+            "and VS precision/recall does not depend on stages.",
+            file=sys.stderr,
+        )
 
     sweep_counts = parse_sweep_counts(args.sweep_counts, args.max_output_count)
 
@@ -148,7 +171,8 @@ def main() -> int:
         f"exclude_source={not args.include_source_ticket}, "
         f"min_truth_streams={args.min_ground_truth_streams}, "
         f"historical_backend={args.historical_search_backend}, "
-        f"output_count_mode={args.output_count_mode}"
+        f"output_count_mode={args.output_count_mode}, "
+        f"include_stages={args.include_stages}"
         + (f", sweep_counts={sweep_counts}" if args.output_count_mode == "sweep" else "")
     )
 
@@ -167,6 +191,7 @@ def main() -> int:
         min_output_count=args.min_output_count,
         max_output_count=args.max_output_count,
         sweep_counts=sweep_counts,
+        include_stages=args.include_stages,
     )
 
     summary = summarize(results)
@@ -189,6 +214,7 @@ def main() -> int:
         "min_output_count": args.min_output_count,
         "max_output_count": args.max_output_count,
         "sweep_counts": sweep_counts if args.output_count_mode == "sweep" else None,
+        "include_stage_predictions": bool(args.include_stages),
         "summary": summary,
         "results": [serialize_result(row) for row in results],
     }
@@ -322,6 +348,11 @@ def parse_args() -> argparse.Namespace:
         "--include-source-ticket",
         action="store_true",
         help="Do not exclude the evaluated ticket from historical FAISS.",
+    )
+    parser.add_argument(
+        "--include-stages",
+        action="store_true",
+        help="Also run stage prediction after value-stream prediction. Off by default.",
     )
     parser.add_argument(
         "--allow-missing-ground-truth",
@@ -591,6 +622,7 @@ def run_batch(
     min_output_count: int,
     max_output_count: int,
     sweep_counts: list[int],
+    include_stages: bool = False,
 ) -> list[TicketMetrics]:
     """Schedule eval jobs per mode and execute in parallel.
 
@@ -636,6 +668,7 @@ def run_batch(
                 final_output_count=count,
                 output_count_mode=mode_tag,
                 gt_buffer=buffer_used,
+                include_stages=include_stages,
             ): (item, count, mode_tag, buffer_used)
             for (item, count, mode_tag, buffer_used) in jobs
         }
@@ -660,7 +693,7 @@ def run_batch(
                 print(
                     f"[{completed}/{total}] {result.ticket_id} n={result.final_output_count} "
                     f"{result.status} p={result.precision:.3f} r={result.recall:.3f} "
-                    f"f1={result.f1:.3f} {result.elapsed_seconds:.1f}s"
+                    f"f1={result.f1:.3f} vs={result.vs_seconds:.1f}s total={result.total_seconds:.1f}s"
                 )
             else:
                 print(f"[{completed}/{total}] {result.ticket_id} error {result.error}")
@@ -680,6 +713,7 @@ def evaluate_one_with_retries(
     final_output_count: int,
     output_count_mode: str = "fixed",
     gt_buffer: int = 0,
+    include_stages: bool = False,
 ) -> TicketMetrics:
     attempts = max(1, int(retries) + 1)
     last_exc: BaseException | None = None
@@ -694,6 +728,7 @@ def evaluate_one_with_retries(
                 final_output_count=final_output_count,
                 output_count_mode=output_count_mode,
                 gt_buffer=gt_buffer,
+                include_stages=include_stages,
             )
         except Exception as exc:
             last_exc = exc
@@ -719,14 +754,16 @@ def evaluate_one(
     final_output_count: int,
     output_count_mode: str = "fixed",
     gt_buffer: int = 0,
+    include_stages: bool = False,
 ) -> TicketMetrics:
     from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
     from vs_app.modules.rag.pipeline import select_value_streams
 
-    start = time.perf_counter()
+    total_start = time.perf_counter()
     text = extract_idea_card_text(input_path=item.path)
     exclude_ids = [item.ticket_id] if exclude_source_ticket else None
 
+    vs_start = time.perf_counter()
     payload = select_value_streams(
         text,
         final_output_count=final_output_count,
@@ -735,11 +772,28 @@ def evaluate_one(
         historical_azure_index_name=historical_azure_index_name,
         exclude_ticket_ids=exclude_ids,
     )
-    elapsed = time.perf_counter() - start
+    payload["include_stage_predictions"] = bool(include_stages)
+    vs_seconds = time.perf_counter() - vs_start
 
     selected_rows = payload.get("selected_value_streams", []) or []
+    stage_seconds = run_optional_stage_prediction(
+        payload=payload,
+        selected_rows=selected_rows,
+        idea_card_text=text,
+        include_stages=include_stages,
+    )
+    if not include_stages:
+        assert_stage_prediction_disabled(payload, item.ticket_id)
+    total_seconds = time.perf_counter() - total_start
+
     predicted = extract_names(selected_rows)
     metrics = compute_metrics(predicted, item.ground_truth)
+    missed_debug = build_missed_ground_truth_debug(
+        false_negatives=metrics["false_negatives"],
+        payload=payload,
+        selected_rows=selected_rows,
+    )
+    missed_buckets = [str(row.get("loss_bucket") or "") for row in missed_debug]
 
     debug_fields = extract_debug_fields(payload)
     runtime_config = debug_fields["runtime_config"]
@@ -752,7 +806,10 @@ def evaluate_one(
         ticket_id=item.ticket_id,
         file_name=item.path.name,
         status="ok",
-        elapsed_seconds=round(elapsed, 3),
+        elapsed_seconds=round(total_seconds, 3),
+        vs_seconds=round(vs_seconds, 3),
+        stage_seconds=round(stage_seconds, 3),
+        total_seconds=round(total_seconds, 3),
         precision=metrics["precision"],
         recall=metrics["recall"],
         f1=metrics["f1"],
@@ -789,7 +846,205 @@ def evaluate_one(
         candidate_window_semantic_only=int(window_counts.get("semantic_only") or 0),
         selection_source_llm_pick=int(source_counts.get("llm_pick") or 0),
         selection_source_safe_backfill=int(source_counts.get("safe_backfill") or 0),
+        include_stage_predictions=bool(include_stages),
+        stage_prediction_enabled=bool(
+            (payload.get("debug") or {}).get("stage_prediction_enabled")
+        ),
+        stage_prediction_seconds=float(
+            (payload.get("debug") or {}).get("stage_prediction_seconds") or 0.0
+        ),
+        missed_ground_truth_debug=missed_debug,
+        missed_gt_names=[str(row.get("ground_truth_name") or "") for row in missed_debug],
+        missed_gt_buckets=missed_buckets,
+        missed_gt_sent_to_llm_count=sum(1 for row in missed_debug if row.get("sent_to_llm")),
+        missed_gt_not_sent_to_llm_count=sum(
+            1 for row in missed_debug if not row.get("sent_to_llm")
+        ),
+        missed_gt_not_retrieved_count=sum(
+            1 for row in missed_debug if row.get("loss_bucket") == "not_retrieved"
+        ),
     )
+
+
+def run_optional_stage_prediction(
+    *,
+    payload: dict,
+    selected_rows: list[dict],
+    idea_card_text: str,
+    include_stages: bool,
+) -> float:
+    debug = dict(payload.get("debug") or {})
+    payload["debug"] = debug
+    payload["stage_predictions"] = []
+    payload["stage_candidate_debug"] = []
+
+    if not include_stages:
+        debug["stage_prediction_enabled"] = False
+        debug["stage_prediction_seconds"] = 0.0
+        return 0.0
+
+    debug["stage_prediction_enabled"] = True
+    if not selected_rows:
+        debug["stage_prediction_seconds"] = 0.0
+        return 0.0
+
+    from vs_app.modules.stages.pipeline import predict_stages
+
+    query_preparation = payload.get("query_preparation") or {}
+    condensed_idea_card = (
+        query_preparation.get("query_for_prompt")
+        or query_preparation.get("summary_text")
+        or idea_card_text
+        or ""
+    )
+    started = time.perf_counter()
+    stage_result = predict_stages(
+        condensed_idea_card=str(condensed_idea_card),
+        selected_value_streams=selected_rows,
+        index_name=VALUE_STREAM_INDEX_NAME,
+    )
+    stage_seconds = time.perf_counter() - started
+    payload["stage_predictions"] = list(stage_result.get("stage_predictions", []) or [])
+    payload["stage_candidate_debug"] = list(stage_result.get("stage_candidate_debug", []) or [])
+    debug["stage_prediction_seconds"] = round(stage_seconds, 3)
+    return stage_seconds
+
+
+def assert_stage_prediction_disabled(payload: dict, ticket_id: str) -> None:
+    if payload.get("stage_predictions"):
+        raise AssertionError(
+            f"Stage predictions should be empty during VS eval: ticket={ticket_id}"
+        )
+    enabled = (payload.get("debug") or {}).get("stage_prediction_enabled")
+    if enabled is not False:
+        raise AssertionError(
+            f"stage_prediction_enabled should be false during VS eval: ticket={ticket_id}"
+        )
+
+
+def build_missed_ground_truth_debug(
+    *,
+    false_negatives: list[str],
+    payload: dict,
+    selected_rows: list[dict],
+) -> list[dict[str, Any]]:
+    semantic_rows = list(payload.get("semantic_candidate_value_streams", []) or [])
+    historical_rows = list(
+        payload.get("historical_value_stream_support")
+        or payload.get("historical_candidate_value_streams")
+        or []
+    )
+    merged_rows = list(payload.get("merged_candidate_value_streams", []) or [])
+    llm_rows = list(payload.get("llm_candidates", []) or [])
+
+    semantic_index = index_rows_by_name(semantic_rows)
+    historical_index = index_rows_by_name(historical_rows)
+    merged_index = index_rows_by_name(merged_rows)
+    llm_index = index_rows_by_name(llm_rows)
+    selected_index = index_rows_by_name(selected_rows)
+    selected_ids = {
+        str(row.get("entity_id") or "").strip()
+        for row in selected_rows
+        if isinstance(row, dict) and str(row.get("entity_id") or "").strip()
+    }
+
+    out: list[dict[str, Any]] = []
+    for name in false_negatives:
+        key = normalize_name(name)
+        semantic_match = semantic_index.get(key)
+        historical_match = historical_index.get(key)
+        merged_match = merged_index.get(key)
+        llm_match = llm_index.get(key)
+        selected_match = selected_index.get(key)
+        match_for_id = semantic_match or historical_match or merged_match or llm_match
+        candidate_id = (
+            str((match_for_id.get("row") if match_for_id else {}).get("entity_id") or "").strip()
+        )
+
+        in_semantic = semantic_match is not None
+        in_historical = historical_match is not None
+        in_merged = merged_match is not None
+        sent_to_llm = llm_match is not None or (
+            merged_match is not None
+            and str(merged_match["row"].get("candidate_status") or "") == "sent_to_llm"
+        )
+        selected = selected_match is not None
+
+        bucket = classify_ground_truth_miss(
+            in_semantic=in_semantic,
+            in_historical=in_historical,
+            in_merged=in_merged,
+            sent_to_llm=sent_to_llm,
+            selected=selected,
+            selected_same_id=bool(candidate_id and candidate_id in selected_ids),
+        )
+        out.append(
+            {
+                "ground_truth_name": name,
+                "in_semantic_candidates": in_semantic,
+                "semantic_rank": rank_from_match(semantic_match, "semantic_rank"),
+                "in_historical_support": in_historical,
+                "historical_rank": rank_from_match(historical_match, "historical_rank"),
+                "in_merged_candidates": in_merged,
+                "merged_rank": rank_from_match(merged_match, "merged_rank"),
+                "sent_to_llm": sent_to_llm,
+                "llm_rank": rank_from_match(llm_match, "llm_rank"),
+                "selected": selected,
+                "loss_bucket": bucket,
+            }
+        )
+    return out
+
+
+def index_rows_by_name(rows: list[dict]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for idx, row in enumerate(rows or [], start=1):
+        if not isinstance(row, dict):
+            continue
+        key = normalize_name(str(row.get("entity_name") or ""))
+        if not key or key in out:
+            continue
+        out[key] = {"row": row, "rank": idx}
+    return out
+
+
+def rank_from_match(match: dict[str, Any] | None, rank_key: str) -> int | None:
+    if not match:
+        return None
+    row = match["row"]
+    for key in (rank_key, "rank", "semantic_rank", "historical_rank", "merged_rank", "llm_rank"):
+        value = row.get(key)
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return parsed
+    return int(match["rank"])
+
+
+def classify_ground_truth_miss(
+    *,
+    in_semantic: bool,
+    in_historical: bool,
+    in_merged: bool,
+    sent_to_llm: bool,
+    selected: bool,
+    selected_same_id: bool,
+) -> str:
+    if selected or selected_same_id:
+        return "selected_but_eval_name_mismatch"
+    if not in_semantic and not in_historical and not in_merged:
+        return "not_retrieved"
+    if sent_to_llm:
+        return "sent_to_llm_but_not_selected"
+    if in_merged:
+        return "merged_not_sent_to_llm"
+    if in_semantic and not in_historical:
+        return "semantic_only_not_sent"
+    if in_historical and not in_semantic:
+        return "historical_only_not_sent"
+    return "merged_not_sent_to_llm"
 
 
 def is_transient_gateway_error(exc: BaseException) -> bool:
@@ -824,6 +1079,9 @@ def failed_result(
         file_name=item.path.name,
         status="error",
         elapsed_seconds=0.0,
+        vs_seconds=0.0,
+        stage_seconds=0.0,
+        total_seconds=0.0,
         precision=0.0,
         recall=0.0,
         f1=0.0,
@@ -845,6 +1103,10 @@ def failed_result(
         output_count_mode=output_count_mode,
         final_output_count=final_output_count,
         gt_buffer=gt_buffer,
+        include_stage_predictions=False,
+        missed_ground_truth_debug=[],
+        missed_gt_names=[],
+        missed_gt_buckets=[],
         error=f"{type(exc).__name__}: {exc}",
     )
 
@@ -900,7 +1162,19 @@ def summarize(results: list[TicketMetrics]) -> dict[str, Any]:
         "true_positive_count": tp,
         "false_positive_count": fp,
         "false_negative_count": fn,
-        "avg_elapsed_seconds": round(average(row.elapsed_seconds for row in ok_rows), 3),
+        "avg_elapsed_seconds": round(
+            average((row.vs_seconds or row.elapsed_seconds) for row in ok_rows),
+            3,
+        ),
+        "avg_vs_seconds": round(
+            average((row.vs_seconds or row.elapsed_seconds) for row in ok_rows),
+            3,
+        ),
+        "avg_stage_seconds": round(average(row.stage_seconds for row in ok_rows), 3),
+        "avg_total_seconds": round(
+            average((row.total_seconds or row.elapsed_seconds) for row in ok_rows),
+            3,
+        ),
     }
 
 
@@ -990,6 +1264,9 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "file_name",
         "status",
         "elapsed_seconds",
+        "vs_seconds",
+        "stage_seconds",
+        "total_seconds",
         "output_count_mode",
         "final_output_count",
         "gt_buffer",
@@ -1024,6 +1301,14 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "candidate_window_semantic_only",
         "selection_source_llm_pick",
         "selection_source_safe_backfill",
+        "include_stage_predictions",
+        "stage_prediction_enabled",
+        "stage_prediction_seconds",
+        "missed_gt_names",
+        "missed_gt_buckets",
+        "missed_gt_sent_to_llm_count",
+        "missed_gt_not_sent_to_llm_count",
+        "missed_gt_not_retrieved_count",
         "error",
     ]
     with path.open("w", encoding="utf-8", newline="") as fh:
@@ -1044,7 +1329,9 @@ def print_summary(summary: dict[str, Any]) -> None:
     print(f"  precision:       {summary['precision']:.4f}")
     print(f"  recall:          {summary['recall']:.4f}")
     print(f"  f1:              {summary['f1']:.4f}")
-    print(f"  avg seconds:     {summary['avg_elapsed_seconds']:.3f}")
+    print(f"  avg seconds:     {summary['avg_vs_seconds']:.3f}")
+    print(f"  avg stage sec:   {summary['avg_stage_seconds']:.3f}")
+    print(f"  avg total sec:   {summary['avg_total_seconds']:.3f}")
 
 
 if __name__ == "__main__":

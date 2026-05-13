@@ -146,6 +146,8 @@ def _validate_stage_selection(
         scope = "specific_stages"
     elif scope == "specific_stages":
         scope = "broad_or_unclear"
+    elif scope == "entire_value_stream" and _looks_uncertain(parsed.get("reason")):
+        scope = "broad_or_unclear"
 
     return {
         "value_stream_id": value_stream_id,
@@ -159,18 +161,53 @@ def _validate_stage_selection(
 def _format_candidate_stages(candidate_stages: list[dict]) -> str:
     blocks: list[str] = []
     for stage in candidate_stages:
-        lines = [
+        parts = [
             f"Stage ID: {stage.get('stage_id', '')}",
             f"Sequence: {stage.get('stage_sequence', '')}",
             f"Name: {stage.get('stage_name', '')}",
-            f"Description: {stage.get('stage_description', '')}",
-            f"Entrance Criteria: {stage.get('stage_entrance_criteria', '')}",
-            f"Exit Criteria: {stage.get('stage_exit_criteria', '')}",
-            f"Value Items: {stage.get('stage_value_items', '')}",
-            f"Stakeholders: {stage.get('stage_stakeholders', '')}",
         ]
-        blocks.append("\n".join(lines))
+
+        description = _trim(stage.get("stage_description"), 420)
+        entrance = _trim(stage.get("stage_entrance_criteria"), 260)
+        exit_criteria = _trim(stage.get("stage_exit_criteria"), 260)
+        value_items = _trim(stage.get("stage_value_items"), 220)
+
+        if description:
+            parts.append(f"Description: {description}")
+        if entrance:
+            parts.append(f"Entrance Criteria: {entrance}")
+        if exit_criteria:
+            parts.append(f"Exit Criteria: {exit_criteria}")
+        if value_items:
+            parts.append(f"Value Items: {value_items}")
+
+        blocks.append("\n".join(parts))
     return "\n\n".join(blocks)
+
+
+def _trim(value: Any, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _looks_uncertain(reason: Any) -> bool:
+    text = str(reason or "").lower()
+    uncertainty_markers = (
+        "unclear",
+        "not enough detail",
+        "not enough information",
+        "broad",
+        "general",
+        "could apply",
+        "may apply",
+        "appears to",
+        "seems to",
+        "not specific",
+        "no specific stage",
+    )
+    return any(marker in text for marker in uncertainty_markers)
 
 
 def _empty_prediction(value_stream_id: str, value_stream_name: str, reason: str) -> dict:

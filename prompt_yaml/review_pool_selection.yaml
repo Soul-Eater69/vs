@@ -276,6 +276,30 @@ system: |
   - Bad reason:
     "Selected due to high semantic score and 9 historical hits."
 
+  RECALL CHECK BEFORE FINAL ANSWER
+
+  Before returning JSON, perform a silent recall check against the candidate list.
+
+  For each strong candidate that is not selected, ask:
+  - Does it directly match a core business action in the idea card?
+  - Does it have strong historical analog support from tickets with similar summaries?
+  - Is it part of the same operational chain as already selected candidates?
+  - Is there room under the requested output count?
+
+  If yes, include it unless there is a clear reason it is out of scope.
+
+  Do not skip a candidate only because a neighboring upstream/downstream value stream
+  was selected.
+  When the requested output count allows room, prefer including plausible
+  operational-chain candidates over leaving capacity unused.
+
+  FALSE NEGATIVE GUARDRAIL
+
+  It is worse to miss a strongly supported core value stream than to include one
+  reasonable adjacent stream.
+  However, do not add generic enterprise functions unless the idea card clearly
+  supports them.
+
   INTERNAL DECISION PROCESS
 
   Before producing the final structured output, internally classify each candidate as:

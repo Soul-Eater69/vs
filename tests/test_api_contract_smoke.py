@@ -30,6 +30,7 @@ def test_api_routes_expose_historical_rag_only() -> None:
 def test_rag_public_schema_requires_query_input() -> None:
     assert not hasattr(ValueStreamRagRequest(ticket_id="IDMT-123"), "mode")
     assert ValueStreamRagRequest(ticket_id="IDMT-123").exclude_source_ticket_from_historical is True
+    assert ValueStreamRagRequest(ticket_id="IDMT-123").include_stage_predictions is False
 
     try:
         ValueStreamRagRequest()
@@ -187,7 +188,78 @@ def test_response_adds_theme_payloads_after_prediction(monkeypatch) -> None:
             "selection_source": "llm_pick",
         }
     ]
-    assert response.stage_predictions[0]["stage_scope"] == "broad_or_unclear"
+    assert response.stage_predictions == []
+    assert response.stage_candidate_debug == []
+    assert response.debug["stage_prediction_enabled"] is False
+    assert response.debug["stage_prediction_seconds"] == 0.0
+
+
+def test_response_runs_stage_prediction_only_when_requested(monkeypatch) -> None:
+    monkeypatch.setattr(rag, "_ground_truth_for_ticket", lambda ticket_id: [])
+    calls: list[dict] = []
+
+    def fake_predict_stages(**kwargs):
+        calls.append(kwargs)
+        return {
+            "stage_predictions": [
+                {
+                    "value_stream_id": "VSR00074590",
+                    "value_stream_name": "Establish Product Offering",
+                    "stage_scope": "entire_value_stream",
+                    "selected_stages": [],
+                    "reason": "Spans the full lifecycle.",
+                }
+            ],
+            "stage_candidate_debug": [{"value_stream_id": "VSR00074590"}],
+        }
+
+    monkeypatch.setattr(rag, "predict_stages", fake_predict_stages)
+    result = SimpleNamespace(
+        selected_value_streams=[
+            {
+                "entity_id": "VSR00074590",
+                "entity_name": "Establish Product Offering",
+                "confidence": 0.82,
+                "selection_source": "llm_pick",
+            }
+        ],
+        query_preparation={
+            "source_ticket_title": "Ignored because request wins",
+            "query_for_prompt": "Condensed idea card",
+        },
+    )
+
+    off_response = rag._response_from_result(
+        result,
+        ValueStreamRagRequest(
+            ticket_id="IDMT-123",
+            idea_card_text="Idea text",
+            source_ticket_title="CP 2025 Health Management & Advocacy: Digital GTM",
+        ),
+    )
+
+    assert calls == []
+    assert off_response.stage_predictions == []
+    assert off_response.stage_candidate_debug == []
+    assert off_response.debug["stage_prediction_enabled"] is False
+    assert off_response.debug["stage_prediction_seconds"] == 0.0
+
+    on_response = rag._response_from_result(
+        result,
+        ValueStreamRagRequest(
+            ticket_id="IDMT-123",
+            idea_card_text="Idea text",
+            source_ticket_title="CP 2025 Health Management & Advocacy: Digital GTM",
+            include_stage_predictions=True,
+        ),
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["condensed_idea_card"] == "Condensed idea card"
+    assert on_response.stage_predictions[0]["stage_scope"] == "entire_value_stream"
+    assert on_response.stage_candidate_debug == [{"value_stream_id": "VSR00074590"}]
+    assert on_response.debug["stage_prediction_enabled"] is True
+    assert on_response.debug["stage_prediction_seconds"] >= 0.0
 
 
 def test_stream_route_emits_pipeline_progress_events(monkeypatch) -> None:
@@ -219,4 +291,33 @@ def test_stream_route_emits_pipeline_progress_events(monkeypatch) -> None:
 
     for step in ["extract", "condense", "semantic", "historical", "merge", "llm_select", "finalize"]:
         assert f'"step": "{step}"' in body
+    assert "Building Jira theme titles..." in body
+    assert "Building Jira titles and selecting stages..." not in body
     assert 'event: result' in body
+
+
+def test_stream_route_stage_progress_label_when_enabled(monkeypatch) -> None:
+    request = ValueStreamRagRequest(
+        idea_card_text="Idea card business text",
+        final_output_count=5,
+        include_stage_predictions=True,
+    )
+    monkeypatch.setattr(rag, "_ground_truth_for_ticket", lambda ticket_id: [])
+
+    class FakeRag:
+        async def analyze(self, command):
+            return SimpleNamespace()
+
+    async def collect_events() -> str:
+        response = await rag.predict_value_streams_stream(
+            request,
+            container=SimpleNamespace(rag=FakeRag()),
+        )
+        chunks: list[str] = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk))
+        return "".join(chunks)
+
+    body = asyncio.run(collect_events())
+
+    assert "Building Jira titles and selecting stages..." in body

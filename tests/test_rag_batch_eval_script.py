@@ -9,6 +9,8 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from evaluate_rag_batch import (
     apply_eval_llm_defaults,
+    build_missed_ground_truth_debug,
+    classify_ground_truth_miss,
     compute_metrics,
     discover_items,
     dynamic_output_count,
@@ -115,6 +117,9 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
             file_name="IDMT-1.txt",
             status="ok",
             elapsed_seconds=1.0,
+            vs_seconds=1.0,
+            stage_seconds=0.0,
+            total_seconds=1.0,
             precision=1.0,
             recall=0.5,
             f1=0.6667,
@@ -139,6 +144,9 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
             file_name="IDMT-2.txt",
             status="ok",
             elapsed_seconds=3.0,
+            vs_seconds=3.0,
+            stage_seconds=0.0,
+            total_seconds=3.0,
             precision=0.5,
             recall=1.0,
             f1=0.6667,
@@ -170,6 +178,61 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
     assert summary["micro_precision"] == 0.6667
     assert summary["micro_recall"] == 0.6667
     assert summary["avg_elapsed_seconds"] == 2.0
+    assert summary["avg_vs_seconds"] == 2.0
+    assert summary["avg_stage_seconds"] == 0.0
+    assert summary["avg_total_seconds"] == 2.0
+
+
+def test_missed_ground_truth_debug_classifies_loss_bucket() -> None:
+    payload = {
+        "semantic_candidate_value_streams": [
+            {"entity_id": "vs-a", "entity_name": "A", "semantic_rank": 2},
+        ],
+        "historical_value_stream_support": [
+            {"entity_id": "vs-b", "entity_name": "B", "historical_rank": 4},
+        ],
+        "merged_candidate_value_streams": [
+            {
+                "entity_id": "vs-a",
+                "entity_name": "A",
+                "candidate_status": "sent_to_llm",
+            },
+            {
+                "entity_id": "vs-b",
+                "entity_name": "B",
+                "candidate_status": "outside_llm_window",
+            },
+        ],
+        "llm_candidates": [{"entity_id": "vs-a", "entity_name": "A"}],
+    }
+
+    debug = build_missed_ground_truth_debug(
+        false_negatives=["A", "B", "C"],
+        payload=payload,
+        selected_rows=[],
+    )
+
+    assert [row["loss_bucket"] for row in debug] == [
+        "sent_to_llm_but_not_selected",
+        "merged_not_sent_to_llm",
+        "not_retrieved",
+    ]
+    assert debug[0]["semantic_rank"] == 2
+    assert debug[1]["historical_rank"] == 4
+
+
+def test_selected_same_id_miss_is_name_mismatch_bucket() -> None:
+    assert (
+        classify_ground_truth_miss(
+            in_semantic=True,
+            in_historical=False,
+            in_merged=True,
+            sent_to_llm=True,
+            selected=False,
+            selected_same_id=True,
+        )
+        == "selected_but_eval_name_mismatch"
+    )
 
 
 def test_load_ground_truth_from_azure_uses_value_stream_names(monkeypatch) -> None:

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from vs_app.modules.stages.finalizer import StageSelectionResult, select_stages_with_llm
+from vs_app.modules.stages.finalizer import (
+    StageSelectionResult,
+    _format_candidate_stages,
+    select_stages_with_llm,
+)
 from vs_app.modules.stages.pipeline import predict_stages
 
 
@@ -107,3 +111,48 @@ def test_stage_finalizer_unknown_only_becomes_broad_or_unclear() -> None:
 
     assert result["stage_scope"] == "broad_or_unclear"
     assert result["selected_stages"] == []
+
+
+def test_stage_finalizer_uncertain_entire_stream_becomes_broad_or_unclear() -> None:
+    class FakeGenerationService:
+        def generate_structured(self, **kwargs):
+            return StageSelectionResult(
+                stage_scope="entire_value_stream",
+                selected_stages=[],
+                reason="The idea is broad and no specific stage is described.",
+            )
+
+    result = select_stages_with_llm(
+        condensed_idea_card="summary",
+        selected_value_stream={"entity_id": "VSR1", "entity_name": "Example Stream"},
+        candidate_stages=_stages(),
+        generation_service=FakeGenerationService(),
+    )
+
+    assert result["stage_scope"] == "broad_or_unclear"
+    assert result["selected_stages"] == []
+
+
+def test_stage_candidate_formatting_is_compact_and_omits_stakeholders() -> None:
+    long_text = " ".join(["detail"] * 120)
+
+    formatted = _format_candidate_stages(
+        [
+            {
+                "stage_id": "VSS1",
+                "stage_sequence": 1,
+                "stage_name": "First Stage",
+                "stage_description": long_text,
+                "stage_entrance_criteria": long_text,
+                "stage_exit_criteria": long_text,
+                "stage_value_items": long_text,
+                "stage_stakeholders": "Generic Stakeholder Group",
+            }
+        ]
+    )
+
+    assert "Stage ID: VSS1" in formatted
+    assert "Description:" in formatted
+    assert "..." in formatted
+    assert "Stakeholders" not in formatted
+    assert "Generic Stakeholder Group" not in formatted

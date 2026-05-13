@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -159,23 +160,33 @@ def _response_from_result(result: object, request: ValueStreamRagRequest) -> Val
                 first_theme.get("title_source") or response.theme_title_prefix_source
             )
 
-    if response.selected_value_streams:
+    response.debug = dict(response.debug or {})
+    if request.include_stage_predictions and response.selected_value_streams:
         condensed_idea_card = (
             query_preparation.get("query_for_prompt")
             or query_preparation.get("summary_text")
             or request.idea_card_text
             or ""
         )
+        stage_started = perf_counter()
         stage_result = predict_stages(
             condensed_idea_card=str(condensed_idea_card),
             selected_value_streams=response.selected_value_streams,
             index_name=_VALUE_STREAM_INDEX_NAME,
         )
+        stage_seconds = perf_counter() - stage_started
         response.stage_predictions = enrich_stage_predictions_with_titles(
             stage_predictions=stage_result.get("stage_predictions", []),
             theme_payloads=response.theme_payloads,
         )
         response.stage_candidate_debug = list(stage_result.get("stage_candidate_debug", []) or [])
+        response.debug["stage_prediction_enabled"] = True
+        response.debug["stage_prediction_seconds"] = round(stage_seconds, 3)
+    else:
+        response.stage_predictions = []
+        response.stage_candidate_debug = []
+        response.debug["stage_prediction_enabled"] = False
+        response.debug["stage_prediction_seconds"] = 0.0
     return response
 
 
@@ -218,7 +229,13 @@ async def predict_value_streams_stream(
                 yield _sse(event, data)
 
             result = await task
-            yield _sse("step", {"step": "finalize", "label": "Selecting stages and Jira titles..."})
+            if request.include_stage_predictions:
+                yield _sse(
+                    "step",
+                    {"step": "finalize", "label": "Building Jira titles and selecting stages..."},
+                )
+            else:
+                yield _sse("step", {"step": "finalize", "label": "Building Jira theme titles..."})
             response = await asyncio.to_thread(_response_from_result, result, request)
             yield _sse("result", response.model_dump())
 

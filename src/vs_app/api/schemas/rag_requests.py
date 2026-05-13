@@ -14,6 +14,7 @@ class ValueStreamRagRequest(BaseModel):
     llm_candidate_window: int = 30
     final_output_count: int = 12
     exclude_source_ticket_from_historical: bool = True
+    include_stage_predictions: bool = False
 
     @model_validator(mode="after")
     def validate_query_input(self) -> "ValueStreamRagRequest":

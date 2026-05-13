@@ -384,6 +384,294 @@ function Empty({ text }: { text: string }) {
   );
 }
 
+type StageDisplay = {
+  label: string;
+  variant: 'muted' | 'success' | 'warning';
+  stages: PredictedStage[];
+};
+
+type ThemeStageNodeKind = 'source' | 'theme' | 'stage' | 'scope';
+
+type ThemeStageNodeData = {
+  kind: ThemeStageNodeKind;
+  label: string;
+  confidence?: number;
+};
+
+function confidenceLabel(value?: number | null) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return '';
+  return `${Math.round(parsed * 100)}%`;
+}
+
+function findThemeForValueStream(vs: SelectedVS, themePayloads: ThemePayload[]) {
+  return themePayloads.find(t =>
+    (t.value_stream_entity_id && t.value_stream_entity_id === vs.entity_id)
+    || t.value_stream_name === vs.entity_name
+  );
+}
+
+function findStagePredictionForValueStream(vs: SelectedVS, stagePredictions: StagePrediction[]) {
+  return stagePredictions.find(p =>
+    p.value_stream_id === vs.entity_id
+    || p.value_stream_name === vs.entity_name
+  );
+}
+
+function getStageDisplay(prediction?: StagePrediction): StageDisplay {
+  if (!prediction) {
+    return {
+      label: 'Stage prediction off',
+      variant: 'muted',
+      stages: [],
+    };
+  }
+
+  if (
+    prediction.stage_scope === 'specific_stages'
+    && prediction.selected_stages?.length
+  ) {
+    return {
+      label: 'Specific stages',
+      variant: 'success',
+      stages: prediction.selected_stages,
+    };
+  }
+
+  if (prediction.stage_scope === 'entire_value_stream') {
+    return {
+      label: 'Full value stream',
+      variant: 'warning',
+      stages: [],
+    };
+  }
+
+  return {
+    label: 'Needs stage review',
+    variant: 'muted',
+    stages: [],
+  };
+}
+
+function stagePillTone(variant: StageDisplay['variant']): 'neutral' | 'green' | 'amber' {
+  if (variant === 'success') return 'green';
+  if (variant === 'warning') return 'amber';
+  return 'neutral';
+}
+
+function stageDebugForValueStream(vs: SelectedVS, stageCandidateDebug: Record<string, unknown>[]) {
+  return stageCandidateDebug.find(row =>
+    row.value_stream_id === vs.entity_id
+    || row.value_stream_name === vs.entity_name
+  );
+}
+
+function ThemeStageNode({ data }: NodeProps<Node<ThemeStageNodeData>>) {
+  const cls: Record<ThemeStageNodeKind, string> = {
+    source: 'border-teal-300 bg-teal-50 text-teal-950 dark:border-teal-700 dark:bg-teal-950/45 dark:text-teal-100',
+    theme: 'border-emerald-300 bg-emerald-50 text-emerald-950 dark:border-emerald-700 dark:bg-emerald-950/35 dark:text-emerald-100',
+    stage: 'border-zinc-300 bg-white text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100',
+    scope: 'border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-700 dark:bg-amber-950/35 dark:text-amber-100',
+  };
+  const kindLabel: Record<ThemeStageNodeKind, string> = {
+    source: 'Source',
+    theme: 'Theme',
+    stage: 'Stage',
+    scope: 'Stage',
+  };
+  const pct = confidenceLabel(data.confidence);
+  const canReceive = data.kind !== 'source';
+  const canSend = data.kind === 'source' || data.kind === 'theme';
+
+  return (
+    <div className={`w-[220px] rounded-md border px-3 py-2.5 shadow-sm ${cls[data.kind]}`}>
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!h-2 !w-2 !border-0 !bg-zinc-400"
+        style={{ visibility: canReceive ? 'visible' : 'hidden' }}
+      />
+      <div className="text-[10px] font-semibold uppercase tracking-wide opacity-60">{kindLabel[data.kind]}</div>
+      <div className="mt-1 text-xs font-semibold leading-snug">{data.label}</div>
+      {pct && <div className="mt-1 text-[11px] font-bold opacity-70">{pct}</div>}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!h-2 !w-2 !border-0 !bg-zinc-400"
+        style={{ visibility: canSend ? 'visible' : 'hidden' }}
+      />
+    </div>
+  );
+}
+
+const THEME_STAGE_NODE_TYPES = { themeStage: ThemeStageNode };
+
+function buildThemeStageGraph({
+  selected,
+  themePayloads,
+  stagePredictions,
+  sourceLabel,
+  themeTitlePrefix,
+}: {
+  selected: SelectedVS[];
+  themePayloads: ThemePayload[];
+  stagePredictions: StagePrediction[];
+  sourceLabel?: string;
+  themeTitlePrefix?: string;
+}) {
+  const sorted = [...selected].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  const nodes: Node<ThemeStageNodeData>[] = [
+    {
+      id: 'source:idea-card',
+      type: 'themeStage',
+      position: { x: 0, y: 0 },
+      draggable: false,
+      selectable: false,
+      data: {
+        kind: 'source',
+        label: sourceLabel || themeTitlePrefix || 'Idea Card',
+      },
+    },
+  ];
+  const edges: Edge[] = [];
+  const themeGap = 280;
+  const stageGap = 185;
+  const themeStartX = -((sorted.length - 1) * themeGap) / 2;
+
+  sorted.forEach((vs, index) => {
+    const theme = findThemeForValueStream(vs, themePayloads);
+    const identity = String(theme?.identity_key || vs.entity_id || `${vs.entity_name}-${index}`);
+    const themeId = `theme:${identity}`;
+    const themeX = themeStartX + index * themeGap;
+    const themeLabel = theme?.theme_title || `${themeTitlePrefix ? `${themeTitlePrefix} - ` : ''}${vs.entity_name}`;
+
+    nodes.push({
+      id: themeId,
+      type: 'themeStage',
+      position: { x: themeX, y: 145 },
+      draggable: false,
+      selectable: false,
+      data: {
+        kind: 'theme',
+        label: themeLabel,
+        confidence: theme?.confidence ?? vs.confidence,
+      },
+    });
+    edges.push({
+      id: `source:idea-card->${themeId}`,
+      source: 'source:idea-card',
+      target: themeId,
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
+      style: { strokeWidth: 2, stroke: '#14b8a6' },
+    });
+
+    const prediction = findStagePredictionForValueStream(vs, stagePredictions);
+    if (!prediction) return;
+
+    const display = getStageDisplay(prediction);
+    if (display.stages.length) {
+      const stageStartX = themeX - ((display.stages.length - 1) * stageGap) / 2;
+      display.stages.forEach((stage, stageIndex) => {
+        const stageId = `stage:${identity}:${stage.stage_id || stage.stage_name || stageIndex}`;
+        nodes.push({
+          id: stageId,
+          type: 'themeStage',
+          position: { x: stageStartX + stageIndex * stageGap, y: 310 },
+          draggable: false,
+          selectable: false,
+          data: {
+            kind: 'stage',
+            label: stage.stage_name || 'Stage',
+            confidence: stage.confidence,
+          },
+        });
+        edges.push({
+          id: `${themeId}->${stageId}`,
+          source: themeId,
+          target: stageId,
+          type: 'smoothstep',
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
+          style: { strokeWidth: 2, stroke: '#10b981' },
+        });
+      });
+      return;
+    }
+
+    const scopeId = `scope:${identity}`;
+    nodes.push({
+      id: scopeId,
+      type: 'themeStage',
+      position: { x: themeX, y: 310 },
+      draggable: false,
+      selectable: false,
+      data: {
+        kind: 'scope',
+        label: display.label,
+      },
+    });
+    edges.push({
+      id: `${themeId}->${scopeId}`,
+      source: themeId,
+      target: scopeId,
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
+      style: { strokeWidth: 2, stroke: '#f59e0b' },
+    });
+  });
+
+  return { nodes, edges };
+}
+
+function ThemeStageGraph({
+  selected,
+  themePayloads,
+  stagePredictions,
+  sourceLabel,
+  themeTitlePrefix,
+}: {
+  selected: SelectedVS[];
+  themePayloads: ThemePayload[];
+  stagePredictions: StagePrediction[];
+  sourceLabel?: string;
+  themeTitlePrefix?: string;
+}) {
+  const graph = useMemo(
+    () => buildThemeStageGraph({
+      selected,
+      themePayloads,
+      stagePredictions,
+      sourceLabel,
+      themeTitlePrefix,
+    }),
+    [selected, themePayloads, stagePredictions, sourceLabel, themeTitlePrefix],
+  );
+
+  if (!selected.length) return <Empty text="Run the pipeline to see the theme graph." />;
+
+  return (
+    <div className="h-[470px] overflow-hidden rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40">
+      <ReactFlow
+        nodes={graph.nodes}
+        edges={graph.edges}
+        nodeTypes={THEME_STAGE_NODE_TYPES}
+        fitView
+        fitViewOptions={{ padding: 0.18, maxZoom: 1.05, minZoom: 0.35 }}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        panOnDrag
+        zoomOnScroll
+        zoomOnDoubleClick
+        zoomOnPinch
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background gap={24} size={1} />
+      </ReactFlow>
+    </div>
+  );
+}
+
 // --- Result panes ---------------------------------------------------------
 
 function SelectionPane({
@@ -391,90 +679,188 @@ function SelectionPane({
   rejected,
   themePayloads = [],
   stagePredictions = [],
+  stageCandidateDebug = [],
+  sourceLabel,
+  themeTitlePrefix,
 }: {
   selected: SelectedVS[];
   rejected: RejectedVS[];
   themePayloads?: ThemePayload[];
   stagePredictions?: StagePrediction[];
+  stageCandidateDebug?: Record<string, unknown>[];
+  sourceLabel?: string;
+  themeTitlePrefix?: string;
 }) {
+  const [view, setView] = useState<'list' | 'graph'>('list');
+  const sortedSelected = useMemo(
+    () => [...selected].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)),
+    [selected],
+  );
+
   if (!selected.length && !rejected.length) return <Empty text="Run the pipeline to see AI selections." />;
   return (
     <div className="space-y-5">
-      <div className="mb-2 flex items-center gap-2"><Pill tone="green">Selected ({selected.length})</Pill></div>
-      <div className="space-y-2">
-        {[...selected].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)).map((vs, i) => {
-          const pct = Math.round((vs.confidence ?? 0) * 100);
-          const theme = themePayloads.find(t =>
-            (t.value_stream_entity_id && t.value_stream_entity_id === vs.entity_id)
-            || t.value_stream_name === vs.entity_name
-          );
-          const stagePrediction = stagePredictions.find(p =>
-            p.value_stream_id === vs.entity_id
-            || p.value_stream_name === vs.entity_name
-          );
-          return (
-            <div key={i} className="rounded-md border border-emerald-200 bg-emerald-50/80 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/30">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{vs.entity_name}</div>
-                  <div className="mt-0.5 text-[11px] font-mono text-zinc-400 dark:text-zinc-500">{vs.entity_id}</div>
-                </div>
-                <span className={`text-xs font-bold ${pct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : pct >= 50 ?
-                  'text-amber-600 dark:text-amber-400' : 'text-red-500'}`}>{pct}%</span>
-              </div>
-              {theme?.theme_title && (
-                <div className="mt-2 rounded border border-emerald-200 bg-white/70 px-2.5 py-2 text-xs text-zinc-700 dark:border-emerald-800 dark:bg-zinc-900/40 dark:text-zinc-200">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
-                    Jira Theme Title
-                  </div>
-                  <div className="font-medium">{theme.theme_title}</div>
-                  {theme.title_source && (
-                    <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      Prefix source: {theme.title_source.replace(/_/g, ' ')}
-                    </div>
-                  )}
-                </div>
-              )}
-              <div className="mt-2 h-1.5 rounded-full bg-emerald-200/70 dark:bg-emerald-900/40">
-                <div className="h-full rounded-full bg-hcsc transition-all duration-700 dark:bg-emerald-400" style={{ width: `${pct}%` }} />
-              </div>
-              {vs.reason && <p className="mt-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300 border-t
-                border-emerald-200/60 dark:border-emerald-800/40 pt-2">{vs.reason}</p>}
-              {stagePrediction && (
-                <div className="mt-3 rounded border border-zinc-200 bg-white/75 px-2.5 py-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/30 dark:text-zinc-200">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
-                    Predicted Stages
-                  </div>
-                  {stagePrediction.stage_scope === 'broad_or_unclear' && (
-                    <div className="text-zinc-500 dark:text-zinc-400">Stage is not specific enough from the idea card.</div>
-                  )}
-                  {stagePrediction.stage_scope === 'entire_value_stream' && (
-                    <div className="text-zinc-500 dark:text-zinc-400">Impacts the full value stream.</div>
-                  )}
-                  {stagePrediction.stage_scope === 'specific_stages' && stagePrediction.selected_stages?.length > 0 && (
-                    <div className="space-y-2">
-                      {stagePrediction.selected_stages.map((stage) => (
-                        <div key={stage.stage_id} className="border-t border-zinc-200 pt-2 first:border-t-0 first:pt-0 dark:border-zinc-800">
-                          <div className="font-semibold">
-                            Stage {stage.stage_sequence ?? ''}: {stage.stage_name}
-                          </div>
-                          {stage.stage_child_issue_title && (
-                            <div className="mt-1">
-                              <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Jira Child Issue Title</div>
-                              <div className="font-medium">{stage.stage_child_issue_title}</div>
-                            </div>
-                          )}
-                          {stage.reason && <div className="mt-1 text-zinc-500 dark:text-zinc-400">{stage.reason}</div>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+        <Pill tone="green">Selected ({selected.length})</Pill>
+        <div className="inline-flex rounded-md border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-800 dark:bg-zinc-950">
+          <button
+            onClick={() => setView('list')}
+            className={`inline-flex h-8 items-center gap-1.5 rounded px-2.5 text-xs font-semibold transition ${
+              view === 'list'
+                ? 'bg-white text-hcsc shadow-sm dark:bg-zinc-900 dark:text-teal-300'
+                : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+            }`}
+          >
+            <I n="grid" className="w-3.5 h-3.5" />
+            List
+          </button>
+          <button
+            onClick={() => setView('graph')}
+            className={`inline-flex h-8 items-center gap-1.5 rounded px-2.5 text-xs font-semibold transition ${
+              view === 'graph'
+                ? 'bg-white text-hcsc shadow-sm dark:bg-zinc-900 dark:text-teal-300'
+                : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+            }`}
+          >
+            <I n="layers" className="w-3.5 h-3.5" />
+            Graph
+          </button>
+        </div>
       </div>
+
+      {view === 'graph' ? (
+        <ThemeStageGraph
+          selected={sortedSelected}
+          themePayloads={themePayloads}
+          stagePredictions={stagePredictions}
+          sourceLabel={sourceLabel}
+          themeTitlePrefix={themeTitlePrefix}
+        />
+      ) : (
+        <div className="space-y-2">
+          {sortedSelected.map((vs, i) => {
+            const pct = Math.round((vs.confidence ?? 0) * 100);
+            const theme = findThemeForValueStream(vs, themePayloads);
+            const stagePrediction = findStagePredictionForValueStream(vs, stagePredictions);
+            const stageDisplay = getStageDisplay(stagePrediction);
+            const debug = stageDebugForValueStream(vs, stageCandidateDebug);
+            const hasDetails = Boolean(
+              vs.entity_id
+              || vs.reason
+              || theme?.title_source
+              || theme?.selection_source
+              || stagePrediction?.reason
+              || stageDisplay.stages.some(stage => stage.reason || stage.stage_child_issue_title)
+              || debug
+            );
+
+            return (
+              <div key={vs.entity_id || `${vs.entity_name}-${i}`} className="rounded-md border border-emerald-200 bg-emerald-50/80 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/30">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{vs.entity_name}</div>
+                    {theme?.theme_title && (
+                      <div className="mt-1 text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">
+                        {theme.theme_title}
+                      </div>
+                    )}
+                  </div>
+                  <span className={`shrink-0 text-xs font-bold ${pct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : pct >= 50 ?
+                    'text-amber-600 dark:text-amber-400' : 'text-red-500'}`}>{pct}%</span>
+                </div>
+
+                {stagePrediction && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                    {stageDisplay.stages.length > 0 ? (
+                      <>
+                        <span className="font-semibold text-zinc-500 dark:text-zinc-400">Stages:</span>
+                        {stageDisplay.stages.map((stage, stageIndex) => {
+                          const stagePct = confidenceLabel(stage.confidence);
+                          return (
+                            <Pill key={stage.stage_id || `${stage.stage_name}-${stageIndex}`} tone="green">
+                              {stage.stage_name}
+                              {stagePct && <span className="font-bold opacity-70">{stagePct}</span>}
+                            </Pill>
+                          );
+                        })}
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-semibold text-zinc-500 dark:text-zinc-400">Stage:</span>
+                        <Pill tone={stagePillTone(stageDisplay.variant)}>{stageDisplay.label}</Pill>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-2 h-1.5 rounded-full bg-emerald-200/70 dark:bg-emerald-900/40">
+                  <div className="h-full rounded-full bg-hcsc transition-all duration-700 dark:bg-emerald-400" style={{ width: `${pct}%` }} />
+                </div>
+
+                {hasDetails && (
+                  <details className="mt-3 border-t border-emerald-200/70 pt-2 text-xs dark:border-emerald-800/50">
+                    <summary className="cursor-pointer select-none font-semibold text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200">
+                      Details
+                    </summary>
+                    <div className="mt-2 space-y-2 text-zinc-600 dark:text-zinc-300">
+                      {vs.entity_id && (
+                        <div>
+                          <span className="font-semibold text-zinc-500 dark:text-zinc-400">Entity ID:</span>{' '}
+                          <span className="font-mono">{vs.entity_id}</span>
+                        </div>
+                      )}
+                      {theme?.title_source && (
+                        <div>
+                          <span className="font-semibold text-zinc-500 dark:text-zinc-400">Prefix source:</span>{' '}
+                          {theme.title_source.replace(/_/g, ' ')}
+                        </div>
+                      )}
+                      {theme?.selection_source && (
+                        <div>
+                          <span className="font-semibold text-zinc-500 dark:text-zinc-400">Selection source:</span>{' '}
+                          {theme.selection_source.replace(/_/g, ' ')}
+                        </div>
+                      )}
+                      {vs.reason && (
+                        <div>
+                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Selection reason</div>
+                          <p className="mt-0.5 leading-relaxed">{vs.reason}</p>
+                        </div>
+                      )}
+                      {stagePrediction?.reason && (
+                        <div>
+                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Stage reason</div>
+                          <p className="mt-0.5 leading-relaxed">{stagePrediction.reason}</p>
+                        </div>
+                      )}
+                      {stageDisplay.stages.some(stage => stage.reason || stage.stage_child_issue_title) && (
+                        <div className="space-y-1">
+                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Stage details</div>
+                          {stageDisplay.stages.map((stage, stageIndex) => (
+                            <div key={stage.stage_id || `${stage.stage_name}-detail-${stageIndex}`} className="rounded border border-zinc-200 bg-white/65 p-2 dark:border-zinc-800 dark:bg-zinc-950/30">
+                              <div className="font-semibold">{stage.stage_name}</div>
+                              {stage.stage_child_issue_title && <div className="mt-1">Child issue title: {stage.stage_child_issue_title}</div>}
+                              {stage.reason && <div className="mt-1 leading-relaxed">{stage.reason}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {debug && (
+                        <div>
+                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Candidate stage debug</div>
+                          <pre className="mt-1 max-h-52 overflow-auto rounded border border-zinc-200 bg-white/70 p-2 text-[10px] leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300">
+                            {JSON.stringify(debug, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {rejected.length > 0 && (
         <div>
@@ -1207,6 +1593,7 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [excludeSourceTicketFromHistorical, setExcludeSourceTicketFromHistorical] = useState(true);
+  const [includeStagePredictions, setIncludeStagePredictions] = useState(false);
   const [dark, setDark] = useState(() => {
     if (typeof window === 'undefined') return true;
     return localStorage.getItem('vs-theme') !== 'light';
@@ -1330,6 +1717,7 @@ export default function Home() {
         historical_ticket_fetch_k: count,
         final_output_count: outputCount,
         exclude_source_ticket_from_historical: excludeSourceTicketFromHistorical,
+        include_stage_predictions: includeStagePredictions,
       };
       if (selectedCard?.display_name) body.source_ticket_title = selectedCard.display_name;
       if (uploadedIdeaText.trim()) {
@@ -1398,7 +1786,7 @@ export default function Home() {
       setStep('error');
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [count, excludeSourceTicketFromHistorical, selectedCard, selectedTicketId, uploadedIdeaText]);
+  }, [count, excludeSourceTicketFromHistorical, includeStagePredictions, selectedCard, selectedTicketId, uploadedIdeaText]);
 
   const busy = step !== 'idle' && step !== 'done' && step !== 'error';
   const card = selectedCard;
@@ -1559,6 +1947,20 @@ export default function Home() {
                     className="h-4 w-4 rounded border-zinc-300 text-hcsc accent-hcsc focus:ring-hcsc dark:border-zinc-700 dark:accent-teal-400"
                   />
                 </label>
+                <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-zinc-700 dark:text-zinc-200">Predict stages</span>
+                    <span className="block text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+                      Adds a slower stage-selection pass after value streams are selected.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={includeStagePredictions}
+                    onChange={e => setIncludeStagePredictions(e.target.checked)}
+                    className="h-4 w-4 rounded border-zinc-300 text-hcsc accent-hcsc focus:ring-hcsc dark:border-zinc-700 dark:accent-teal-400"
+                  />
+                </label>
                 <button
                   onClick={run}
                   disabled={busy || uploading || !canRun}
@@ -1662,7 +2064,17 @@ export default function Home() {
                   </div>
                 )}
 
-                {tab === 'selection'  && <SelectionPane  selected={result.selected_value_streams ?? []} rejected={result.rejected_candidates ?? []} themePayloads={result?.theme_payloads ?? []} stagePredictions={result?.stage_predictions ?? []} />}
+                {tab === 'selection'  && (
+                  <SelectionPane
+                    selected={result.selected_value_streams ?? []}
+                    rejected={result.rejected_candidates ?? []}
+                    themePayloads={result?.theme_payloads ?? []}
+                    stagePredictions={result?.stage_predictions ?? []}
+                    stageCandidateDebug={result?.stage_candidate_debug ?? []}
+                    sourceLabel={result.source_ticket_title}
+                    themeTitlePrefix={result.theme_title_prefix}
+                  />
+                )}
                 {tab === 'comparison' && <ComparisonPane selected={result.selected_value_streams ?? []} groundTruth={result.ground_truth} title={result.ground_truth_title} />}
                 {tab === 'llmPasses'  && <LlmPassesPane reviewPool={result.review_pool_llm_output} direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} llmCandidates={result.llm_candidates ?? result.candidates_used ?? []} />}
                 {tab === 'retrieval'  && <RetrievalPane  candidates={cands} />}

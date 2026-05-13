@@ -466,6 +466,31 @@ function stageDebugForValueStream(vs: SelectedVS, stageCandidateDebug: Record<st
   );
 }
 
+function selectedCountDisplay(
+  selectedCount: number,
+  rawResponse?: unknown,
+  fallbackRequested?: number,
+) {
+  const raw = asRecord(rawResponse);
+  const requestedRaw = Number(raw?.requested_final_output_count ?? fallbackRequested ?? 0);
+  const requested = Number.isFinite(requestedRaw) && requestedRaw > 0 ? requestedRaw : 0;
+  if (requested && selectedCount !== requested) return `Selected (${selectedCount}/${requested})`;
+  return `Selected (${selectedCount})`;
+}
+
+function selectionLimitMessage(rawResponse?: unknown) {
+  const raw = asRecord(rawResponse);
+  const reason = String(raw?.selected_count_limit_reason || '');
+  if (reason !== 'candidate_count_below_request') return '';
+  const budget = asRecord(raw?.selection_budget);
+  const candidateCount = Number(budget?.candidate_count ?? raw?.selected_count ?? 0);
+  const requested = Number(raw?.requested_final_output_count ?? 0);
+  if (!Number.isFinite(candidateCount) || !Number.isFinite(requested) || candidateCount >= requested) {
+    return '';
+  }
+  return `Only ${candidateCount} candidates were available after retrieval.`;
+}
+
 function ThemeStageNode({ data }: NodeProps<Node<ThemeStageNodeData>>) {
   const cls: Record<ThemeStageNodeKind, string> = {
     source: 'border-teal-300 bg-teal-50 text-teal-950 dark:border-teal-700 dark:bg-teal-950/45 dark:text-teal-100',
@@ -682,6 +707,8 @@ function SelectionPane({
   stageCandidateDebug = [],
   sourceLabel,
   themeTitlePrefix,
+  rawResponse,
+  reviewPoolSize,
 }: {
   selected: SelectedVS[];
   rejected: RejectedVS[];
@@ -690,18 +717,25 @@ function SelectionPane({
   stageCandidateDebug?: Record<string, unknown>[];
   sourceLabel?: string;
   themeTitlePrefix?: string;
+  rawResponse?: unknown;
+  reviewPoolSize?: number;
 }) {
   const [view, setView] = useState<'list' | 'graph'>('list');
   const sortedSelected = useMemo(
     () => [...selected].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)),
     [selected],
   );
+  const selectedLabel = selectedCountDisplay(selected.length, rawResponse, reviewPoolSize);
+  const limitMessage = selectionLimitMessage(rawResponse);
 
   if (!selected.length && !rejected.length) return <Empty text="Run the pipeline to see AI selections." />;
   return (
     <div className="space-y-5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-        <Pill tone="green">Selected ({selected.length})</Pill>
+        <div className="flex flex-wrap items-center gap-2">
+          <Pill tone="green">{selectedLabel}</Pill>
+          {limitMessage && <span className="text-xs text-amber-600 dark:text-amber-300">{limitMessage}</span>}
+        </div>
         <div className="inline-flex rounded-md border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-800 dark:bg-zinc-950">
           <button
             onClick={() => setView('list')}
@@ -743,16 +777,7 @@ function SelectionPane({
             const theme = findThemeForValueStream(vs, themePayloads);
             const stagePrediction = findStagePredictionForValueStream(vs, stagePredictions);
             const stageDisplay = getStageDisplay(stagePrediction);
-            const debug = stageDebugForValueStream(vs, stageCandidateDebug);
-            const hasDetails = Boolean(
-              vs.entity_id
-              || vs.reason
-              || theme?.title_source
-              || theme?.selection_source
-              || stagePrediction?.reason
-              || stageDisplay.stages.some(stage => stage.reason || stage.stage_child_issue_title)
-              || debug
-            );
+            const hasDetails = Boolean(vs.entity_id || vs.reason);
 
             return (
               <div key={vs.entity_id || `${vs.entity_name}-${i}`} className="rounded-md border border-emerald-200 bg-emerald-50/80 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/30">
@@ -805,52 +830,14 @@ function SelectionPane({
                     <div className="mt-2 space-y-2 text-zinc-600 dark:text-zinc-300">
                       {vs.entity_id && (
                         <div>
-                          <span className="font-semibold text-zinc-500 dark:text-zinc-400">Entity ID:</span>{' '}
+                          <span className="font-semibold text-zinc-500 dark:text-zinc-400">ID:</span>{' '}
                           <span className="font-mono">{vs.entity_id}</span>
-                        </div>
-                      )}
-                      {theme?.title_source && (
-                        <div>
-                          <span className="font-semibold text-zinc-500 dark:text-zinc-400">Prefix source:</span>{' '}
-                          {theme.title_source.replace(/_/g, ' ')}
-                        </div>
-                      )}
-                      {theme?.selection_source && (
-                        <div>
-                          <span className="font-semibold text-zinc-500 dark:text-zinc-400">Selection source:</span>{' '}
-                          {theme.selection_source.replace(/_/g, ' ')}
                         </div>
                       )}
                       {vs.reason && (
                         <div>
-                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Selection reason</div>
+                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Reason</div>
                           <p className="mt-0.5 leading-relaxed">{vs.reason}</p>
-                        </div>
-                      )}
-                      {stagePrediction?.reason && (
-                        <div>
-                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Stage reason</div>
-                          <p className="mt-0.5 leading-relaxed">{stagePrediction.reason}</p>
-                        </div>
-                      )}
-                      {stageDisplay.stages.some(stage => stage.reason || stage.stage_child_issue_title) && (
-                        <div className="space-y-1">
-                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Stage details</div>
-                          {stageDisplay.stages.map((stage, stageIndex) => (
-                            <div key={stage.stage_id || `${stage.stage_name}-detail-${stageIndex}`} className="rounded border border-zinc-200 bg-white/65 p-2 dark:border-zinc-800 dark:bg-zinc-950/30">
-                              <div className="font-semibold">{stage.stage_name}</div>
-                              {stage.stage_child_issue_title && <div className="mt-1">Child issue title: {stage.stage_child_issue_title}</div>}
-                              {stage.reason && <div className="mt-1 leading-relaxed">{stage.reason}</div>}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {debug && (
-                        <div>
-                          <div className="font-semibold text-zinc-500 dark:text-zinc-400">Candidate stage debug</div>
-                          <pre className="mt-1 max-h-52 overflow-auto rounded border border-zinc-200 bg-white/70 p-2 text-[10px] leading-relaxed text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-300">
-                            {JSON.stringify(debug, null, 2)}
-                          </pre>
                         </div>
                       )}
                     </div>
@@ -2020,7 +2007,9 @@ export default function Home() {
                 badge={
                   <div className="flex items-center gap-2">
                     <Pill tone="neutral">{resultCandidateCount} candidates</Pill>
-                    <Pill tone="green">{result.selected_value_streams?.length ?? 0} selected</Pill>
+                    <Pill tone="green">
+                      {selectedCountDisplay(result.selected_value_streams?.length ?? 0, result.raw_response, count)}
+                    </Pill>
                   </div>
                 }
               >
@@ -2073,6 +2062,8 @@ export default function Home() {
                     stageCandidateDebug={result?.stage_candidate_debug ?? []}
                     sourceLabel={result.source_ticket_title}
                     themeTitlePrefix={result.theme_title_prefix}
+                    rawResponse={result.raw_response}
+                    reviewPoolSize={count}
                   />
                 )}
                 {tab === 'comparison' && <ComparisonPane selected={result.selected_value_streams ?? []} groundTruth={result.ground_truth} title={result.ground_truth_title} />}

@@ -213,7 +213,7 @@ def test_missed_ground_truth_debug_classifies_loss_bucket() -> None:
     )
 
     assert [row["loss_bucket"] for row in debug] == [
-        "sent_to_llm_but_not_selected",
+        "sent_to_llm_but_skipped",
         "merged_not_sent_to_llm",
         "not_retrieved",
     ]
@@ -231,8 +231,16 @@ def test_selected_same_id_miss_is_name_mismatch_bucket() -> None:
             selected=False,
             selected_same_id=True,
         )
-        == "selected_but_eval_name_mismatch"
+        == "selected_name_mismatch"
     )
+
+
+def test_compute_metrics_uses_canonical_value_stream_names() -> None:
+    metrics = compute_metrics(["Order to Cash"], ["Order to Cash for Group Coverage"])
+
+    assert metrics["precision"] == 1.0
+    assert metrics["recall"] == 1.0
+    assert metrics["false_negatives"] == []
 
 
 def test_load_ground_truth_from_azure_uses_value_stream_names(monkeypatch) -> None:

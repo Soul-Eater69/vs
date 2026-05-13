@@ -29,6 +29,11 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from vs_app.modules.value_streams.canonical import (
+    canonicalize_value_stream_name,
+    normalize_vs_name,
+)
+
 
 SUPPORTED_EXTENSIONS = {
     ".pptx",
@@ -115,6 +120,9 @@ class TicketMetrics:
     missed_gt_sent_to_llm_count: int = 0
     missed_gt_not_sent_to_llm_count: int = 0
     missed_gt_not_retrieved_count: int = 0
+    missed_gt_merged_not_sent_count: int = 0
+    missed_gt_sent_not_selected_count: int = 0
+    missed_gt_name_mismatch_count: int = 0
     error: str = ""
 
 
@@ -863,6 +871,15 @@ def evaluate_one(
         missed_gt_not_retrieved_count=sum(
             1 for row in missed_debug if row.get("loss_bucket") == "not_retrieved"
         ),
+        missed_gt_merged_not_sent_count=sum(
+            1 for row in missed_debug if row.get("loss_bucket") == "merged_not_sent_to_llm"
+        ),
+        missed_gt_sent_not_selected_count=sum(
+            1 for row in missed_debug if row.get("loss_bucket") == "sent_to_llm_but_skipped"
+        ),
+        missed_gt_name_mismatch_count=sum(
+            1 for row in missed_debug if row.get("loss_bucket") == "selected_name_mismatch"
+        ),
     )
 
 
@@ -950,7 +967,7 @@ def build_missed_ground_truth_debug(
 
     out: list[dict[str, Any]] = []
     for name in false_negatives:
-        key = normalize_name(name)
+        key = canonical_eval_key(name)
         semantic_match = semantic_index.get(key)
         historical_match = historical_index.get(key)
         merged_match = merged_index.get(key)
@@ -1001,7 +1018,7 @@ def index_rows_by_name(rows: list[dict]) -> dict[str, dict[str, Any]]:
     for idx, row in enumerate(rows or [], start=1):
         if not isinstance(row, dict):
             continue
-        key = normalize_name(str(row.get("entity_name") or ""))
+        key = canonical_eval_key(str(row.get("entity_name") or ""))
         if not key or key in out:
             continue
         out[key] = {"row": row, "rank": idx}
@@ -1033,17 +1050,18 @@ def classify_ground_truth_miss(
     selected_same_id: bool,
 ) -> str:
     if selected or selected_same_id:
-        return "selected_but_eval_name_mismatch"
+        return "selected_name_mismatch"
     if not in_semantic and not in_historical and not in_merged:
         return "not_retrieved"
+    if not in_merged:
+        if in_semantic:
+            return "in_semantic_not_merged"
+        if in_historical:
+            return "in_historical_not_merged"
     if sent_to_llm:
-        return "sent_to_llm_but_not_selected"
+        return "sent_to_llm_but_skipped"
     if in_merged:
         return "merged_not_sent_to_llm"
-    if in_semantic and not in_historical:
-        return "semantic_only_not_sent"
-    if in_historical and not in_semantic:
-        return "historical_only_not_sent"
     return "merged_not_sent_to_llm"
 
 
@@ -1107,13 +1125,17 @@ def failed_result(
         missed_ground_truth_debug=[],
         missed_gt_names=[],
         missed_gt_buckets=[],
+        missed_gt_not_retrieved_count=0,
+        missed_gt_merged_not_sent_count=0,
+        missed_gt_sent_not_selected_count=0,
+        missed_gt_name_mismatch_count=0,
         error=f"{type(exc).__name__}: {exc}",
     )
 
 
 def compute_metrics(predicted: Iterable[str], ground_truth: Iterable[str]) -> dict[str, Any]:
-    predicted_by_key = {normalize_name(name): name for name in clean_name_list(predicted)}
-    truth_by_key = {normalize_name(name): name for name in clean_name_list(ground_truth)}
+    predicted_by_key = {canonical_eval_key(name): name for name in clean_name_list(predicted)}
+    truth_by_key = {canonical_eval_key(name): name for name in clean_name_list(ground_truth)}
 
     predicted_keys = set(predicted_by_key)
     truth_keys = set(truth_by_key)
@@ -1221,6 +1243,11 @@ def normalize_name(value: str) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
+def canonical_eval_key(name: str) -> str:
+    canonical = canonicalize_value_stream_name(name) or name
+    return normalize_vs_name(canonical)
+
+
 def normalize_ticket_id(value: str) -> str:
     return str(value or "").strip().upper()
 
@@ -1309,6 +1336,9 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "missed_gt_sent_to_llm_count",
         "missed_gt_not_sent_to_llm_count",
         "missed_gt_not_retrieved_count",
+        "missed_gt_merged_not_sent_count",
+        "missed_gt_sent_not_selected_count",
+        "missed_gt_name_mismatch_count",
         "error",
     ]
     with path.open("w", encoding="utf-8", newline="") as fh:

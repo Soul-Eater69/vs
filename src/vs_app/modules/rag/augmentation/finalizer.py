@@ -35,6 +35,8 @@ def generate_review_pool_value_streams(
             "raw_response": {
                 "selected_value_streams": [],
                 "requested_final_output_count": requested,
+                "selected_count": 0,
+                "selected_count_limit_reason": "candidate_count_below_request",
                 "selection_budget": {"max_select": 0, "candidate_count": 0},
                 "single_review_pool_pass": _empty_pass(),
                 "missed_strong_candidates": [],
@@ -91,7 +93,10 @@ def generate_review_pool_value_streams(
     }
     selected: List[dict] = []
     seen_ids: set[str] = set()
-    for pick in parsed.get("picks") or []:
+    picks = parsed.get("picks")
+    if picks is None:
+        picks = parsed.get("selected_value_streams") or []
+    for pick in picks or []:
         pick_id = str(pick.get("entity_id") or "").strip().lower()
         if not pick_id or pick_id in seen_ids:
             continue
@@ -108,11 +113,21 @@ def generate_review_pool_value_streams(
             )
         )
 
-    selected = selected[:requested]
+    selected = selected[:max_select]
     selected = _safe_backfill_review_pool(
         selected=selected,
         candidates=candidates,
-        min_target=min(requested, 8),
+        min_target=max_select,
+    )
+    selected = _exact_fill_review_pool(
+        selected=selected,
+        candidates=candidates,
+        target=max_select,
+    )
+    selected_count_limit_reason = (
+        "candidate_count_below_request"
+        if len(candidates) < requested
+        else "exact_request_satisfied"
     )
     rejected = _pass_rejected_candidates(
         selected=selected,
@@ -121,6 +136,8 @@ def generate_review_pool_value_streams(
     raw_response = {
         "selected_value_streams": selected,
         "requested_final_output_count": requested,
+        "selected_count": len(selected),
+        "selected_count_limit_reason": selected_count_limit_reason,
         "selection_budget": {
             "max_select": max_select,
             "candidate_count": len(candidates),
@@ -128,6 +145,8 @@ def generate_review_pool_value_streams(
         "single_review_pool_pass": {
             "selected_value_streams": selected,
             "candidate_count": len(candidates),
+            "selected_count": len(selected),
+            "selected_count_limit_reason": selected_count_limit_reason,
             "selection_limits": {"max_select": max_select},
             "candidates_passed": [_to_pass_candidate(row) for row in candidates],
             "rejected_candidates": rejected,
@@ -150,6 +169,7 @@ def generate_review_pool_value_streams(
         "llm_selected_value_streams": selected,
         "raw_response": raw_response,
         "candidates_used": candidates,
+        "selected_count_limit_reason": selected_count_limit_reason,
     }
 
 
@@ -281,6 +301,46 @@ def _safe_backfill_review_pool(
         selected_keys.update(_selection_keys(candidate))
 
     return out
+
+
+def _exact_fill_review_pool(
+    *,
+    selected: List[dict],
+    candidates: List[dict],
+    target: int,
+) -> List[dict]:
+    """Guarantee exact review-pool size when enough candidates exist.
+
+    This runs after LLM picks and safe backfill, so these rows are intentionally
+    lower confidence and marked separately for downstream diagnostics.
+    """
+    if len(selected) >= target:
+        return selected[:target]
+
+    selected_keys: set[str] = set()
+    for row in selected:
+        selected_keys.update(_selection_keys(row))
+
+    out = list(selected)
+    for candidate in _backfill_order(candidates):
+        if len(out) >= target:
+            break
+        if selected_keys.intersection(_selection_keys(candidate)):
+            continue
+
+        filler = _build_selected_row(
+            candidate,
+            confidence=0.25,
+            llm_reason=(
+                "Added to complete the requested review-pool size based on candidate "
+                "ranking and available semantic or historical evidence."
+            ),
+        )
+        filler["selection_source"] = "exact_count_fill"
+        out.append(filler)
+        selected_keys.update(_selection_keys(candidate))
+
+    return out[:target]
 
 
 def _backfill_order(candidates: List[dict]) -> List[dict]:

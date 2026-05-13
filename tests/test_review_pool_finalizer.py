@@ -92,7 +92,7 @@ def test_review_pool_finalizer_calls_llm_once_and_passes_all_lanes(monkeypatch) 
     assert result["raw_response"]["single_review_pool_pass"]["candidate_count"] == 3
 
 
-def test_review_pool_finalizer_removes_invented_output(monkeypatch) -> None:
+def test_review_pool_finalizer_ignores_invented_output_and_exact_fills(monkeypatch) -> None:
     class FakeGenerationService:
         def generate_structured(self, **kwargs):
             return _FakeResult(
@@ -116,8 +116,11 @@ def test_review_pool_finalizer_removes_invented_output(monkeypatch) -> None:
         final_output_count=5,
     )
 
-    assert result["selected_value_streams"] == []
-    assert result["raw_response"]["single_review_pool_pass"]["rejected_candidates"][0]["entity_name"] == "Issue Payment"
+    assert [row["entity_name"] for row in result["selected_value_streams"]] == ["Issue Payment"]
+    assert result["selected_value_streams"][0]["selection_source"] == "exact_count_fill"
+    assert result["raw_response"]["selected_count_limit_reason"] == "candidate_count_below_request"
+    assert result["raw_response"]["selected_count"] == 1
+    assert result["raw_response"]["single_review_pool_pass"]["rejected_candidates"] == []
 
 
 def test_review_pool_safe_backfills_strong_candidate_when_llm_returns_none(monkeypatch) -> None:
@@ -149,6 +152,62 @@ def test_review_pool_safe_backfills_strong_candidate_when_llm_returns_none(monke
     assert result["selected_value_streams"][0]["selection_source"] == "safe_backfill"
     missed = result["raw_response"]["missed_strong_candidates"]
     assert missed == []
+
+
+def test_review_pool_exact_fills_to_requested_count_when_candidates_exist(monkeypatch) -> None:
+    class FakeGenerationService:
+        def generate_structured(self, **kwargs):
+            return _FakeResult(
+                [
+                    {
+                        "entity_id": "vs-1",
+                        "confidence": 0.8,
+                        "reason": "First candidate is clearly supported.",
+                    }
+                ]
+            )
+
+    _install_generation_service(monkeypatch, FakeGenerationService)
+
+    result = finalizer.generate_review_pool_value_streams(
+        query_for_prompt="idea card",
+        llm_candidates=[
+            _candidate("vs-1", "First Stream", "semantic_only", from_semantic=True),
+            _candidate("vs-2", "Second Stream", "semantic_only", from_semantic=True),
+            _candidate("vs-3", "Third Stream", "historical_only", from_historical=True),
+        ],
+        final_output_count=3,
+    )
+
+    assert len(result["selected_value_streams"]) == 3
+    assert [row["selection_source"] for row in result["selected_value_streams"]] == [
+        "llm_pick",
+        "exact_count_fill",
+        "exact_count_fill",
+    ]
+    assert result["raw_response"]["selected_count"] == 3
+    assert result["raw_response"]["selected_count_limit_reason"] == "exact_request_satisfied"
+
+
+def test_review_pool_returns_all_candidates_when_request_exceeds_candidates(monkeypatch) -> None:
+    class FakeGenerationService:
+        def generate_structured(self, **kwargs):
+            return _FakeResult([])
+
+    _install_generation_service(monkeypatch, FakeGenerationService)
+
+    result = finalizer.generate_review_pool_value_streams(
+        query_for_prompt="idea card",
+        llm_candidates=[
+            _candidate("vs-1", "First Stream", "semantic_only", from_semantic=True),
+            _candidate("vs-2", "Second Stream", "historical_only", from_historical=True),
+        ],
+        final_output_count=5,
+    )
+
+    assert len(result["selected_value_streams"]) == 2
+    assert result["raw_response"]["requested_final_output_count"] == 5
+    assert result["raw_response"]["selected_count_limit_reason"] == "candidate_count_below_request"
 
 
 def test_review_pool_prompt_stays_compact() -> None:

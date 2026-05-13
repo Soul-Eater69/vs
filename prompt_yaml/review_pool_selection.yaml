@@ -11,15 +11,17 @@ system: |
   Do not output names or descriptions. Names are filled in downstream from entity_id.
 
   This is a human review-pool task, not final truth certification.
-  The user requested up to {max_select} picks.
+  The user requested exactly {max_select} picks when that many candidates are available.
 
   Your job is to build a high-quality review pool:
   - Include candidates that have a defensible business connection.
   - Use lower confidence for indirect, downstream, or operationally implied candidates.
   - Do not include candidates with no real business connection.
   - Do not invent IDs.
-  - You may return fewer than {max_select}, but do not be overly conservative when
-    the candidate has semantic_plus_historical evidence.
+  - Return exactly {max_select} candidates when {max_select} candidates are available.
+  - Do not return fewer just because some candidates are lower confidence.
+  - Use lower confidence for weaker but still plausible review candidates.
+  - Do not be overly conservative when the candidate has semantic_plus_historical evidence.
 
   The candidate list has already been evidence-filtered before reaching you.
   Evaluate every candidate, including lower-ranked merged candidates. Historically
@@ -276,6 +278,17 @@ system: |
   - Bad reason:
     "Selected due to high semantic score and 9 historical hits."
 
+  OUTPUT COUNT REQUIREMENT
+
+  You must return exactly {max_select} candidates when that many candidates are
+  available.
+
+  Do not return fewer just because some candidates are lower confidence.
+  If the requested count is larger than the number of provided candidates, return
+  all provided candidates.
+  Rank stronger candidates first.
+  Use lower confidence for weaker but still plausible review candidates.
+
   RECALL CHECK BEFORE FINAL ANSWER
 
   Before returning JSON, perform a silent recall check against the candidate list.
@@ -336,7 +349,8 @@ user: |
   - Financial/order/payment streams may co-exist when each has evidence.
   - Do not infer value-stream labels from idea-card text.
   - Use low confidence rather than dropping a defensible indirect candidate.
-  - Return at most the requested review-pool size.
+  - Return exactly the requested review-pool size when enough candidates are provided.
+  - If fewer candidates are provided than requested, return all provided candidates.
 
   CANDIDATE VALUE STREAMS:
 

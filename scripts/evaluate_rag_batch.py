@@ -104,6 +104,7 @@ class TicketMetrics:
     llm_candidate_window: int = 0
     candidate_count: int = 0
     prompt_chars: int = 0
+    system_prompt_chars: int = 0
     final_llm_ms: int = 0
     total_ms: int = 0
     candidate_window_semantic_plus_historical: int = 0
@@ -845,6 +846,7 @@ def evaluate_one(
         llm_candidate_window=int(runtime_config.get("llm_candidate_window") or 0),
         candidate_count=int(prompt_debug.get("candidate_count") or 0),
         prompt_chars=int(prompt_debug.get("prompt_chars") or 0),
+        system_prompt_chars=int(prompt_debug.get("system_prompt_chars") or 0),
         final_llm_ms=int(timing_ms.get("final_llm") or 0),
         total_ms=int(timing_ms.get("total") or 0),
         candidate_window_semantic_plus_historical=int(
@@ -1197,6 +1199,12 @@ def summarize(results: list[TicketMetrics]) -> dict[str, Any]:
             average((row.total_seconds or row.elapsed_seconds) for row in ok_rows),
             3,
         ),
+        "avg_prompt_chars": round(average(row.prompt_chars for row in ok_rows), 1),
+        "avg_system_prompt_chars": round(
+            average(row.system_prompt_chars for row in ok_rows),
+            1,
+        ),
+        "avg_llm_ms": round(average(row.final_llm_ms for row in ok_rows), 1),
     }
 
 
@@ -1321,6 +1329,7 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "llm_candidate_window",
         "candidate_count",
         "prompt_chars",
+        "system_prompt_chars",
         "final_llm_ms",
         "total_ms",
         "candidate_window_semantic_plus_historical",
@@ -1362,6 +1371,9 @@ def print_summary(summary: dict[str, Any]) -> None:
     print(f"  avg seconds:     {summary['avg_vs_seconds']:.3f}")
     print(f"  avg stage sec:   {summary['avg_stage_seconds']:.3f}")
     print(f"  avg total sec:   {summary['avg_total_seconds']:.3f}")
+    print(f"  avg prompt chars:{summary['avg_prompt_chars']:.1f}")
+    print(f"  avg system chars:{summary['avg_system_prompt_chars']:.1f}")
+    print(f"  avg LLM ms:      {summary['avg_llm_ms']:.1f}")
 
 
 if __name__ == "__main__":

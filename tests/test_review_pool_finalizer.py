@@ -5,6 +5,7 @@ from types import ModuleType
 
 from vs_app.modules.rag.augmentation import finalizer
 from vs_app.modules.rag.augmentation.prompt_context import build_review_pool_candidate_prompt
+from vs_app.modules.prompts.loader import build_review_pool_selection_system_prompt
 
 
 class _FakeResult:
@@ -252,3 +253,13 @@ def test_review_pool_prompt_stays_compact() -> None:
     )
 
     assert len(prompt) < 14000
+
+
+def test_review_pool_system_prompt_is_lean() -> None:
+    prompt = build_review_pool_selection_system_prompt(max_select=15)
+
+    assert "HOW TO READ THE IDEA CARD SUMMARY" not in prompt
+    assert "OPERATIONAL CHAIN RULES" not in prompt
+    assert "DOMAIN-SPECIFIC CALIBRATION" not in prompt
+    assert "Exact count rule" in prompt
+    assert len(prompt) < 3000

@@ -138,6 +138,9 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
             merged_candidate_count=3,
             historical_hit_count=4,
             excluded_ticket_ids=["IDMT-1"],
+            prompt_chars=100,
+            system_prompt_chars=40,
+            final_llm_ms=900,
         ),
         TicketMetrics(
             ticket_id="IDMT-2",
@@ -165,6 +168,9 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
             merged_candidate_count=3,
             historical_hit_count=4,
             excluded_ticket_ids=["IDMT-2"],
+            prompt_chars=300,
+            system_prompt_chars=80,
+            final_llm_ms=1100,
         ),
     ]
 
@@ -181,6 +187,9 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
     assert summary["avg_vs_seconds"] == 2.0
     assert summary["avg_stage_seconds"] == 0.0
     assert summary["avg_total_seconds"] == 2.0
+    assert summary["avg_prompt_chars"] == 200.0
+    assert summary["avg_system_prompt_chars"] == 60.0
+    assert summary["avg_llm_ms"] == 1000.0
 
 
 def test_missed_ground_truth_debug_classifies_loss_bucket() -> None:

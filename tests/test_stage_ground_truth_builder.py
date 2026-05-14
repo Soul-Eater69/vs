@@ -6,6 +6,8 @@ from pathlib import Path
 import shutil
 import sys
 
+import pytest
+
 from vs_app.eval.stages.ground_truth_builder import (
     build_stage_ground_truth_for_tickets,
     fetch_theme_epic_rows,
@@ -98,7 +100,7 @@ def test_rows_to_ticket_ground_truth_groups_stages_under_value_stream() -> None:
     )
 
     ticket = result["IDMT-19761"]
-    assert ticket["source"] == "neo4j_jira_graph"
+    assert ticket["source"] == "jira_api"
     assert len(ticket["value_streams"]) == 1
     value_stream = ticket["value_streams"][0]
     assert value_stream["theme_issue_key"] == "GROUP-22223"
@@ -131,50 +133,155 @@ def test_rows_to_ticket_ground_truth_rejects_non_theme_group_rows() -> None:
     assert rows_to_ticket_ground_truth(rows, stage_id_resolver=lambda **kwargs: None) == {}
 
 
-class _FakeSession:
-    def __init__(self, rows: list[dict]) -> None:
-        self.rows = rows
+class _FakeJiraClient:
+    def __init__(
+        self,
+        *,
+        ticket_payload: dict,
+        issues: dict[str, dict],
+        search_issues: list[dict] | None = None,
+    ) -> None:
+        self.ticket_payload = ticket_payload
+        self.issues = issues
+        self.search_issues_payload = search_issues or []
         self.seen_ticket_key = ""
+        self.seen_issue_keys: list[str] = []
+        self.seen_jqls: list[str] = []
 
-    def run(self, query, **params):
-        self.seen_ticket_key = params["ticket_key"]
-        return self.rows
+    async def get_ticket_data(self, ticket_id: str):
+        self.seen_ticket_key = ticket_id
+        return self.ticket_payload
 
-    def __enter__(self):
-        return self
+    async def get_issue_by_key(self, issue_key: str, fields=None):
+        self.seen_issue_keys.append(issue_key)
+        return self.issues[issue_key]
 
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-
-class _FakeDriver:
-    def __init__(self, rows: list[dict]) -> None:
-        self.session_obj = _FakeSession(rows)
-
-    def session(self):
-        return self.session_obj
+    async def get_issues(self, *, jql: str, start_at: int = 0, max_results: int = 100, fields=None):
+        self.seen_jqls.append(jql)
+        return {"issues": self.search_issues_payload, "total": len(self.search_issues_payload)}
 
 
-def test_fetch_theme_epic_rows_reads_neo4j_records() -> None:
-    session = _FakeSession([{"ticket_id": "IDMT-1"}])
+def _ticket_payload() -> dict:
+    return {
+        "key": "IDMT-19761",
+        "fields": {
+            "summary": "CP 2026 Women's and Family Health",
+            "issuelinks": [],
+        },
+        "themes": [
+            {
+                "key": "GROUP-22223",
+                "summary": "Manage Utilization Management Program",
+                "summary_raw": (
+                    "CP 2026 Women's and Family Health : "
+                    "Manage Utilization Management Program"
+                ),
+                "status": "In Progress",
+                "issue_type": "Theme",
+            }
+        ],
+    }
 
-    rows = fetch_theme_epic_rows(neo4j_session=session, ticket_key="idmt-1")
 
-    assert session.seen_ticket_key == "IDMT-1"
-    assert rows == [{"ticket_id": "IDMT-1"}]
+def _issue(
+    key: str,
+    summary: str,
+    issue_type: str,
+    *,
+    issuelinks: list[dict] | None = None,
+    status: str = "In Progress",
+    resolution: str | None = None,
+) -> dict:
+    return {
+        "key": key,
+        "fields": {
+            "summary": summary,
+            "issuetype": {"name": issue_type},
+            "status": {"name": status},
+            "resolution": {"name": resolution} if resolution else None,
+            "issuelinks": issuelinks or [],
+        },
+    }
 
 
-def test_build_stage_ground_truth_for_tickets_uses_driver_session() -> None:
-    driver = _FakeDriver(_rows())
+@pytest.mark.anyio
+async def test_fetch_theme_epic_rows_reads_jira_theme_issue_links() -> None:
+    theme_summary = "CP 2026 Women's and Family Health : Manage Utilization Management Program"
+    stage = _issue(
+        "GROUP-22805",
+        f"{theme_summary} - Manage UM Operations (PA)",
+        "Epic",
+        status="Cancelled",
+        resolution="Won't Do",
+    )
+    theme = _issue(
+        "GROUP-22223",
+        theme_summary,
+        "Theme",
+        issuelinks=[
+            {"type": {"name": "implements"}, "outwardIssue": stage},
+            {
+                "type": {"name": "relates"},
+                "outwardIssue": _issue("GROUP-30000", "Not a stage", "Theme"),
+            },
+        ],
+    )
+    client = _FakeJiraClient(
+        ticket_payload=_ticket_payload(),
+        issues={"GROUP-22223": theme},
+    )
 
-    result = build_stage_ground_truth_for_tickets(
+    rows = await fetch_theme_epic_rows(jira_client=client, ticket_key="idmt-19761")
+
+    assert client.seen_ticket_key == "IDMT-19761"
+    assert rows[0]["theme_key"] == "GROUP-22223"
+    assert rows[0]["stage_issue_key"] == "GROUP-22805"
+    assert rows[0]["stage_issue_type"] == "Epic"
+    assert rows[0]["stage_resolution"] == "Won't Do"
+
+
+@pytest.mark.anyio
+async def test_fetch_theme_epic_rows_searches_title_prefix_when_no_links() -> None:
+    theme_summary = "CP 2026 Women's and Family Health : Manage Utilization Management Program"
+    theme = _issue("GROUP-22223", theme_summary, "Theme")
+    matching_stage = _issue(
+        "GROUP-22838",
+        f"{theme_summary} - Manage UM Operations (Referral)",
+        "Epic",
+    )
+    unrelated_stage = _issue(
+        "GROUP-99999",
+        "Different Theme - Manage UM Operations (Referral)",
+        "Epic",
+    )
+    client = _FakeJiraClient(
+        ticket_payload=_ticket_payload(),
+        issues={"GROUP-22223": theme},
+        search_issues=[matching_stage, unrelated_stage],
+    )
+
+    rows = await fetch_theme_epic_rows(jira_client=client, ticket_key="IDMT-19761")
+
+    assert [row["stage_issue_key"] for row in rows] == ["GROUP-22838"]
+    assert any("summary ~" in jql for jql in client.seen_jqls)
+
+
+@pytest.mark.anyio
+async def test_build_stage_ground_truth_for_tickets_uses_jira_client() -> None:
+    theme_summary = "CP 2026 Women's and Family Health : Manage Utilization Management Program"
+    client = _FakeJiraClient(
+        ticket_payload=_ticket_payload(),
+        issues={"GROUP-22223": _issue("GROUP-22223", theme_summary, "Theme")},
+    )
+
+    result = await build_stage_ground_truth_for_tickets(
         ticket_keys=["idmt-19761"],
-        neo4j_driver=driver,
+        jira_client=client,
         stage_id_resolver=lambda **kwargs: None,
     )
 
     assert list(result) == ["IDMT-19761"]
-    assert driver.session_obj.seen_ticket_key == "IDMT-19761"
+    assert client.seen_ticket_key == "IDMT-19761"
 
 
 def test_load_ticket_keys_reads_direct_json_and_csv() -> None:
@@ -196,4 +303,3 @@ def test_load_ticket_keys_reads_direct_json_and_csv() -> None:
         assert load_ticket_keys(args) == ["IDMT-4", "IDMT-5"]
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-

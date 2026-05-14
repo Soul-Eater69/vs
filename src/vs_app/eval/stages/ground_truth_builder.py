@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Callable
 
@@ -9,63 +10,31 @@ from vs_app.eval.stages.stage_ground_truth_models import (
     StageGroundTruthTicket,
     StageGroundTruthValueStream,
 )
+from vs_app.ingestion.jira.mapper import build_ticket_payload
+from vs_app.ingestion.jira.value_stream_labels.theme_extraction import extract_themes
 from vs_app.ingestion.jira.value_stream_labels.approved_registry import approved_value_stream_id
 from vs_app.modules.value_streams.canonical import canonicalize_value_stream_name
 
 
-THEME_EPIC_QUERY = """
-MATCH (t:JIRA {key: $ticket_key})
-WITH t, coalesce(t.inwardIssues, []) AS theme_refs
-UNWIND theme_refs AS raw_theme_ref
-WITH t, raw_theme_ref,
-     CASE
-       WHEN raw_theme_ref IS NULL THEN NULL
-       WHEN raw_theme_ref CONTAINS " " THEN split(raw_theme_ref, " ")[0]
-       ELSE raw_theme_ref
-     END AS theme_key
-WHERE theme_key STARTS WITH "GROUP-"
-MATCH (theme:JIRA {key: theme_key})
-WHERE theme.issueType = "Theme"
+logger = logging.getLogger(__name__)
 
-WITH t, theme,
-     coalesce(theme.outwardIssues, []) + coalesce(theme.inwardIssues, []) AS child_refs
-UNWIND CASE WHEN size(child_refs) = 0 THEN [NULL] ELSE child_refs END AS raw_child_ref
-
-WITH t, theme, raw_child_ref,
-     CASE
-       WHEN raw_child_ref IS NULL THEN NULL
-       WHEN raw_child_ref CONTAINS " " THEN split(raw_child_ref, " ")[0]
-       ELSE raw_child_ref
-     END AS child_key
-
-OPTIONAL MATCH (child:JIRA {key: child_key})
-WHERE child IS NULL OR child.issueType = "Epic"
-
-RETURN
-  t.key AS ticket_id,
-  t.summary AS ticket_summary,
-
-  theme.key AS theme_key,
-  theme.summary AS theme_summary,
-  theme.issueType AS theme_issue_type,
-  theme.businessValueStreams AS theme_business_value_streams,
-
-  child.key AS stage_issue_key,
-  child.summary AS stage_summary,
-  child.issueType AS stage_issue_type,
-  child.status AS stage_status,
-  child.resolution AS stage_resolution
-ORDER BY t.key, theme.key, child.key
-"""
+_JIRA_FIELDS = [
+    "summary",
+    "status",
+    "resolution",
+    "issuetype",
+    "issuelinks",
+    "parent",
+]
 
 StageResolver = Callable[..., str | None]
 ValueStreamIdResolver = Callable[[str], str | None]
 
 
-def build_stage_ground_truth_for_tickets(
+async def build_stage_ground_truth_for_tickets(
     *,
     ticket_keys: list[str],
-    neo4j_driver: Any,
+    jira_client: Any,
     include_cancelled_epics: bool = True,
     value_stream_id_resolver: ValueStreamIdResolver | None = None,
     stage_id_resolver: StageResolver | None = None,
@@ -76,28 +45,259 @@ def build_stage_ground_truth_for_tickets(
     if not keys:
         return out
 
-    with neo4j_driver.session() as session:
-        for ticket_key in keys:
-            rows = fetch_theme_epic_rows(neo4j_session=session, ticket_key=ticket_key)
-            out.update(
-                rows_to_ticket_ground_truth(
-                    rows,
-                    include_cancelled_epics=include_cancelled_epics,
-                    value_stream_id_resolver=value_stream_id_resolver,
-                    stage_id_resolver=stage_id_resolver,
-                    stage_index_name=stage_index_name,
-                )
+    for ticket_key in keys:
+        rows = await fetch_theme_epic_rows(jira_client=jira_client, ticket_key=ticket_key)
+        out.update(
+            rows_to_ticket_ground_truth(
+                rows,
+                include_cancelled_epics=include_cancelled_epics,
+                value_stream_id_resolver=value_stream_id_resolver,
+                stage_id_resolver=stage_id_resolver,
+                stage_index_name=stage_index_name,
             )
+        )
     return out
 
 
-def fetch_theme_epic_rows(
+async def fetch_theme_epic_rows(
     *,
-    neo4j_session: Any,
+    jira_client: Any,
     ticket_key: str,
 ) -> list[dict[str, Any]]:
-    result = neo4j_session.run(THEME_EPIC_QUERY, ticket_key=normalize_ticket_key(ticket_key))
-    return [_record_to_dict(row) for row in result]
+    ticket_payload = await _fetch_ticket_payload(jira_client, normalize_ticket_key(ticket_key))
+    ticket_id = normalize_ticket_key(str(ticket_payload.get("key") or ticket_key))
+    fields = ticket_payload.get("fields") or {}
+    ticket_summary = clean_text(fields.get("summary"))
+    themes = list(ticket_payload.get("themes") or [])
+    if not themes:
+        themes = extract_themes(fields.get("issuelinks") or [], source_title=ticket_summary)
+
+    rows: list[dict[str, Any]] = []
+    for theme in themes:
+        theme_key = clean_text(theme.get("key"))
+        if not theme_key:
+            continue
+
+        theme_issue = await _fetch_issue(jira_client, theme_key)
+        theme_fields = theme_issue.get("fields") or {}
+        theme_summary = clean_text(
+            theme_fields.get("summary")
+            or theme.get("summary_raw")
+            or theme.get("summary")
+        )
+        theme_issue_type = _issue_type_name(theme_issue) or clean_text(theme.get("issue_type"))
+        theme_business_value_streams = (
+            theme_issue.get("businessValueStreams")
+            or theme_fields.get("businessValueStreams")
+            or theme.get("raw_value_stream_suffix")
+            or None
+        )
+
+        stage_issues = await _fetch_stage_epics_for_theme(
+            jira_client=jira_client,
+            theme_key=theme_key,
+            theme_summary=theme_summary,
+            theme_issue=theme_issue,
+        )
+        if not stage_issues:
+            rows.append(
+                _stage_row(
+                    ticket_id=ticket_id,
+                    ticket_summary=ticket_summary,
+                    theme_key=theme_key,
+                    theme_summary=theme_summary,
+                    theme_issue_type=theme_issue_type,
+                    theme_business_value_streams=theme_business_value_streams,
+                    stage_issue=None,
+                )
+            )
+            continue
+
+        for stage_issue in stage_issues:
+            rows.append(
+                _stage_row(
+                    ticket_id=ticket_id,
+                    ticket_summary=ticket_summary,
+                    theme_key=theme_key,
+                    theme_summary=theme_summary,
+                    theme_issue_type=theme_issue_type,
+                    theme_business_value_streams=theme_business_value_streams,
+                    stage_issue=stage_issue,
+                )
+            )
+
+    return rows
+
+
+async def _fetch_ticket_payload(jira_client: Any, ticket_key: str) -> dict[str, Any]:
+    get_ticket_data = getattr(jira_client, "get_ticket_data", None)
+    if callable(get_ticket_data):
+        return dict(await get_ticket_data(ticket_key))
+
+    issue = await _fetch_issue(jira_client, ticket_key)
+    return build_ticket_payload(issue, ticket_id=ticket_key)
+
+
+async def _fetch_stage_epics_for_theme(
+    *,
+    jira_client: Any,
+    theme_key: str,
+    theme_summary: str,
+    theme_issue: dict[str, Any],
+) -> list[dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+
+    for issue in _extract_linked_epics(theme_issue):
+        hydrated = await _hydrate_issue(jira_client, issue)
+        key = clean_text(hydrated.get("key"))
+        if key:
+            by_key[key] = hydrated
+
+    for issue in await _search_stage_epics_by_theme(jira_client, theme_key, theme_summary):
+        key = clean_text(issue.get("key"))
+        if key and key not in by_key:
+            by_key[key] = issue
+
+    return sorted(by_key.values(), key=lambda issue: clean_text(issue.get("key")))
+
+
+def _extract_linked_epics(issue: dict[str, Any]) -> list[dict[str, Any]]:
+    fields = issue.get("fields") or {}
+    out: list[dict[str, Any]] = []
+    for link in fields.get("issuelinks") or []:
+        for side in ("outwardIssue", "inwardIssue"):
+            linked = link.get(side)
+            if isinstance(linked, dict) and _issue_type_name(linked).lower() == "epic":
+                out.append(linked)
+    return out
+
+
+async def _search_stage_epics_by_theme(
+    jira_client: Any,
+    theme_key: str,
+    theme_summary: str,
+) -> list[dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for jql in _stage_epic_jql_candidates(theme_key, theme_summary):
+        try:
+            result = await _search_issues(jira_client, jql, fields=_JIRA_FIELDS)
+        except Exception as exc:
+            logger.info("Stage Epic JQL failed for %s: %s", theme_key, exc)
+            continue
+
+        for issue in result.get("issues") or []:
+            if _issue_type_name(issue).lower() != "epic":
+                continue
+            if not _stage_belongs_to_theme(theme_summary, _issue_summary(issue)):
+                continue
+            key = clean_text(issue.get("key"))
+            if key:
+                out[key] = issue
+
+    return sorted(out.values(), key=lambda issue: clean_text(issue.get("key")))
+
+
+def _stage_epic_jql_candidates(theme_key: str, theme_summary: str) -> list[str]:
+    project_key = clean_text(theme_key).split("-", 1)[0] or "GROUP"
+    summary_probe = _jql_summary_probe(theme_summary)
+    candidates = [
+        f'"Parent Link" = {theme_key}',
+        f"parent = {theme_key}",
+    ]
+    if summary_probe:
+        candidates.append(
+            f'project = {project_key} AND issuetype = Epic AND summary ~ "{_jql_quote(summary_probe)}"'
+        )
+    return candidates
+
+
+def _jql_summary_probe(theme_summary: str) -> str:
+    summary = clean_text(theme_summary)
+    if " : " in summary:
+        return summary.rsplit(" : ", 1)[-1].strip()
+    if " - " in summary:
+        return summary.rsplit(" - ", 1)[-1].strip()
+    return summary
+
+
+def _jql_quote(value: str) -> str:
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _stage_belongs_to_theme(theme_summary: str, stage_summary: str) -> bool:
+    theme = clean_text(theme_summary).lower()
+    stage = clean_text(stage_summary).lower()
+    return bool(theme and stage.startswith(f"{theme} - "))
+
+
+async def _hydrate_issue(jira_client: Any, issue: dict[str, Any]) -> dict[str, Any]:
+    fields = issue.get("fields") or {}
+    if fields.get("summary") and _issue_type_name(issue):
+        return issue
+    key = clean_text(issue.get("key"))
+    return await _fetch_issue(jira_client, key) if key else issue
+
+
+async def _fetch_issue(jira_client: Any, issue_key: str) -> dict[str, Any]:
+    get_issue = getattr(jira_client, "get_issue_by_key", None)
+    if callable(get_issue):
+        return dict(await get_issue(issue_key, fields=_JIRA_FIELDS))
+
+    nested_client = getattr(jira_client, "client", None)
+    nested_get_issue = getattr(nested_client, "get_issue_by_key", None)
+    if callable(nested_get_issue):
+        return dict(await nested_get_issue(issue_key, fields=_JIRA_FIELDS))
+
+    raise TypeError("jira_client must provide get_issue_by_key or get_ticket_data")
+
+
+async def _search_issues(
+    jira_client: Any,
+    jql: str,
+    *,
+    fields: list[str],
+) -> dict[str, Any]:
+    get_issues = getattr(jira_client, "get_issues", None)
+    if callable(get_issues):
+        return dict(await get_issues(jql=jql, start_at=0, max_results=100, fields=fields))
+
+    nested_client = getattr(jira_client, "client", None)
+    nested_get_issues = getattr(nested_client, "get_issues", None)
+    if callable(nested_get_issues):
+        return dict(
+            await nested_get_issues(jql=jql, start_at=0, max_results=100, fields=fields)
+        )
+
+    search_issues = getattr(jira_client, "search_issues", None)
+    if callable(search_issues):
+        return dict(await search_issues(jql, start_at=0, max_results=100))
+
+    return {"issues": [], "total": 0}
+
+
+def _stage_row(
+    *,
+    ticket_id: str,
+    ticket_summary: str,
+    theme_key: str,
+    theme_summary: str,
+    theme_issue_type: str,
+    theme_business_value_streams: Any,
+    stage_issue: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "ticket_id": ticket_id,
+        "ticket_summary": ticket_summary,
+        "theme_key": theme_key,
+        "theme_summary": theme_summary,
+        "theme_issue_type": theme_issue_type,
+        "theme_business_value_streams": theme_business_value_streams,
+        "stage_issue_key": clean_text((stage_issue or {}).get("key")),
+        "stage_summary": _issue_summary(stage_issue or {}),
+        "stage_issue_type": _issue_type_name(stage_issue or {}),
+        "stage_status": _issue_status_name(stage_issue or {}),
+        "stage_resolution": _issue_resolution_name(stage_issue or {}),
+    }
 
 
 def rows_to_ticket_ground_truth(
@@ -307,6 +507,35 @@ def is_cancelled_stage(row: dict[str, Any]) -> bool:
     return clean_text(row.get("stage_status")).lower() == "cancelled"
 
 
+def _issue_summary(issue: dict[str, Any]) -> str:
+    fields = issue.get("fields") or {}
+    return clean_text(fields.get("summary") or issue.get("summary"))
+
+
+def _issue_type_name(issue: dict[str, Any]) -> str:
+    fields = issue.get("fields") or {}
+    issue_type = fields.get("issuetype") or issue.get("issueType")
+    if isinstance(issue_type, dict):
+        return clean_text(issue_type.get("name"))
+    return clean_text(issue_type)
+
+
+def _issue_status_name(issue: dict[str, Any]) -> str:
+    fields = issue.get("fields") or {}
+    status = fields.get("status") or issue.get("status")
+    if isinstance(status, dict):
+        return clean_text(status.get("name"))
+    return clean_text(status)
+
+
+def _issue_resolution_name(issue: dict[str, Any]) -> str:
+    fields = issue.get("fields") or {}
+    resolution = fields.get("resolution") or issue.get("resolution")
+    if isinstance(resolution, dict):
+        return clean_text(resolution.get("name"))
+    return clean_text(resolution)
+
+
 def normalize_stage_name(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
@@ -344,17 +573,7 @@ def _listify_text_values(value: Any) -> list[str]:
     return [clean_text(value)] if clean_text(value) else []
 
 
-def _record_to_dict(record: Any) -> dict[str, Any]:
-    if isinstance(record, dict):
-        return dict(record)
-    data = getattr(record, "data", None)
-    if callable(data):
-        return dict(data())
-    return dict(record)
-
-
 __all__ = [
-    "THEME_EPIC_QUERY",
     "build_stage_ground_truth_for_tickets",
     "fetch_theme_epic_rows",
     "is_valid_theme_value_stream",
@@ -365,4 +584,3 @@ __all__ = [
     "resolve_value_stream_id",
     "rows_to_ticket_ground_truth",
 ]
-

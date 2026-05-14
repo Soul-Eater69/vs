@@ -38,7 +38,7 @@ class StageGroundTruthValueStream:
 class StageGroundTruthTicket:
     ticket_id: str
     ticket_summary: str
-    source: str = "neo4j_jira_graph"
+    source: str = "jira_api"
     value_streams: list[StageGroundTruthValueStream] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -52,4 +52,3 @@ __all__ = [
     "StageGroundTruthTicket",
     "StageGroundTruthValueStream",
 ]
-

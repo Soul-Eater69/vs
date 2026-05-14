@@ -1,4 +1,4 @@
-"""Build stage ground truth from Neo4j Jira Theme -> Epic links.
+"""Build stage ground truth from Jira Theme -> Epic links.
 
 The generated JSON is an evaluation artifact only. It is not used by prediction.
 """
@@ -6,6 +6,7 @@ The generated JSON is an evaluation artifact only. It is not used by prediction.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
 import json
 import os
@@ -20,23 +21,34 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from vs_app.eval.stages.ground_truth_builder import build_stage_ground_truth_for_tickets
+from vs_app.integrations.jira.client import JiraTicketClient
 
 
 def main() -> int:
+    return asyncio.run(async_main())
+
+
+async def async_main() -> int:
     args = parse_args()
     ticket_keys = load_ticket_keys(args)
     if not ticket_keys:
         raise SystemExit("No ticket keys provided. Use --ticket or --tickets-file.")
 
-    driver = make_neo4j_driver(
-        uri=args.neo4j_uri,
-        user=args.neo4j_user,
-        password=args.neo4j_password,
+    if not args.jira_base_url or not args.jira_token:
+        raise SystemExit(
+            "Jira access requires --jira-base-url and --jira-token "
+            "or JIRA_BASE_URL/JIRA_TOKEN."
+        )
+
+    jira_client = JiraTicketClient(
+        base_url=args.jira_base_url,
+        token=args.jira_token,
+        verify_ssl=bool(args.verify_ssl),
     )
-    with driver:
-        ground_truth = build_stage_ground_truth_for_tickets(
+    async with jira_client:
+        ground_truth = await build_stage_ground_truth_for_tickets(
             ticket_keys=ticket_keys,
-            neo4j_driver=driver,
+            jira_client=jira_client,
             include_cancelled_epics=not args.exclude_cancelled_epics,
         )
 
@@ -52,7 +64,7 @@ def main() -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build stage ground truth from Neo4j Jira Theme -> Epic links.",
+        description="Build stage ground truth from Jira Theme -> Epic links.",
     )
     parser.add_argument("--tickets-file", help="JSON/CSV file with ticket IDs.")
     parser.add_argument(
@@ -77,26 +89,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Exclude Epic stage links whose Jira status is Cancelled.",
     )
-    parser.add_argument("--neo4j-uri", default=os.getenv("NEO4J_URI"))
-    parser.add_argument("--neo4j-user", default=os.getenv("NEO4J_USER"))
-    parser.add_argument("--neo4j-password", default=os.getenv("NEO4J_PASSWORD"))
+    parser.add_argument("--jira-base-url", default=os.getenv("JIRA_BASE_URL"))
+    parser.add_argument(
+        "--jira-token",
+        default=os.getenv("JIRA_TOKEN") or os.getenv("JIRA_API_TOKEN"),
+    )
+    parser.add_argument(
+        "--verify-ssl",
+        action="store_true",
+        help="Verify Jira TLS certificates. Off by default for local enterprise Jira compatibility.",
+    )
     return parser.parse_args()
-
-
-def make_neo4j_driver(*, uri: str | None, user: str | None, password: str | None):
-    if not uri or not user or not password:
-        raise SystemExit(
-            "Neo4j connection requires --neo4j-uri, --neo4j-user, and --neo4j-password "
-            "or NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD."
-        )
-    try:
-        from neo4j import GraphDatabase
-    except ImportError as exc:
-        raise SystemExit(
-            "The neo4j package is required to build stage ground truth. "
-            "Install it in this environment before running the script."
-        ) from exc
-    return GraphDatabase.driver(uri, auth=(user, password))
 
 
 def load_ticket_keys(args: argparse.Namespace) -> list[str]:
@@ -159,4 +162,3 @@ def normalize_ticket_key(value: Any) -> str:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

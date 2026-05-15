@@ -161,3 +161,52 @@ def test_historical_only_direct_tag_below_evidence_floor_is_not_sent_to_llm() ->
 
     assert result["llm_candidates"] == []
     assert result["merged_candidates"][0]["candidate_status"] == "outside_llm_window"
+
+
+def test_semantic_only_reuses_empty_historical_lane_capacity() -> None:
+    result = merge_candidate_sources(
+        [
+            {
+                "entity_id": f"sem-{idx}",
+                "entity_name": f"Semantic {idx}",
+                "semantic_score": 0.5 + idx * 0.01,
+            }
+            for idx in range(6)
+        ],
+        [],
+        policy=CandidateWindowPolicy(
+            max_semantic_plus_historical=4,
+            max_semantic_only=1,
+            max_historical_only=4,
+        ),
+        max_llm_candidates=6,
+    )
+
+    assert len(result["llm_candidates"]) == 6
+    assert result["candidate_window_counts"]["semantic_only"] == 6
+    assert all(row["lane"] == "semantic_only" for row in result["llm_candidates"])
+
+
+def test_historical_value_stream_candidates_are_not_capped_by_ticket_hit_top_k() -> None:
+    result = merge_candidate_sources(
+        [],
+        [
+            {
+                "entity_name": f"Historical Stream {idx}",
+                "supporting_ticket_ids": ["IDMT-1"],
+                "support_count": 1,
+                "direct_count": 1,
+                "best_support_score": 0.9,
+                "avg_support_score": 0.9,
+                "weighted_support_count": 1.0,
+            }
+            for idx in range(8)
+        ],
+        policy=CandidateWindowPolicy(
+            max_semantic_plus_historical=0,
+            max_semantic_only=0,
+            max_historical_only=10,
+        ),
+    )
+
+    assert len(result["llm_candidates"]) == 8

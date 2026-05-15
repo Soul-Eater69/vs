@@ -1004,7 +1004,7 @@ function RetrievalPane({
 
 function FaissHitsPane({
   hits,
-  emptyText = 'No historical FAISS ticket hits were returned.',
+  emptyText = 'No historical ticket hits were returned.',
 }: {
   hits: HistoricalTicketHit[];
   emptyText?: string;
@@ -1014,8 +1014,15 @@ function FaissHitsPane({
     Number(hit.historical_evidence_score ?? hit.best_score ?? hit.score ?? hit['@search.score'] ?? 0) || 0
   );
   const best = Math.max(...hits.map(hit => hitScore(hit)), 0.0001);
+  const qualifiedCount = hits.filter(hit => String(hit.historical_evidence_status ?? '') === 'used_as_evidence').length;
+  const ignoredCount = hits.filter(hit => String(hit.historical_evidence_status ?? '') === 'retrieved_but_not_used').length;
   return (
     <div className="space-y-2">
+      {qualifiedCount === 0 && ignoredCount > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          No qualifying historical analogs found. Using semantic-only + operational impact inference.
+        </div>
+      )}
       {hits.map((hit, i) => {
         const score = hitScore(hit);
         const pct = Math.max((score / best) * 100, 4);
@@ -1041,7 +1048,7 @@ function FaissHitsPane({
               <span className="shrink-0 text-xs font-mono text-amber-700 dark:text-amber-300">{score.toFixed(4)}</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <Pill tone="amber">faiss</Pill>
+              <Pill tone="amber">historical ticket hit</Pill>
               {status === 'used_as_evidence' && <Pill tone="green">Used as historical evidence</Pill>}
               {status === 'retrieved_but_not_used' && <Pill tone="amber">Retrieved but not used</Pill>}
               {hasClassified ? (
@@ -1317,6 +1324,8 @@ function RuntimeDebugPane({
   const runtimeConfig = (runtime ?? asRecord(debug?.rag_runtime_config) ?? {}) as Record<string, unknown>;
   const promptDebug = (asRecord(debug?.prompt_debug) ?? asRecord(raw?.prompt_debug) ?? {}) as Record<string, unknown>;
   const timing = (asRecord(debug?.timing_ms) ?? asRecord(raw?.timing_ms) ?? {}) as Record<string, unknown>;
+  const historicalCounts = (asRecord(debug?.historical_counts) ?? {}) as Record<string, unknown>;
+  const windowCounts = (asRecord(debug?.candidate_window_counts) ?? {}) as Record<string, unknown>;
 
   const item = (label: string, value: unknown) => (
     <div className="flex items-center justify-between gap-4 rounded border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900">
@@ -1326,7 +1335,7 @@ function RuntimeDebugPane({
   );
 
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
       <div className="space-y-2">
         <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Runtime Config</div>
         {item('Review Pool Size', runtimeConfig.final_output_count)}
@@ -1346,6 +1355,16 @@ function RuntimeDebugPane({
         {item('Candidate count', promptDebug.candidate_count)}
         {item('Idea card chars', promptDebug.idea_card_chars)}
         {item('System prompt chars', promptDebug.system_prompt_chars)}
+      </div>
+      <div className="space-y-2">
+        <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Historical Counts</div>
+        {item('Historical ticket hits', historicalCounts.retrieved_ticket_hits)}
+        {item('Qualified historical hits', historicalCounts.qualified_ticket_hits)}
+        {item('Ignored weak hits', historicalCounts.ignored_ticket_hits)}
+        {item('Historical VS candidates', historicalCounts.historical_vs_support_count)}
+        {item('Semantic sent to LLM', windowCounts.semantic_only)}
+        {item('Historical sent to LLM', windowCounts.historical_only)}
+        {item('Merged sent to LLM', windowCounts.semantic_plus_historical)}
       </div>
       <div className="space-y-2">
         <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Timing</div>
@@ -2052,8 +2071,8 @@ export default function Home() {
                   {hasHistoricCandidateTabs ? (
                     <>
                       <TabBtn active={tab === 'vsCandidates'}       label="VS Candidates" icon="database" count={vsCandidates.length}       onClick={() => setTab('vsCandidates')} />
-                      <TabBtn active={tab === 'historicCandidates'} label="Historic"      icon="book"     count={historicCandidates.length} onClick={() => setTab('historicCandidates')} />
-                      <TabBtn active={tab === 'faissHits'}          label="FAISS Hits"    icon="file"     count={faissHits.length}         onClick={() => setTab('faissHits')} />
+                      <TabBtn active={tab === 'historicCandidates'} label="Historical VS" icon="book"     count={historicCandidates.length} onClick={() => setTab('historicCandidates')} />
+                      <TabBtn active={tab === 'faissHits'}          label="Ticket Hits"   icon="file"     count={faissHits.length}         onClick={() => setTab('faissHits')} />
                       <TabBtn active={tab === 'mergedCandidates'}   label="Merged"        icon="layers"   count={mergedCandidates.length}   onClick={() => setTab('mergedCandidates')} />
                     </>
                   ) : (
@@ -2102,8 +2121,8 @@ export default function Home() {
                 {tab === 'llmPasses'  && <LlmPassesPane reviewPool={result.review_pool_llm_output} direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} llmCandidates={result.llm_candidates ?? result.candidates_used ?? []} />}
                 {tab === 'retrieval'  && <RetrievalPane  candidates={cands} />}
                 {tab === 'vsCandidates'       && <RetrievalPane candidates={vsCandidates} emptyText="No semantic VS candidates retrieved yet." />}
-                {tab === 'historicCandidates' && <RetrievalPane candidates={historicCandidates} emptyText="No historic candidates recovered yet." />}
-                {tab === 'faissHits'          && <FaissHitsPane hits={faissHits} emptyText="No IDMT ticket hits recovered from FAISS yet." />}
+                {tab === 'historicCandidates' && <RetrievalPane candidates={historicCandidates} emptyText="No historical VS candidates recovered from qualified hits yet." />}
+                {tab === 'faissHits'          && <FaissHitsPane hits={faissHits} emptyText="No historical ticket hits recovered yet." />}
                 {tab === 'mergedCandidates'   && <RetrievalPane candidates={mergedCandidates} emptyText="No merged candidates available yet." />}
                 {tab === 'runtime'    && <RuntimeDebugPane runtime={result.rag_runtime_config} debug={result.debug} rawResponse={result.raw_response} />}
                 {tab === 'reference'  && <ReferencePane  canonical={result.canonical_value_streams} />}

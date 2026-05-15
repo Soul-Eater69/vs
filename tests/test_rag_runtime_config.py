@@ -12,6 +12,6 @@ def test_runtime_config_for_review_pool_20() -> None:
     assert cfg.historical_evidence_top_k == 6
     assert cfg.min_historical_evidence_score == 0.08
     assert cfg.llm_candidate_window == 50
-    assert cfg.max_semantic_plus_historical == 50
-    assert cfg.max_semantic_only == 1
-    assert cfg.max_historical_only == 8
+    assert cfg.max_semantic_plus_historical == 16
+    assert cfg.max_semantic_only == 24
+    assert cfg.max_historical_only == 10

@@ -88,11 +88,25 @@ def select_value_streams(
             max_semantic_only=runtime_config.max_semantic_only,
             max_historical_only=runtime_config.max_historical_only,
             max_supporting_tickets_per_candidate=runtime_config.max_supporting_tickets_per_candidate,
-        )
-        if final_output_count is not None
-        else CandidateWindowPolicy(),
+        ),
         max_llm_candidates=llm_candidate_window,
     )
+    if not augmented.get("llm_candidates") and semantic_candidates:
+        logger.warning(
+            "[RAG] candidate merger returned 0 LLM candidates. Falling back to top semantic candidates."
+        )
+        fallback_candidates = _semantic_fallback_candidates(
+            semantic_candidates,
+            limit=min(llm_candidate_window, len(semantic_candidates)),
+        )
+        augmented = dict(augmented)
+        augmented["llm_candidates"] = fallback_candidates
+        augmented["merged_candidates"] = list(augmented.get("merged_candidates") or fallback_candidates)
+        augmented["candidate_window_counts"] = {
+            **dict(augmented.get("candidate_window_counts", {}) or {}),
+            "semantic_only": len(fallback_candidates),
+            "pipeline_semantic_fallback": len(fallback_candidates),
+        }
     finalizer_started = perf_counter()
     _emit_progress(progress_callback, "llm_select", "Running Review Pool LLM selection...")
     generated = generate_review_pool_value_streams(
@@ -139,6 +153,14 @@ def select_value_streams(
         "ignored_count": ignored_count,
     }
     debug["historical_evidence_policy"] = historical_evidence_policy
+    debug["historical_counts"] = {
+        "retrieved_ticket_hits": len(historical.get("historical_ticket_hits", []) or []),
+        "qualified_ticket_hits": qualified_count,
+        "ignored_ticket_hits": ignored_count,
+        "historical_vs_support_count": len(
+            historical.get("historical_value_stream_support", []) or []
+        ),
+    }
     _emit_progress(progress_callback, "finalize", "Finalizing selections...")
     return {
         "selected_value_streams": generated["selected_value_streams"],
@@ -185,3 +207,21 @@ def _emit_progress(
         progress_callback(step, label)
     except Exception:
         logger.debug("RAG progress callback failed", exc_info=True)
+
+
+def _semantic_fallback_candidates(semantic_candidates: List[dict], *, limit: int) -> List[dict]:
+    out: List[dict] = []
+    for rank, row in enumerate(semantic_candidates[: max(0, limit)], start=1):
+        candidate = dict(row)
+        candidate.setdefault("entity_id", str(row.get("entity_id") or "").strip())
+        candidate.setdefault("entity_name", str(row.get("entity_name") or "").strip())
+        candidate["from_semantic"] = True
+        candidate["from_historical"] = False
+        candidate["semantic_rank"] = int(candidate.get("semantic_rank") or rank)
+        candidate["lane"] = "semantic_only"
+        candidate["bucket"] = "semantic_only"
+        candidate["candidate_lane"] = "semantic_only"
+        candidate["candidate_status"] = "sent_to_llm"
+        candidate["candidate_status_reason"] = "pipeline_semantic_fallback"
+        out.append(candidate)
+    return out

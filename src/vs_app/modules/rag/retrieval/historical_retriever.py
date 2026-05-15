@@ -20,7 +20,7 @@ def retrieve_historical_support(
     historical_azure_index_name: str | None = None,
     max_ticket_hits: int = 12,
     exclude_ticket_ids: Optional[Iterable[str]] = None,
-    min_evidence_score: float = 0.08,
+    min_evidence_score: float = 0.0,
 ) -> dict:
     cleaned = clean_ppt_text(query)
 

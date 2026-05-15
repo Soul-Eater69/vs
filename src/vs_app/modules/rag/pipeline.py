@@ -70,12 +70,12 @@ def select_value_streams(
     ignored_count = len(historical.get("historical_ignored_ticket_hits", []) or [])
     if qualified_count:
         historical_context_status = (
-            f"{qualified_count} qualifying historical analog ticket(s) passed the relevance threshold. "
-            "Use them as supporting evidence only when they match the current idea-card business problem."
+            f"{qualified_count} historical ticket hit(s) are available as prior labeled examples. "
+            "Use them as candidate-expansion hints, not as automatic proof."
         )
     else:
         historical_context_status = (
-            "No qualifying historical analog tickets passed the relevance threshold. "
+            "No historical ticket hits were available. "
             "Select using current idea-card meaning, value-stream descriptions, and operational impact inference."
         )
 

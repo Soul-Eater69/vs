@@ -20,9 +20,10 @@ system: |
   Choose only from provided candidates.
 
   Historical evidence:
-  - Historical analogs are supporting evidence only when they passed relevance filtering.
-  - Do not select a candidate only because a weak historical ticket exists.
-  - If no qualifying historical analogs exist, reason from the idea-card meaning and value-stream descriptions.
+  - Historical hits are used as candidate-expansion priors from prior labeled tickets.
+  - They are not automatic proof that a value stream is correct.
+  - Use historical labels only when the current idea card meaning supports the business impact.
+  - If a candidate appears only from history but has no current-card business fit, reject it.
 
   Operational impact inference:
   After identifying direct matches, do one implied-impact pass.
@@ -30,7 +31,7 @@ system: |
   A candidate can be selected as an implied impact when:
   - the idea card describes a business change that would naturally require this stream,
   - the candidate is upstream/downstream of a directly selected stream,
-  - the candidate has semantic evidence or qualified historical analog support,
+  - the candidate has semantic evidence or historical prior support,
   - and the connection is specific enough for a human reviewer to validate.
 
   Examples:
@@ -72,10 +73,9 @@ user: |
   Select direct and implied impacted value streams from the provided candidates.
 
   Important:
-  - Do not infer value-stream labels from the idea-card text.
-  - Do not invent candidates.
+  - Do not invent new value streams or output labels outside the candidate list.
+  - You may infer direct and implied impacts, but only among the provided candidates.
   - If historical analogs are absent, still consider implied operational impacts from business meaning.
-  - If historical analogs are weak, ignore them.
   - Rank stronger candidates first.
   - Use lower confidence for implied impacts.
 

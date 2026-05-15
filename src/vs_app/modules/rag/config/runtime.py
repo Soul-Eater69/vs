@@ -39,8 +39,9 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     # Qualified hits may produce more than 6 value-stream candidates.
     historical_evidence_top_k = 6
 
-    # Minimum score for a retrieved historical ticket to become trusted evidence.
-    min_historical_evidence_score = 0.08
+    # Azure hybrid scores are not absolute similarity probabilities. Use all
+    # top-k historical ticket hits as candidate-expansion priors.
+    min_historical_evidence_score = 0.0
 
     # Adaptive LLM candidate window. This is how many evidence-qualified candidates
     # the LLM may inspect, not how many it returns. Bigger than `requested` so the
@@ -48,7 +49,7 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     llm_candidate_window = min(50, max(35, math.ceil(requested * 3.0)))
 
     # Candidate lane caps. These are value-stream candidate caps, not historical
-    # ticket-hit caps. Historical ticket hits remain 6, but qualified hits may
+    # ticket-hit caps. Historical ticket hits remain 6, but those prior hits may
     # produce many value-stream candidates.
     max_historical_only = min(
         10,

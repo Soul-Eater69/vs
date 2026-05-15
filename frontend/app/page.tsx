@@ -1020,7 +1020,7 @@ function FaissHitsPane({
     <div className="space-y-2">
       {qualifiedCount === 0 && ignoredCount > 0 && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-medium text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          No qualifying historical analogs found. Using semantic-only + operational impact inference.
+          No historical prior hits were used. Using semantic-only + operational impact inference.
         </div>
       )}
       {hits.map((hit, i) => {
@@ -1049,7 +1049,7 @@ function FaissHitsPane({
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               <Pill tone="amber">historical ticket hit</Pill>
-              {status === 'used_as_evidence' && <Pill tone="green">Used as historical evidence</Pill>}
+              {status === 'used_as_evidence' && <Pill tone="green">Used as historical prior</Pill>}
               {status === 'retrieved_but_not_used' && <Pill tone="amber">Retrieved but not used</Pill>}
               {hasClassified ? (
                 <>
@@ -1359,9 +1359,9 @@ function RuntimeDebugPane({
       <div className="space-y-2">
         <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Historical Counts</div>
         {item('Historical ticket hits', historicalCounts.retrieved_ticket_hits)}
-        {item('Qualified historical hits', historicalCounts.qualified_ticket_hits)}
-        {item('Ignored weak hits', historicalCounts.ignored_ticket_hits)}
-        {item('Historical VS candidates', historicalCounts.historical_vs_support_count)}
+        {item('Historical prior hits used', historicalCounts.qualified_ticket_hits)}
+        {item('Historical hits not used', historicalCounts.ignored_ticket_hits)}
+        {item('Historical VS support candidates', historicalCounts.historical_vs_support_count)}
         {item('Semantic sent to LLM', windowCounts.semantic_only)}
         {item('Historical sent to LLM', windowCounts.historical_only)}
         {item('Merged sent to LLM', windowCounts.semantic_plus_historical)}
@@ -2121,7 +2121,7 @@ export default function Home() {
                 {tab === 'llmPasses'  && <LlmPassesPane reviewPool={result.review_pool_llm_output} direct={result.direct_llm_output} historical={result.historical_llm_output} rawResponse={result.raw_response} llmCandidates={result.llm_candidates ?? result.candidates_used ?? []} />}
                 {tab === 'retrieval'  && <RetrievalPane  candidates={cands} />}
                 {tab === 'vsCandidates'       && <RetrievalPane candidates={vsCandidates} emptyText="No semantic VS candidates retrieved yet." />}
-                {tab === 'historicCandidates' && <RetrievalPane candidates={historicCandidates} emptyText="No historical VS candidates recovered from qualified hits yet." />}
+                {tab === 'historicCandidates' && <RetrievalPane candidates={historicCandidates} emptyText="No historical VS support candidates recovered from prior hits yet." />}
                 {tab === 'faissHits'          && <FaissHitsPane hits={faissHits} emptyText="No historical ticket hits recovered yet." />}
                 {tab === 'mergedCandidates'   && <RetrievalPane candidates={mergedCandidates} emptyText="No merged candidates available yet." />}
                 {tab === 'runtime'    && <RuntimeDebugPane runtime={result.rag_runtime_config} debug={result.debug} rawResponse={result.raw_response} />}

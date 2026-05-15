@@ -80,6 +80,7 @@ interface SelectedVS {
   entity_name: string;
   confidence: number;
   reason: string;
+  selection_type?: string;
   category?: string;
   is_match?: boolean;
   matched_to_ground_truth?: string;
@@ -121,6 +122,11 @@ interface StagePrediction {
 interface HistoricalTicketHit {
   ticket_id: string;
   best_score?: number;
+  score?: number;
+  '@search.score'?: number;
+  historical_evidence_score?: number;
+  historical_evidence_status?: string;
+  historical_evidence_reason?: string;
   title?: string;
   summary_preview?: string;
   value_stream_names?: string[];
@@ -139,6 +145,10 @@ interface PipelineResult {
   historical_candidate_value_streams?: Candidate[];
   merged_candidate_value_streams?: Candidate[];
   historical_ticket_hits?: HistoricalTicketHit[];
+  historical_evidence_ticket_hits?: HistoricalTicketHit[];
+  historical_ignored_ticket_hits?: HistoricalTicketHit[];
+  historical_evidence_policy?: Record<string, unknown>;
+  historical_source?: string;
   raw_response?: unknown;
   review_pool_llm_output?: unknown;
   direct_llm_output?: unknown;
@@ -794,6 +804,14 @@ function SelectionPane({
                     'text-amber-600 dark:text-amber-400' : 'text-red-500'}`}>{pct}%</span>
                 </div>
 
+                {vs.selection_type && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Pill tone={vs.selection_type === 'direct' ? 'green' : 'amber'}>
+                      {vs.selection_type === 'direct' ? 'Direct' : 'Implied impact'}
+                    </Pill>
+                  </div>
+                )}
+
                 {stagePrediction && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                     {stageDisplay.stages.length > 0 ? (
@@ -992,17 +1010,22 @@ function FaissHitsPane({
   emptyText?: string;
 }) {
   if (!hits.length) return <Empty text={emptyText} />;
-  const best = Math.max(...hits.map(hit => Number(hit.best_score ?? 0) || 0), 0.0001);
+  const hitScore = (hit: HistoricalTicketHit) => (
+    Number(hit.historical_evidence_score ?? hit.best_score ?? hit.score ?? hit['@search.score'] ?? 0) || 0
+  );
+  const best = Math.max(...hits.map(hit => hitScore(hit)), 0.0001);
   return (
     <div className="space-y-2">
       {hits.map((hit, i) => {
-        const score = Number(hit.best_score ?? 0) || 0;
+        const score = hitScore(hit);
         const pct = Math.max((score / best) * 100, 4);
         const direct = Array.isArray(hit.direct_vs_names) ? hit.direct_vs_names.filter(Boolean) : [];
         const implied = Array.isArray(hit.implied_vs_names) ? hit.implied_vs_names.filter(Boolean) : [];
         const names = Array.isArray(hit.value_stream_names) ? hit.value_stream_names.filter(Boolean) : [];
         const hasClassified = direct.length > 0 || implied.length > 0;
         const preview = String(hit.summary_preview ?? '').trim();
+        const status = String(hit.historical_evidence_status ?? '').trim();
+        const reason = String(hit.historical_evidence_reason ?? '').trim();
         return (
           <div key={`${hit.ticket_id}-${i}`} className="rounded-md border border-zinc-200 bg-white px-3.5 py-3 transition hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:border-zinc-700">
             <div className="flex items-start justify-between gap-3">
@@ -1019,6 +1042,8 @@ function FaissHitsPane({
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               <Pill tone="amber">faiss</Pill>
+              {status === 'used_as_evidence' && <Pill tone="green">Used as historical evidence</Pill>}
+              {status === 'retrieved_but_not_used' && <Pill tone="amber">Retrieved but not used</Pill>}
               {hasClassified ? (
                 <>
                   {direct.length > 0 && <Pill tone="green">{direct.length} direct</Pill>}
@@ -1029,6 +1054,11 @@ function FaissHitsPane({
               )}
               {hit.label_source && <Pill tone="neutral">{String(hit.label_source)}</Pill>}
             </div>
+            {status === 'retrieved_but_not_used' && reason && (
+              <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                Reason: {reason.replace(/_/g, ' ')}
+              </div>
+            )}
             <div className="mt-2 h-1 rounded-full bg-stone-100 dark:bg-zinc-800">
               <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${pct}%` }} />
             </div>
@@ -1303,6 +1333,8 @@ function RuntimeDebugPane({
         {item('LLM Candidate Window', runtimeConfig.llm_candidate_window)}
         {item('Semantic Fetch K', runtimeConfig.semantic_fetch_k)}
         {item('Historical Ticket Fetch K', runtimeConfig.historical_ticket_fetch_k)}
+        {item('Historical Evidence Top K', runtimeConfig.historical_evidence_top_k)}
+        {item('Min Historical Evidence Score', runtimeConfig.min_historical_evidence_score)}
         {item(
           'Lane Caps',
           `merged ${runtimeConfig.max_semantic_plus_historical ?? '-'}, semantic ${runtimeConfig.max_semantic_only ?? '-'}, historical ${runtimeConfig.max_historical_only ?? '-'}`,

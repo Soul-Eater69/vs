@@ -95,6 +95,11 @@ class TicketMetrics:
     merged_candidate_count: int
     historical_hit_count: int
     excluded_ticket_ids: list[str]
+    historical_evidence_top_k: int = 0
+    min_historical_evidence_score: float = 0.0
+    qualified_historical_hit_count: int = 0
+    ignored_historical_hit_count: int = 0
+    historical_source: str = ""
     output_count_mode: str = "fixed"
     final_output_count: int = 0
     gt_buffer: int = 0
@@ -837,6 +842,17 @@ def evaluate_one(
         merged_candidate_count=len(payload.get("merged_candidate_value_streams", []) or []),
         historical_hit_count=len(payload.get("historical_ticket_hits", []) or []),
         excluded_ticket_ids=list(payload.get("historical_excluded_ticket_ids", []) or []),
+        historical_evidence_top_k=int(runtime_config.get("historical_evidence_top_k") or 0),
+        min_historical_evidence_score=float(
+            runtime_config.get("min_historical_evidence_score") or 0.0
+        ),
+        qualified_historical_hit_count=len(
+            payload.get("historical_evidence_ticket_hits", []) or []
+        ),
+        ignored_historical_hit_count=len(
+            payload.get("historical_ignored_ticket_hits", []) or []
+        ),
+        historical_source=str(payload.get("historical_source") or ""),
         output_count_mode=output_count_mode,
         final_output_count=final_output_count,
         gt_buffer=gt_buffer,
@@ -1322,6 +1338,11 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "llm_candidate_count",
         "merged_candidate_count",
         "historical_hit_count",
+        "historical_evidence_top_k",
+        "min_historical_evidence_score",
+        "qualified_historical_hit_count",
+        "ignored_historical_hit_count",
+        "historical_source",
         "excluded_ticket_ids",
         "runtime_final_output_count",
         "semantic_fetch_k",

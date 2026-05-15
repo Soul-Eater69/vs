@@ -9,9 +9,9 @@ class ValueStreamRagRequest(BaseModel):
     ticket_id: str | None = None
     idea_card_text: str | None = None
     source_ticket_title: str | None = None
-    semantic_fetch_k: int = 40
-    historical_ticket_fetch_k: int = 35
-    llm_candidate_window: int = 30
+    semantic_fetch_k: int = 60
+    historical_ticket_fetch_k: int = 6
+    llm_candidate_window: int = 36
     final_output_count: int = 12
     exclude_source_ticket_from_historical: bool = True
     include_stage_predictions: bool = False

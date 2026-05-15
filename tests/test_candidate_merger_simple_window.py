@@ -136,3 +136,28 @@ def test_supporting_ticket_count_is_unique_and_support_count_alias_remains() -> 
     assert row["supporting_ticket_count"] == 2
     assert row["support_count"] == 2
     assert row["weighted_support"] == 2.0
+
+
+def test_historical_only_direct_tag_below_evidence_floor_is_not_sent_to_llm() -> None:
+    result = merge_candidate_sources(
+        [],
+        [
+            {
+                "entity_name": "Weak Historical Stream",
+                "supporting_ticket_ids": ["H1"],
+                "support_count": 1,
+                "direct_count": 1,
+                "best_support_score": 0.03,
+                "avg_support_score": 0.03,
+                "weighted_support_count": 1.0,
+            }
+        ],
+        policy=CandidateWindowPolicy(
+            max_semantic_plus_historical=0,
+            max_semantic_only=0,
+            max_historical_only=1,
+        ),
+    )
+
+    assert result["llm_candidates"] == []
+    assert result["merged_candidates"][0]["candidate_status"] == "outside_llm_window"

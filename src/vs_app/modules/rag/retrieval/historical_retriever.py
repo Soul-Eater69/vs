@@ -20,6 +20,7 @@ def retrieve_historical_support(
     historical_azure_index_name: str | None = None,
     max_ticket_hits: int = 12,
     exclude_ticket_ids: Optional[Iterable[str]] = None,
+    min_evidence_score: float = 0.08,
 ) -> dict:
     cleaned = clean_ppt_text(query)
 
@@ -36,6 +37,7 @@ def retrieve_historical_support(
             index_name=historical_azure_index_name or config.HISTORICAL_AZURE_SEARCH_INDEX_NAME,
             max_ticket_hits=max_ticket_hits,
             exclude_ticket_ids=excluded,
+            min_evidence_score=min_evidence_score,
         )
 
     from vs_app.integrations.sinks.faiss_store import faiss_index_exists, search_local_faiss
@@ -44,8 +46,16 @@ def retrieve_historical_support(
         logger.warning("No FAISS index at %s - no historical support available", historical_faiss_dir)
         return {
             "historical_ticket_hits": [],
+            "historical_evidence_ticket_hits": [],
+            "historical_ignored_ticket_hits": [],
             "historical_value_stream_support": [],
-            "historical_source": "none",
+            "historical_source": "none_qualified",
+            "historical_evidence_policy": _historical_evidence_policy(
+                min_evidence_score=min_evidence_score,
+                max_ticket_hits=max_ticket_hits,
+                qualified_count=0,
+                ignored_count=0,
+            ),
         }
 
     exclusion_backfill = 0
@@ -85,13 +95,12 @@ def retrieve_historical_support(
         })
 
     filtered_hits = filter_ticket_hits(ticket_hits, exclude_ticket_ids)
-    vs_support = _build_support_from_faiss_hits(filtered_hits)
-
-    return {
-        "historical_ticket_hits": filtered_hits,
-        "historical_value_stream_support": vs_support,
-        "historical_source": "summary_faiss",
-    }
+    return _historical_payload_from_hits(
+        filtered_hits,
+        min_evidence_score=min_evidence_score,
+        max_ticket_hits=max_ticket_hits,
+        backend_source="summary_faiss",
+    )
 
 
 def _retrieve_historical_support_azure(
@@ -100,6 +109,7 @@ def _retrieve_historical_support_azure(
     index_name: str,
     max_ticket_hits: int,
     exclude_ticket_ids: Iterable[str],
+    min_evidence_score: float,
 ) -> dict:
     from vs_app.ingestion.persistence.azure_historical_index import search_historical_summaries
 
@@ -114,15 +124,121 @@ def _retrieve_historical_support_azure(
         logger.warning("Azure historical search unavailable (%s) - no historical support available", exc)
         return {
             "historical_ticket_hits": [],
+            "historical_evidence_ticket_hits": [],
+            "historical_ignored_ticket_hits": [],
             "historical_value_stream_support": [],
-            "historical_source": "none",
+            "historical_source": "none_qualified",
+            "historical_evidence_policy": _historical_evidence_policy(
+                min_evidence_score=min_evidence_score,
+                max_ticket_hits=max_ticket_hits,
+                qualified_count=0,
+                ignored_count=0,
+            ),
         }
 
     filtered_hits = filter_ticket_hits(ticket_hits, exclude_ticket_ids)
+    return _historical_payload_from_hits(
+        filtered_hits,
+        min_evidence_score=min_evidence_score,
+        max_ticket_hits=max_ticket_hits,
+        backend_source="summary_azure_ai_search",
+    )
+
+
+def _historical_payload_from_hits(
+    filtered_hits: List[dict],
+    *,
+    min_evidence_score: float,
+    max_ticket_hits: int,
+    backend_source: str,
+) -> dict:
+    qualified_hits, ignored_hits = split_historical_evidence_hits(
+        filtered_hits,
+        min_evidence_score=min_evidence_score,
+    )
+    all_hits = sorted(
+        qualified_hits + ignored_hits,
+        key=lambda hit: int(hit.get("historical_evidence_rank", 0) or 0),
+    )
     return {
-        "historical_ticket_hits": filtered_hits,
-        "historical_value_stream_support": _build_support_from_faiss_hits(filtered_hits),
-        "historical_source": "summary_azure_ai_search",
+        "historical_ticket_hits": all_hits,
+        "historical_evidence_ticket_hits": qualified_hits,
+        "historical_ignored_ticket_hits": ignored_hits,
+        "historical_value_stream_support": _build_support_from_faiss_hits(qualified_hits),
+        "historical_source": "qualified_historical" if qualified_hits else "none_qualified",
+        "historical_backend_source": backend_source,
+        "historical_evidence_policy": _historical_evidence_policy(
+            min_evidence_score=min_evidence_score,
+            max_ticket_hits=max_ticket_hits,
+            qualified_count=len(qualified_hits),
+            ignored_count=len(ignored_hits),
+        ),
+    }
+
+
+def split_historical_evidence_hits(
+    ticket_hits: List[dict],
+    *,
+    min_evidence_score: float,
+) -> tuple[List[dict], List[dict]]:
+    qualified: List[dict] = []
+    ignored: List[dict] = []
+    try:
+        threshold = float(min_evidence_score or 0.0)
+    except (TypeError, ValueError):
+        threshold = 0.0
+
+    for rank, hit in enumerate(ticket_hits or [], start=1):
+        score = _historical_hit_score(hit)
+        enriched = dict(hit)
+        enriched["historical_evidence_rank"] = rank
+        enriched["historical_evidence_score"] = score
+        try:
+            best_score = float(enriched.get("best_score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            best_score = 0.0
+        if not best_score:
+            enriched["best_score"] = score
+
+        if score >= threshold:
+            enriched["historical_evidence_status"] = "used_as_evidence"
+            enriched["historical_evidence_reason"] = "score_above_threshold"
+            qualified.append(enriched)
+        else:
+            enriched["historical_evidence_status"] = "retrieved_but_not_used"
+            enriched["historical_evidence_reason"] = "below_historical_relevance_threshold"
+            ignored.append(enriched)
+
+    return qualified, ignored
+
+
+def _historical_hit_score(hit: dict) -> float:
+    for key in ("best_score", "score", "@search.score"):
+        try:
+            value = float(hit.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value:
+            return value
+    return 0.0
+
+
+def _historical_evidence_policy(
+    *,
+    min_evidence_score: float,
+    max_ticket_hits: int,
+    qualified_count: int,
+    ignored_count: int,
+) -> dict:
+    try:
+        threshold = float(min_evidence_score or 0.0)
+    except (TypeError, ValueError):
+        threshold = 0.0
+    return {
+        "min_evidence_score": threshold,
+        "max_ticket_hits": max_ticket_hits,
+        "qualified_count": qualified_count,
+        "ignored_count": ignored_count,
     }
 
 
@@ -134,7 +250,31 @@ def filter_historical_result(result: dict, exclude_ticket_ids: Optional[Iterable
 
     payload = dict(result)
     payload["historical_ticket_hits"] = filtered_hits
-    payload["historical_value_stream_support"] = _build_support_from_faiss_hits(filtered_hits)
+    if (
+        "historical_evidence_ticket_hits" in result
+        or "historical_ignored_ticket_hits" in result
+    ):
+        evidence_hits = filter_ticket_hits(
+            result.get("historical_evidence_ticket_hits", []),
+            exclude_ticket_ids,
+        )
+        ignored_hits = filter_ticket_hits(
+            result.get("historical_ignored_ticket_hits", []),
+            exclude_ticket_ids,
+        )
+    else:
+        evidence_hits = filtered_hits
+        ignored_hits = []
+
+    payload["historical_evidence_ticket_hits"] = evidence_hits
+    payload["historical_ignored_ticket_hits"] = ignored_hits
+    payload["historical_value_stream_support"] = _build_support_from_faiss_hits(evidence_hits)
+    payload["historical_source"] = "qualified_historical" if evidence_hits else "none_qualified"
+    policy = dict(result.get("historical_evidence_policy", {}) or {})
+    if policy:
+        policy["qualified_count"] = len(evidence_hits)
+        policy["ignored_count"] = len(ignored_hits)
+        payload["historical_evidence_policy"] = policy
     return payload
 
 

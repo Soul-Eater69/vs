@@ -16,9 +16,9 @@ class ValueStreamRagCommand:
     historical_faiss_dir: str = "ticket_data/_faiss"
     historical_search_backend: str | None = "azure"
     historical_azure_index_name: str | None = None
-    semantic_fetch_k: int = 40
-    historical_ticket_fetch_k: int = 35
-    llm_candidate_window: int = 30
+    semantic_fetch_k: int = 60
+    historical_ticket_fetch_k: int = 6
+    llm_candidate_window: int = 36
     final_output_count: int | None = None
     exclude_source_ticket_from_historical: bool = True
     progress_callback: ProgressCallback | None = None
@@ -34,6 +34,9 @@ class ValueStreamRagResult:
     historical_candidate_value_streams: list[dict]
     merged_candidate_value_streams: list[dict]
     historical_ticket_hits: list[dict]
+    historical_evidence_ticket_hits: list[dict]
+    historical_ignored_ticket_hits: list[dict]
+    historical_evidence_policy: dict[str, Any]
     historical_value_stream_support: list[dict]
     candidate_value_streams: list[dict]
     llm_candidates: list[dict]
@@ -109,6 +112,13 @@ class ValueStreamRagService:
             historical_candidate_value_streams=list(payload.get("historical_candidate_value_streams", []) or []),
             merged_candidate_value_streams=list(payload.get("merged_candidate_value_streams", []) or []),
             historical_ticket_hits=list(payload.get("historical_ticket_hits", []) or []),
+            historical_evidence_ticket_hits=list(
+                payload.get("historical_evidence_ticket_hits", []) or []
+            ),
+            historical_ignored_ticket_hits=list(
+                payload.get("historical_ignored_ticket_hits", []) or []
+            ),
+            historical_evidence_policy=dict(payload.get("historical_evidence_policy", {}) or {}),
             historical_value_stream_support=list(payload.get("historical_value_stream_support", []) or []),
             candidate_value_streams=list(payload.get("candidate_value_streams", []) or []),
             llm_candidates=list(payload.get("llm_candidates", []) or []),

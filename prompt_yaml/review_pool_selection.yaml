@@ -5,53 +5,54 @@ system: |
   From the provided candidate list, choose the value streams that should be included
   in the human review pool for the idea card.
 
-  This is not final truth certification. The output is a review pool for a human
-  analyst, so favor recall when the business connection is defensible.
+  The review pool should include both:
+  - direct value streams clearly described by the idea card
+  - implied operational impacts that are likely required upstream/downstream
 
   Output only:
   - entity_id
   - confidence
   - reason
+  - selection_type: direct or implied
 
   Do not output names or descriptions. Names are filled downstream from entity_id.
-  Do not invent entity IDs.
-  Choose only from the provided candidates.
+  Do not invent value streams or entity IDs.
+  Choose only from provided candidates.
+
+  Historical evidence:
+  - Historical analogs are supporting evidence only when they passed relevance filtering.
+  - Do not select a candidate only because a weak historical ticket exists.
+  - If no qualifying historical analogs exist, reason from the idea-card meaning and value-stream descriptions.
+
+  Operational impact inference:
+  After identifying direct matches, do one implied-impact pass.
+
+  A candidate can be selected as an implied impact when:
+  - the idea card describes a business change that would naturally require this stream,
+  - the candidate is upstream/downstream of a directly selected stream,
+  - the candidate has semantic evidence or qualified historical analog support,
+  - and the connection is specific enough for a human reviewer to validate.
+
+  Examples:
+  - Provider network/tiering work may imply product offering, pricing/quote, member care, or order-to-cash impacts.
+  - Prior authorization or utilization management work may imply request inquiry, care management, payment, or compliance impacts.
+  - Partner/vendor workflow changes may imply onboard partner, perform engagement, or invoice/payment receipt impacts.
+
+  Rules:
+  - Select implied impacts only from the candidate list.
+  - Do not select generic enterprise streams only because they are adjacent.
+  - Use lower confidence for implied impacts than direct matches.
+  - Use the full requested review-pool count when enough candidates are available.
 
   Exact count rule:
   - Return exactly {max_select} candidates when {max_select} candidates are available.
   - If fewer than {max_select} candidates are provided, return all provided candidates.
-  - Do not return fewer just because some candidates are lower confidence.
-  - Use lower confidence for weaker but still plausible review candidates.
-
-  How to judge candidates:
-  - Include candidates with clear idea-card semantic fit.
-  - Include candidates with strong or repeated historical analog support.
-  - Include semantic_plus_historical candidates when the business connection is plausible.
-  - Include downstream or upstream operational impacts when the candidate evidence supports them.
-  - Do not skip a candidate only because a neighboring related stream was already selected.
-
-  Reject candidates when:
-  - the connection is only generic adjacency
-  - the candidate is broad enterprise noise without specific support
-  - the historical analog evidence is from a clearly different business domain
-  - the idea card gives no meaningful support for the stream
-
-  Lane guidance:
-  - semantic_plus_historical: strongest lane; include unless clearly out of scope.
-  - historical_only: include when analog tickets show a similar business pattern.
-  - semantic_only: include only when the idea-card text itself strongly supports it.
 
   Reason guidance:
+  - For direct matches, explain the direct business action.
+  - For implied matches, explain the operational dependency or downstream/upstream impact.
   - One short business-facing sentence.
-  - Max about 140 characters.
-  - Explain the business connection.
-  - Do not mention scores, ranks, lane names, support counts, or similarity values.
-
-  Confidence guidance:
-  - 0.85-1.00: strong direct fit or multiple close direct analogs.
-  - 0.65-0.84: meaningful fit with some indirectness.
-  - 0.40-0.64: plausible but borderline review candidate.
-  - 0.30-0.39: weak but defensible; human should validate.
+  - Do not mention scores, ranks, lane names, prompt mechanics, or JSON.
 
   Output only data matching the provided structured schema.
 
@@ -60,20 +61,23 @@ user: |
 
   {query_for_prompt}
 
+  HISTORICAL ANALOG STATUS:
+
+  {historical_context_status}
+
   REQUESTED REVIEW POOL SIZE:
   {requested_final_output_count}
 
   TASK:
-  Evaluate every candidate below and return exactly the requested number of
-  candidates when enough candidates are available.
+  Select direct and implied impacted value streams from the provided candidates.
 
   Important:
   - Do not infer value-stream labels from the idea-card text.
   - Do not invent candidates.
-  - Use the full requested count when enough candidates are provided.
+  - If historical analogs are absent, still consider implied operational impacts from business meaning.
+  - If historical analogs are weak, ignore them.
   - Rank stronger candidates first.
-  - Use lower confidence instead of dropping a defensible indirect candidate.
-  - Reject generic adjacency.
+  - Use lower confidence for implied impacts.
 
   CANDIDATE VALUE STREAMS:
 

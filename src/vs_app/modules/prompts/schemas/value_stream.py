@@ -65,6 +65,10 @@ class ReviewPoolPick(BaseModel):
             "value stream maps to the idea card. Do not mention scores, ranks, or lanes."
         ),
     )
+    selection_type: str = Field(
+        default="",
+        description="Use 'direct' for clear idea-card matches or 'implied' for operational impacts.",
+    )
 
 
 class ReviewPoolPickResult(BaseModel):

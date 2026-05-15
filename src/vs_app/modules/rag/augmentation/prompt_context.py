@@ -17,12 +17,14 @@ def build_review_pool_candidate_prompt(
     candidates: List[dict],
     final_output_count: int,
     prompt_budget: dict | None = None,
+    historical_context_status: str = "",
 ) -> str:
     budget = prompt_budget or {}
     idea_chars = int(budget.get("idea_card_prompt_chars", 2200))
     return build_review_pool_selection_prompt(
         query_for_prompt=(query_for_prompt or "")[:idea_chars],
         requested_final_output_count=final_output_count,
+        historical_context_status=historical_context_status,
         candidate_blocks=format_review_pool_candidate_blocks(
             candidates,
             prompt_budget=budget,

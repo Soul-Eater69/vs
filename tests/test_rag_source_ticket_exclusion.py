@@ -184,8 +184,45 @@ def test_azure_historical_backend_returns_support(monkeypatch) -> None:
         exclude_ticket_ids=["IDMT-1"],
     )
 
-    assert result["historical_source"] == "summary_azure_ai_search"
+    assert result["historical_source"] == "qualified_historical"
+    assert result["historical_backend_source"] == "summary_azure_ai_search"
     assert [hit["ticket_id"] for hit in result["historical_ticket_hits"]] == ["IDMT-2"]
+    assert [hit["ticket_id"] for hit in result["historical_evidence_ticket_hits"]] == ["IDMT-2"]
     assert [row["entity_name"] for row in result["historical_value_stream_support"]] == [
         "Issue Payment"
     ]
+
+
+def test_historical_hits_below_threshold_are_debug_only(monkeypatch) -> None:
+    def fake_search(query: str, *, index_name: str, top_k: int, exclude_ticket_ids):
+        return [
+            {
+                "ticket_id": "IDMT-weak",
+                "best_score": 0.03,
+                "summary_preview": "weak neighbor",
+                "direct_vs_names": ["Weak Direct Stream"],
+                "implied_vs_names": ["Weak Implied Stream"],
+                "label_source": "summary_azure_ai_search",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index.search_historical_summaries",
+        fake_search,
+    )
+
+    result = retrieve_historical_support(
+        "query",
+        historical_search_backend="azure",
+        historical_azure_index_name="historical-index",
+        max_ticket_hits=6,
+        min_evidence_score=0.08,
+    )
+
+    assert result["historical_source"] == "none_qualified"
+    assert result["historical_evidence_ticket_hits"] == []
+    assert [hit["ticket_id"] for hit in result["historical_ignored_ticket_hits"]] == ["IDMT-weak"]
+    assert result["historical_value_stream_support"] == []
+    assert result["historical_ignored_ticket_hits"][0]["historical_evidence_status"] == (
+        "retrieved_but_not_used"
+    )

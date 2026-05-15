@@ -9,6 +9,8 @@ class RagRuntimeConfig:
     final_output_count: int
     semantic_fetch_k: int
     historical_ticket_fetch_k: int
+    historical_evidence_top_k: int
+    min_historical_evidence_score: float
     llm_candidate_window: int
     max_semantic_plus_historical: int
     max_semantic_only: int
@@ -28,7 +30,9 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     # shrink it with the requested output count — the user's slider only affects
     # the *output* count, not how widely we search for evidence.
     semantic_fetch_k = 60
-    historical_ticket_fetch_k = 60
+    historical_ticket_fetch_k = 6
+    historical_evidence_top_k = 6
+    min_historical_evidence_score = 0.08
 
     # Adaptive LLM candidate window. This is how many evidence-qualified candidates
     # the LLM may inspect, not how many it returns. Bigger than `requested` so the
@@ -50,6 +54,8 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
         final_output_count=requested,
         semantic_fetch_k=semantic_fetch_k,
         historical_ticket_fetch_k=historical_ticket_fetch_k,
+        historical_evidence_top_k=historical_evidence_top_k,
+        min_historical_evidence_score=min_historical_evidence_score,
         llm_candidate_window=llm_candidate_window,
         max_semantic_plus_historical=max_semantic_plus_historical,
         max_semantic_only=max_semantic_only,

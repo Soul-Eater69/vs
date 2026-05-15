@@ -17,6 +17,7 @@ def generate_review_pool_value_streams(
     llm_candidates: List[dict],
     final_output_count: int,
     prompt_budget: dict | None = None,
+    historical_context_status: str = "",
 ) -> dict:
     from time import perf_counter
 
@@ -40,6 +41,7 @@ def generate_review_pool_value_streams(
                 "selection_budget": {"max_select": 0, "candidate_count": 0},
                 "single_review_pool_pass": _empty_pass(),
                 "missed_strong_candidates": [],
+                "historical_context_status": historical_context_status,
                 "prompt_debug": {
                     "prompt_chars": 0,
                     "system_prompt_chars": 0,
@@ -56,6 +58,7 @@ def generate_review_pool_value_streams(
         candidates=candidates,
         final_output_count=requested,
         prompt_budget=prompt_budget or {},
+        historical_context_status=historical_context_status,
     )
     system_prompt = build_review_pool_system_prompt(max_select=max_select)
 
@@ -110,6 +113,7 @@ def generate_review_pool_value_streams(
                 candidate,
                 float(pick.get("confidence") or 0.0),
                 llm_reason=str(pick.get("reason") or "").strip(),
+                selection_type=str(pick.get("selection_type") or "").strip(),
             )
         )
 
@@ -152,6 +156,7 @@ def generate_review_pool_value_streams(
             "rejected_candidates": rejected,
         },
         "missed_strong_candidates": _missed_strong_candidates(candidates, selected),
+        "historical_context_status": historical_context_status,
         "prompt_debug": {
             "prompt_chars": len(prompt),
             "system_prompt_chars": len(system_prompt),
@@ -236,6 +241,7 @@ def _build_selected_row(
     candidate: dict,
     confidence: float,
     llm_reason: str = "",
+    selection_type: str = "",
 ) -> dict:
     if llm_reason and not _has_score_language(llm_reason):
         reason = llm_reason
@@ -244,11 +250,15 @@ def _build_selected_row(
             candidate,
             fallback="Selected because the idea card has a defensible business connection to this value stream.",
         )
+    clean_selection_type = str(selection_type or "").lower().strip()
+    if clean_selection_type not in {"direct", "implied"}:
+        clean_selection_type = "direct" if confidence >= 0.75 else "implied"
     return {
         "entity_id": str(candidate.get("entity_id") or "").strip(),
         "entity_name": str(candidate.get("entity_name") or "").strip(),
         "confidence": max(0.0, min(1.0, confidence)),
         "reason": reason,
+        "selection_type": clean_selection_type,
         "selection_source": "llm_pick",
         "supporting_ticket_ids": list(candidate.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(candidate.get("supporting_chunk_ids") or [])[:5],

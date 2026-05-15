@@ -24,6 +24,8 @@ GENERIC_OR_RISKY_STREAMS = {
     "develop mission, vision, and strategy",
 }
 
+MIN_HISTORICAL_CANDIDATE_SCORE = 0.08
+
 
 @dataclass(frozen=True)
 class CandidateWindowPolicy:
@@ -309,15 +311,14 @@ def _policy_with_total_cap(policy: CandidateWindowPolicy, total: int) -> Candida
 
 
 def _is_good_historical_only(row: dict) -> bool:
-    """Gate historical-only candidates behind real evidence — at least 2 hits, a
-    direct tag, a strong best-support score, or meaningful weighted support. Thin
-    historical-only candidates cause noise without recall benefit.
-    """
+    """Gate historical-only candidates behind the retriever evidence floor."""
     hits = int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0)
     best = _float(row.get("best_support_score"))
     direct = int(row.get("direct_count", 0) or 0)
     weighted = _float(row.get("weighted_support", row.get("weighted_support_count")))
-    return hits >= 2 or direct >= 1 or best >= 0.65 or weighted >= 0.6
+    if best < MIN_HISTORICAL_CANDIDATE_SCORE:
+        return False
+    return hits >= 2 or direct >= 1 or weighted >= 0.6
 
 
 def _is_strong_semantic_only(row: dict) -> bool:

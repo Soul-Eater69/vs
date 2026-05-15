@@ -14,6 +14,9 @@ class ValueStreamRagResponse(BaseModel):
     historical_candidate_value_streams: list[dict] = Field(default_factory=list)
     merged_candidate_value_streams: list[dict] = Field(default_factory=list)
     historical_ticket_hits: list[dict] = Field(default_factory=list)
+    historical_evidence_ticket_hits: list[dict] = Field(default_factory=list)
+    historical_ignored_ticket_hits: list[dict] = Field(default_factory=list)
+    historical_evidence_policy: dict[str, Any] = Field(default_factory=dict)
     historical_value_stream_support: list[dict] = Field(default_factory=list)
     candidate_value_streams: list[dict] = Field(default_factory=list)
     llm_candidates: list[dict] = Field(default_factory=list)
@@ -51,6 +54,15 @@ class ValueStreamRagResponse(BaseModel):
                 getattr(result, "merged_candidate_value_streams", []) or []
             ),
             historical_ticket_hits=list(getattr(result, "historical_ticket_hits", []) or []),
+            historical_evidence_ticket_hits=list(
+                getattr(result, "historical_evidence_ticket_hits", []) or []
+            ),
+            historical_ignored_ticket_hits=list(
+                getattr(result, "historical_ignored_ticket_hits", []) or []
+            ),
+            historical_evidence_policy=dict(
+                getattr(result, "historical_evidence_policy", {}) or {}
+            ),
             historical_value_stream_support=list(
                 getattr(result, "historical_value_stream_support", []) or []
             ),

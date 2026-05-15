@@ -90,12 +90,14 @@ def build_review_pool_selection_prompt(
     *,
     query_for_prompt: str,
     requested_final_output_count: int,
+    historical_context_status: str = "",
     candidate_blocks: str,
 ) -> str:
     payload = _load_required_prompt_yaml("review_pool_selection", ["user"])
     return render_prompt(
         str(payload["user"]),
         query_for_prompt=query_for_prompt,
+        historical_context_status=historical_context_status,
         requested_final_output_count=requested_final_output_count,
         candidate_blocks=candidate_blocks,
     )

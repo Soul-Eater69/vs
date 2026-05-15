@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 def select_value_streams(
     query: str,
     *,
-    semantic_fetch_k: int = 40,
-    historical_ticket_fetch_k: int = 35,
-    llm_candidate_window: int = 30,
+    semantic_fetch_k: int = 60,
+    historical_ticket_fetch_k: int = 6,
+    llm_candidate_window: int = 36,
     final_output_count: int | None = None,
     historical_faiss_dir: str = "ticket_data/_faiss",
     historical_search_backend: str | None = "azure",
@@ -37,8 +37,8 @@ def select_value_streams(
         historical_ticket_fetch_k = runtime_config.historical_ticket_fetch_k
         llm_candidate_window = runtime_config.llm_candidate_window
 
-    top_k = min(max(1, semantic_fetch_k), 50)
-    max_ticket_hits = min(max(1, historical_ticket_fetch_k), 40)
+    top_k = min(max(1, semantic_fetch_k), 60)
+    max_ticket_hits = min(max(1, runtime_config.historical_evidence_top_k), 40)
     _emit_progress(progress_callback, "condense", "Condensing idea card...")
     prepared = prepare_idea_card_for_rag(query, max_chars=3500)
     cleaned_query = prepared.cleaned_text
@@ -61,10 +61,23 @@ def select_value_streams(
             historical_azure_index_name=historical_azure_index_name,
             max_ticket_hits=max_ticket_hits,
             exclude_ticket_ids=exclude_ticket_ids,
+            min_evidence_score=runtime_config.min_historical_evidence_score,
         )
         semantic_candidates = semantic_future.result()
         historical = historical_future.result()
     historical = filter_historical_result(historical, exclude_ticket_ids)
+    qualified_count = len(historical.get("historical_evidence_ticket_hits", []) or [])
+    ignored_count = len(historical.get("historical_ignored_ticket_hits", []) or [])
+    if qualified_count:
+        historical_context_status = (
+            f"{qualified_count} qualifying historical analog ticket(s) passed the relevance threshold. "
+            "Use them as supporting evidence only when they match the current idea-card business problem."
+        )
+    else:
+        historical_context_status = (
+            "No qualifying historical analog tickets passed the relevance threshold. "
+            "Select using current idea-card meaning, value-stream descriptions, and operational impact inference."
+        )
 
     _emit_progress(progress_callback, "merge", "Merging semantic and historical evidence...")
     augmented = merge_candidate_sources(
@@ -93,6 +106,7 @@ def select_value_streams(
             "analog_chars": runtime_config.analog_chars,
             "historical_ticket_ids_per_candidate": runtime_config.historical_ticket_ids_per_candidate,
         },
+        historical_context_status=historical_context_status,
     )
     raw_response = generated["raw_response"]
     review_pool_llm_output = (
@@ -118,6 +132,13 @@ def select_value_streams(
     debug["rag_runtime_config"] = runtime_config_dict
     debug["prompt_debug"] = raw_response.get("prompt_debug", {}) if isinstance(raw_response, dict) else {}
     debug["candidate_window_counts"] = augmented.get("candidate_window_counts", {})
+    historical_evidence_policy = historical.get("historical_evidence_policy", {}) or {
+        "max_ticket_hits": max_ticket_hits,
+        "min_evidence_score": runtime_config.min_historical_evidence_score,
+        "qualified_count": qualified_count,
+        "ignored_count": ignored_count,
+    }
+    debug["historical_evidence_policy"] = historical_evidence_policy
     _emit_progress(progress_callback, "finalize", "Finalizing selections...")
     return {
         "selected_value_streams": generated["selected_value_streams"],
@@ -128,6 +149,9 @@ def select_value_streams(
         "historical_candidate_value_streams": historical.get("historical_value_stream_support", []),
         "merged_candidate_value_streams": augmented["merged_candidates"],
         "historical_ticket_hits": historical.get("historical_ticket_hits", []),
+        "historical_evidence_ticket_hits": historical.get("historical_evidence_ticket_hits", []),
+        "historical_ignored_ticket_hits": historical.get("historical_ignored_ticket_hits", []),
+        "historical_evidence_policy": historical_evidence_policy,
         "historical_value_stream_support": historical.get("historical_value_stream_support", []),
         "candidate_value_streams": augmented["merged_candidates"],
         "llm_candidates": generated["candidates_used"],

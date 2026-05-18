@@ -252,39 +252,47 @@ def test_review_pool_prompt_stays_compact() -> None:
     assert len(prompt) < 14000
 
 
-def test_review_pool_system_prompt_is_balanced_final_selection_prompt() -> None:
+def test_review_pool_system_prompt_is_neutral_deep_reasoning_prompt() -> None:
     prompt = build_review_pool_selection_system_prompt(max_select=15)
     lower_prompt = prompt.lower()
 
     assert "final predicted value-stream set" in prompt
-    assert "direct impacts and strong implied operational impacts" in prompt
-    assert "requested size is an upper bound" in prompt
+    assert "Final does not mean literal-only" in prompt
+    assert "BUSINESS IMPACT REASONING" in prompt
+    assert "Upstream dependency" in prompt
+    assert "Downstream execution" in prompt
+    assert "Stakeholder impact" in prompt
+    assert "System/process impact" in prompt
+    assert "Implied operational impact" in prompt
+    assert "history alone is not automatic proof" in prompt
+    assert "Treat every candidate using the same evidence rules" in prompt
+    assert "requested size is an upper bound" in lower_prompt
     assert "Do not pad" in prompt
-    assert "Do not require exact wording overlap" in prompt
-    assert "Use lower confidence for indirect but defensible streams instead of dropping them" in prompt
-    assert "DOWNSTREAM OPERATIONAL IMPACT GUIDANCE" in prompt
-    assert "COMMON FALSE POSITIVE GUARDS" in prompt
-    assert "Establish Provider Network" in prompt
-    assert "Participate in Health Management Program" in prompt
-    assert "Adjudicate Claim" in prompt
-    assert "Manage Member Care" in prompt
-    assert "Onboard Partner" in prompt
-    assert "Discover Business Insights" in prompt
-    assert "Manage Invoice and Payment Receipt" in prompt
-    assert "Issue Payment" in prompt
-    assert "Record Financial Transaction" in prompt
-    assert "Reconcile Account" in prompt
-    assert "Ensure Compliance" in prompt
-    assert "Manage Utilization Management Program" in prompt
-    assert "Administer Utilization Management Program" in prompt
-    assert "Receive Care" in prompt
     assert "review pool" not in lower_prompt
     assert "not final truth certification" not in prompt
     assert "prefer recall over precision" not in lower_prompt
-    assert "below 0.55" not in lower_prompt
-    assert "usually do not select" not in lower_prompt
     assert "HISTORICAL ANALOG STATUS" not in prompt
     assert "Return exactly" not in prompt
     assert "selection_type" not in prompt
+    assert "high-attention" not in lower_prompt
+    assert "guard stream" not in lower_prompt
+    assert "target stream" not in lower_prompt
+    assert "auto-select" not in lower_prompt
+    assert "rescue" not in lower_prompt
+    assert "backfill" not in lower_prompt
     assert "foundational/current-card value-stream signals" not in prompt
+    assert "Establish Provider Network" not in prompt
+    assert "Participate in Health Management Program" not in prompt
+    assert "Adjudicate Claim" not in prompt
+    assert "Manage Member Care" not in prompt
+    assert "Onboard Partner" not in prompt
+    assert "Discover Business Insights" not in prompt
+    assert "Manage Invoice and Payment Receipt" not in prompt
+    assert "Issue Payment" not in prompt
+    assert "Record Financial Transaction" not in prompt
+    assert "Reconcile Account" not in prompt
+    assert "Ensure Compliance" not in prompt
+    assert "Manage Utilization Management Program" not in prompt
+    assert "Administer Utilization Management Program" not in prompt
+    assert "Receive Care" not in prompt
     assert len(prompt) < 15000

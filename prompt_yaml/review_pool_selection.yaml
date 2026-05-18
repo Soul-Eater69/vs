@@ -5,8 +5,7 @@ system: |
   From the provided candidate list, select the value streams impacted by the idea card.
 
   This is the final predicted value-stream set.
-  Final does not mean literal-only. A value stream can be impacted even when the idea card
-  does not use the exact stream name, if the idea creates a clear business or operational change.
+  Final does not mean literal-only. Include direct impacts and strong implied operational impacts.
 
   For each selected value stream, output:
   - entity_id
@@ -15,156 +14,91 @@ system: |
 
   Do not output names or descriptions. Names are filled downstream from entity_id.
 
-  CORE PRINCIPLES
+  SELECTION GOAL
 
-  - Treat every candidate using the same evidence rules.
-  - Do not give special priority to any value-stream name.
-  - Do not use any hidden foundational, tail, target, or guard list.
-  - The requested size is an upper bound, not a target.
-  - Return fewer than {max_select} when fewer candidates are defensible.
-  - Do not pad with weak, generic, or unrelated candidates.
-  - Select only entity_id values that appear in the candidate list.
+  Select every candidate that has a defensible business impact from the current idea card.
 
-  BUSINESS IMPACT REASONING
+  The requested size is an upper bound, not a target. Return fewer than {max_select}
+  only when fewer candidates are defensible. Do not pad with unrelated candidates.
 
-  For each candidate, reason through the business chain:
+  A value stream can be selected when it has one or more of:
+  - explicit/direct support in the idea card,
+  - clear downstream or upstream operational impact,
+  - coherent historical analog evidence that fits the current card,
+  - repeated historical direct/implied support plus plausible current-card business fit.
 
-  1. Current-card business change:
-     What is the idea card trying to create, change, configure, enable, remediate, or operate?
-
-  2. Direct ownership:
-     Does the candidate value stream directly own that work?
-
-  3. Upstream dependency:
-     Does the idea require upstream setup, definition, configuration, pricing, planning,
-     eligibility, product setup, policy setup, partner setup, or operational readiness?
-
-  4. Downstream execution:
-     Does the idea affect downstream fulfillment, servicing, billing, payment, claims,
-     inquiries, engagement, reporting, compliance, care operations, reconciliation, or
-     financial/operational processing?
-
-  5. Stakeholder impact:
-     Which stakeholders are affected: member, provider, employer group, broker, partner,
-     payer, operations team, clinical team, finance team, compliance team, or IT team?
-
-  6. System/process impact:
-     Does the idea change how systems, workflows, handoffs, decisions, records, transactions,
-     or operational teams behave?
-
-  Select the candidate when this reasoning produces a clear business impact.
-
-  WHAT COUNTS AS SUPPORT
-
-  A candidate is defensible when one or more of these is true:
-
-  - Direct current-card support:
-    The idea card explicitly describes work that belongs to the candidate stream.
-
-  - Implied operational impact:
-    The idea card would reasonably require that business operation to change, even if
-    the exact stream name is not written.
-
-  - Historical analog support:
-    Prior tickets show this stream for similar work, and the current idea card has a
-    plausible business fit with that analog.
-
-  - Combined support:
-    Semantic meaning, candidate description, and historical analogs together create a
-    coherent business explanation.
-
-  WHAT DOES NOT COUNT AS SUPPORT
-
-  Do not select a candidate only because:
-  - it is healthcare-related,
-  - it is adjacent to another selected stream,
-  - it appeared in historical tickets without current-card fit,
-  - it has a high score but no business explanation,
-  - it sounds broadly relevant,
-  - it is commonly selected in other examples,
-  - it is merely a downstream possibility with no clear operational chain.
+  Do not require exact wording overlap. The idea card may describe business work without
+  naming the value stream exactly.
 
   HOW TO READ CANDIDATES
 
   Candidate lanes:
-  - semantic_plus_historical:
-    Candidate has both current-card semantic match and historical support. This is strong
-    evidence, but still verify the business fit.
-
-  - semantic_only:
-    Candidate has current-card semantic match. Select only if the business meaning fits.
-
-  - historical_only:
-    Candidate comes from historical analogs. Select only if the analog pattern fits the
-    current idea card. Do not reject only because wording differs, but do not accept history
-    without a current-card business chain.
+  - semantic_plus_historical: strongest lane. Include when current-card meaning and analog
+    evidence are coherent, unless there is clear contradiction.
+  - semantic_only: include when the current-card meaning clearly supports the stream.
+  - historical_only: include when historical analogs reveal a plausible implied impact
+    that fits the current card. Do not reject only because wording differs.
 
   Historical evidence:
   - Direct analog means a prior ticket was explicitly tagged with this value stream.
-  - Implied analog means a prior ticket inferred the stream through downstream/upstream
-    business impact.
-  - Multiple analogs can strengthen evidence, but history alone is not automatic proof.
-  - If historical examples are from a different business domain, discount them.
+  - Implied analog means a prior ticket inferred this value stream from downstream functions.
+  - Multiple coherent implied analogs can be enough when the functional bridge is clear.
+  - If analog summaries are from a different business domain, discount them heavily.
 
-  DECISION RUBRIC
+  SELECTION POLICY
 
-  For every candidate, answer these questions internally:
+  - Select core/direct streams first.
+  - Also select strong implied downstream operational streams.
+  - A stream does not need to be the main purpose of the card to qualify.
+  - Use lower confidence for indirect but defensible streams instead of dropping them.
+  - Do not select a stream only because it is adjacent, generic, or healthcare-sounding.
+  - Do not select a stream only because it appeared in history; it must fit the current card.
+  - Order selected streams from strongest to weakest.
 
-  1. What exact business capability or operation does this candidate represent?
-  2. Where is that capability or operation visible in the idea card?
-  3. If it is not visible directly, what is the operational chain connecting it?
-  4. Is the chain necessary or strongly likely, not merely possible?
-  5. Does historical evidence support the same kind of work, or is it just generic co-occurrence?
-  6. Would a business reviewer agree this stream is actually impacted?
+  OPERATIONAL IMPACT REASONING
 
-  Select the candidate only when the answer is defensible.
+  Business ideas often affect upstream or downstream operations even when the exact
+  value-stream name is not written.
 
-  DIRECT VS IMPLIED SELECTION
+  Consider whether the idea card affects operations such as:
+  - product or offering setup
+  - benefit, tiering, coverage, eligibility, or plan configuration
+  - pricing, quoting, enrollment, billing, payment, invoice, refund, or financial processing
+  - claims, payment integrity, reconciliation, or transaction recording
+  - member, provider, employer group, broker, partner, or customer service workflows
+  - inquiries, support, outreach, engagement, notifications, or handoffs
+  - utilization management, prior authorization, clinical review, policy, or care operations
+  - compliance, regulation, mandate, audit, controls, reporting, or analytics
 
-  Select direct streams when the idea card clearly describes the stream's work.
+  These are reasoning categories, not automatic selections.
+  Select a candidate only when the current-card workflow reasonably affects that operation.
 
-  Select implied streams when:
-  - the current idea creates a necessary upstream/downstream operational change,
-  - the candidate description matches that operation,
-  - historical analogs or semantic evidence support the connection,
-  - and the rationale can be explained in one clear business sentence.
+  COMMON FALSE POSITIVE CHECK
 
-  Do not require exact wording overlap. Business ideas often describe outcomes, systems,
-  stakeholders, or workflows without naming the value stream directly.
+  Before selecting any candidate, verify that it is actually impacted by the idea card.
+  Reject candidates that are only broadly related through generic words like member, provider,
+  health, care, data, platform, strategy, implementation, or operations.
 
-  But do not over-infer. If the connection requires too many assumptions, reject the candidate.
+  Do not select a candidate merely because:
+  - it sounds healthcare-related,
+  - it is adjacent to another selected stream,
+  - it commonly appears in historical examples,
+  - it has a high score but no clear business explanation,
+  - it requires too many assumptions.
 
   CONFIDENCE GUIDANCE
 
-  - 0.85-1.00:
-    Explicit/direct impact or very strong current-card + historical agreement.
-
-  - 0.70-0.84:
-    Strong implied operational impact with a clear business chain.
-
-  - 0.45-0.69:
-    Indirect but defensible impact. Use when the stream is not explicit but the operational
-    chain is reasonable and supported.
-
-  - 0.30-0.44:
-    Weak but still defensible. Use sparingly.
-
-  - Below 0.30:
-    Do not select.
-
-  REASON GUIDANCE
-
-  - Give one short business reason.
-  - Explain the current-card business connection or implied operational chain.
-  - Do not cite scores, ranks, lane names, support counts, or internal mechanics.
-  - Do not mention "foundational", "tail", "guard", "target", or "common pattern".
+  - 0.85-1.00: explicit/direct impact or strong current-card + historical agreement.
+  - 0.70-0.84: strong implied operational impact.
+  - 0.45-0.69: indirect but defensible downstream or historical impact.
+  - 0.30-0.44: weak but still defensible; use sparingly.
 
   OUTPUT RULES
 
-  - Output only data matching the schema: entity_id, confidence, reason.
+  - Select only entity_id values from the candidate list.
   - Do not invent value streams.
-  - Do not output labels outside the candidate list.
-  - Order selected streams from strongest to weakest.
+  - Do not cite scores, ranks, lane names, or support counts in the reason.
+  - Output only data matching the schema: entity_id, confidence, reason.
 
 user: |
   IDEA CARD SUMMARY:
@@ -175,13 +109,12 @@ user: |
   {requested_final_output_count}
 
   TASK:
-  Select the final impacted value streams from the candidate list.
+  Select the impacted value streams from the candidate list.
 
-  Use direct business impact, implied operational impact, and historical analog evidence.
-  Treat every candidate equally.
-  Do not use any hardcoded foundational, tail, target, or guard list.
-  Do not require exact wording match.
-  Do not pad to the requested number.
+  Include direct impacts and strong implied operational impacts.
+  Do not pad with unrelated streams.
+  Do not require literal wording match.
+  Use historical analog evidence as support when it fits the current card.
 
   CANDIDATE VALUE STREAMS:
 

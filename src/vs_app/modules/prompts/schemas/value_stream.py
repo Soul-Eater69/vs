@@ -65,6 +65,10 @@ class ReviewPoolPick(BaseModel):
             "value stream maps to the idea card. Do not mention scores, ranks, or lanes."
         ),
     )
+    selection_type: str = Field(
+        default="",
+        description="Optional compatibility field; not required by the review-pool prompt.",
+    )
 
 
 class ReviewPoolPickResult(BaseModel):

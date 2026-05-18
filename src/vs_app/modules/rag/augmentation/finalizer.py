@@ -116,11 +116,11 @@ def generate_review_pool_value_streams(
             )
         )
 
-    selected = selected[:max_select]
+    selected = selected[:requested]
     selected = _safe_backfill_review_pool(
         selected=selected,
         candidates=candidates,
-        min_target=max_select,
+        min_target=min(requested, 8),
     )
     selected_count_limit_reason = _selected_count_limit_reason(
         selected_count=len(selected),

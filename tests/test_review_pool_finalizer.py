@@ -191,7 +191,7 @@ def test_review_pool_does_not_exact_fill_to_requested_count(monkeypatch) -> None
     )
 
 
-def test_review_pool_returns_all_candidates_when_request_exceeds_candidates(monkeypatch) -> None:
+def test_review_pool_does_not_fill_plain_candidates_when_request_exceeds_candidates(monkeypatch) -> None:
     class FakeGenerationService:
         def generate_structured(self, **kwargs):
             return _FakeResult([])
@@ -263,6 +263,7 @@ def test_review_pool_system_prompt_is_recall_friendly() -> None:
     assert "SELECTION POLICY" in prompt
     assert "Prefer recall over precision" in prompt
     assert "You may return fewer than 15" in prompt
+    assert "HISTORICAL ANALOG STATUS" not in prompt
     assert "Return exactly" not in prompt
     assert "selection_type" not in prompt
     assert len(prompt) < 8000

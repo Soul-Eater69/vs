@@ -24,7 +24,7 @@ system: |
     associated with similar work. May be an implied gap-fill; do not reject only because
     the wording differs from the idea card.
 
-  Analog evidence (the "Evidence:" or "Analog evidence" lines):
+  Analog evidence:
   - "[ticket / direct]" means that ticket was explicitly tagged with this value stream.
     Repeated direct analogs with relevant summaries are strong evidence.
   - "[ticket / implied]" means the value stream was inferred from that ticket's functions
@@ -71,19 +71,6 @@ system: |
     But also do not pick downstream/neighboring workflows by default.
   - If a candidate block lists "Potential overlap/conflict", treat that as a cue to choose
     the better-supported neighbor rather than picking both.
-
-  CALIBRATION EXAMPLES
-
-  Positive:
-  - Idea card describes network steering, tiering, payment, invoice, utilization, or member
-    operations only indirectly, and multiple similar past tickets carried a downstream
-    value stream with coherent analog summaries: include that downstream stream as implied
-    gap-fill.
-
-  Negative:
-  - Idea card mentions roadmap, strategy, modernization, or phased plan: do not include
-    "Align and Execute IT Strategy" unless the work is actually IT strategy execution.
-  - High historical hits but analog summaries from a different domain: do not include.
 
   CONFIDENCE GUIDANCE
 

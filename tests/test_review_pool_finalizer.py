@@ -252,32 +252,37 @@ def test_review_pool_prompt_stays_compact() -> None:
     assert len(prompt) < 14000
 
 
-def test_review_pool_system_prompt_is_final_selection_oriented() -> None:
+def test_review_pool_system_prompt_is_balanced_final_selection_prompt() -> None:
     prompt = build_review_pool_selection_system_prompt(max_select=15)
     lower_prompt = prompt.lower()
 
-    assert "final value-stream mapping" in prompt
-    assert "final prediction set" in prompt
+    assert "final predicted value-stream set" in prompt
+    assert "direct impacts and strong implied operational impacts" in prompt
     assert "requested size is an upper bound" in prompt
     assert "Do not pad" in prompt
-    assert (
-        "Historical evidence can support selection, but cannot replace current-card business fit"
-        in prompt
-    )
+    assert "Do not require exact wording overlap" in prompt
+    assert "Use lower confidence for indirect but defensible streams instead of dropping them" in prompt
+    assert "DOWNSTREAM OPERATIONAL IMPACT GUIDANCE" in prompt
+    assert "COMMON FALSE POSITIVE GUARDS" in prompt
     assert "Establish Provider Network" in prompt
     assert "Participate in Health Management Program" in prompt
     assert "Adjudicate Claim" in prompt
     assert "Manage Member Care" in prompt
     assert "Onboard Partner" in prompt
+    assert "Discover Business Insights" in prompt
     assert "Manage Invoice and Payment Receipt" in prompt
     assert "Issue Payment" in prompt
+    assert "Record Financial Transaction" in prompt
+    assert "Reconcile Account" in prompt
     assert "Ensure Compliance" in prompt
     assert "Manage Utilization Management Program" in prompt
     assert "Administer Utilization Management Program" in prompt
+    assert "Receive Care" in prompt
     assert "review pool" not in lower_prompt
     assert "not final truth certification" not in prompt
-    assert "Prefer recall over precision" not in prompt
-    assert "Use lower confidence" not in prompt
+    assert "prefer recall over precision" not in lower_prompt
+    assert "below 0.55" not in lower_prompt
+    assert "usually do not select" not in lower_prompt
     assert "HISTORICAL ANALOG STATUS" not in prompt
     assert "Return exactly" not in prompt
     assert "selection_type" not in prompt

@@ -93,7 +93,7 @@ def test_review_pool_finalizer_calls_llm_once_and_passes_all_lanes(monkeypatch) 
     assert result["raw_response"]["single_review_pool_pass"]["candidate_count"] == 3
 
 
-def test_review_pool_finalizer_ignores_invented_output_and_exact_fills(monkeypatch) -> None:
+def test_review_pool_finalizer_ignores_invented_output_without_exact_fill(monkeypatch) -> None:
     class FakeGenerationService:
         def generate_structured(self, **kwargs):
             return _FakeResult(
@@ -117,11 +117,12 @@ def test_review_pool_finalizer_ignores_invented_output_and_exact_fills(monkeypat
         final_output_count=5,
     )
 
-    assert [row["entity_name"] for row in result["selected_value_streams"]] == ["Issue Payment"]
-    assert result["selected_value_streams"][0]["selection_source"] == "exact_count_fill"
+    assert result["selected_value_streams"] == []
     assert result["raw_response"]["selected_count_limit_reason"] == "candidate_count_below_request"
-    assert result["raw_response"]["selected_count"] == 1
-    assert result["raw_response"]["single_review_pool_pass"]["rejected_candidates"] == []
+    assert result["raw_response"]["selected_count"] == 0
+    assert [row["entity_name"] for row in result["raw_response"]["single_review_pool_pass"]["rejected_candidates"]] == [
+        "Issue Payment"
+    ]
 
 
 def test_review_pool_safe_backfills_strong_candidate_when_llm_returns_none(monkeypatch) -> None:
@@ -155,7 +156,7 @@ def test_review_pool_safe_backfills_strong_candidate_when_llm_returns_none(monke
     assert missed == []
 
 
-def test_review_pool_exact_fills_to_requested_count_when_candidates_exist(monkeypatch) -> None:
+def test_review_pool_does_not_exact_fill_to_requested_count(monkeypatch) -> None:
     class FakeGenerationService:
         def generate_structured(self, **kwargs):
             return _FakeResult(
@@ -180,14 +181,14 @@ def test_review_pool_exact_fills_to_requested_count_when_candidates_exist(monkey
         final_output_count=3,
     )
 
-    assert len(result["selected_value_streams"]) == 3
+    assert len(result["selected_value_streams"]) == 1
     assert [row["selection_source"] for row in result["selected_value_streams"]] == [
         "llm_pick",
-        "exact_count_fill",
-        "exact_count_fill",
     ]
-    assert result["raw_response"]["selected_count"] == 3
-    assert result["raw_response"]["selected_count_limit_reason"] == "exact_request_satisfied"
+    assert result["raw_response"]["selected_count"] == 1
+    assert result["raw_response"]["selected_count_limit_reason"] == (
+        "defensible_candidate_count_below_request"
+    )
 
 
 def test_review_pool_returns_all_candidates_when_request_exceeds_candidates(monkeypatch) -> None:
@@ -206,7 +207,7 @@ def test_review_pool_returns_all_candidates_when_request_exceeds_candidates(monk
         final_output_count=5,
     )
 
-    assert len(result["selected_value_streams"]) == 2
+    assert result["selected_value_streams"] == []
     assert result["raw_response"]["requested_final_output_count"] == 5
     assert result["raw_response"]["selected_count_limit_reason"] == "candidate_count_below_request"
 
@@ -255,11 +256,13 @@ def test_review_pool_prompt_stays_compact() -> None:
     assert len(prompt) < 14000
 
 
-def test_review_pool_system_prompt_is_lean() -> None:
+def test_review_pool_system_prompt_is_recall_friendly() -> None:
     prompt = build_review_pool_selection_system_prompt(max_select=15)
 
-    assert "HOW TO READ THE IDEA CARD SUMMARY" not in prompt
-    assert "OPERATIONAL CHAIN RULES" not in prompt
-    assert "DOMAIN-SPECIFIC CALIBRATION" not in prompt
-    assert "Exact count rule" in prompt
-    assert len(prompt) < 3000
+    assert "HOW TO READ THE CANDIDATE BLOCKS" in prompt
+    assert "SELECTION POLICY" in prompt
+    assert "Prefer recall over precision" in prompt
+    assert "You may return fewer than 15" in prompt
+    assert "Return exactly" not in prompt
+    assert "selection_type" not in prompt
+    assert len(prompt) < 8000

@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 # Streams that historically show up as false positives because they have broad
 # wording overlap with many idea cards (analytics, governance, generic care, claim
-# adjudication, prescription fulfillment, etc.). We don't ban them — strong evidence
-# can still surface them — but we apply a sort penalty so they don't crowd out
+# adjudication, prescription fulfillment, etc.). We don't ban them; strong evidence
+# can still surface them, but we apply a sort penalty so they don't crowd out
 # stream-specific candidates in the lane caps.
 GENERIC_OR_RISKY_STREAMS = {
     "discover business insights",
@@ -29,11 +29,12 @@ MIN_HISTORICAL_CANDIDATE_SCORE = 0.0
 
 @dataclass(frozen=True)
 class CandidateWindowPolicy:
-    # These are VALUE-STREAM CANDIDATE caps after merge.
-    # They are not the number of historical ticket hits retrieved from FAISS/Azure.
-    max_semantic_plus_historical: int = 16
-    max_semantic_only: int = 24
-    max_historical_only: int = 10
+    # These are VALUE-STREAM CANDIDATE caps after merge, not the number of
+    # historical ticket hits retrieved from FAISS/Azure. The final reuse pass can
+    # spend unused lane capacity on other lanes, so these are priority caps.
+    max_semantic_plus_historical: int = 37
+    max_semantic_only: int = 5
+    max_historical_only: int = 8
     max_supporting_tickets_per_candidate: int = 3
 
     @property
@@ -63,8 +64,6 @@ def merge_candidate_sources(
         logger.debug("Ignoring legacy candidate threshold kwargs: %s", sorted(legacy_kwargs))
 
     active_policy = policy or CandidateWindowPolicy()
-    if max_llm_candidates is not None and max_llm_candidates < active_policy.max_llm_candidates:
-        active_policy = _policy_with_total_cap(active_policy, max_llm_candidates)
 
     by_name: dict[str, dict] = {}
 
@@ -147,14 +146,11 @@ def merge_candidate_sources(
         row["ranking_score"] = 0.0
         row["historical_strength"] = 0.0
 
-    # Evidence-qualified selection: gate historical-only candidates behind the
-    # retriever floor and prioritize strong semantic-only candidates, then fill
-    # the LLM window in priority order:
+    # Evidence-qualified selection: prioritize the old high-recall lane order:
     #   1. all merged (semantic+historical) candidates
-    #   2. evidence-qualified historical-only candidates
+    #   2. historical-only candidate-expansion priors
     #   3. very strong semantic-only candidates
-    # A final reuse pass lets semantic candidates use otherwise-empty historical
-    # lane capacity when no historical analogs qualify.
+    # A final reuse pass keeps semantic fallback available when history is absent.
     semantic_plus_all = sorted(
         [row for row in merged if row["lane"] == "semantic_plus_historical"],
         key=_sort_semantic_plus_historical,
@@ -191,10 +187,7 @@ def merge_candidate_sources(
         if len(llm_candidates) >= llm_limit:
             break
 
-    historical_room = min(
-        active_policy.max_historical_only, max(0, llm_limit - len(llm_candidates))
-    )
-    for row in historical_only_all[:historical_room]:
+    for row in historical_only_all[: active_policy.max_historical_only]:
         _append_unique_candidate(
             llm_candidates,
             selected_keys,
@@ -204,10 +197,7 @@ def merge_candidate_sources(
         if len(llm_candidates) >= llm_limit:
             break
 
-    semantic_room = min(
-        active_policy.max_semantic_only, max(0, llm_limit - len(llm_candidates))
-    )
-    for row in semantic_only_qualified[:semantic_room]:
+    for row in semantic_only_qualified[: active_policy.max_semantic_only]:
         _append_unique_candidate(
             llm_candidates,
             selected_keys,
@@ -229,7 +219,7 @@ def merge_candidate_sources(
         if len(llm_candidates) >= llm_limit:
             break
 
-    for row in semantic_only_all:
+    for row in historical_only_all:
         _append_unique_candidate(
             llm_candidates,
             selected_keys,
@@ -239,7 +229,7 @@ def merge_candidate_sources(
         if len(llm_candidates) >= llm_limit:
             break
 
-    for row in historical_only_all:
+    for row in semantic_only_all:
         _append_unique_candidate(
             llm_candidates,
             selected_keys,
@@ -276,7 +266,7 @@ def merge_candidate_sources(
         "llm_candidates": llm_candidates,
         "candidate_window_policy": {
             **asdict(active_policy),
-            "max_llm_candidates": active_policy.max_llm_candidates,
+            "max_llm_candidates": llm_limit,
         },
         "candidate_window_counts": {
             "semantic_plus_historical": len(semantic_plus),
@@ -355,37 +345,12 @@ def _base_candidate(*, entity_id: str, entity_name: str, description: str) -> di
     }
 
 
-def _policy_with_total_cap(policy: CandidateWindowPolicy, total: int) -> CandidateWindowPolicy:
-    total = max(0, int(total or 0))
-    if total >= policy.max_llm_candidates:
-        return policy
-
-    semantic_plus = min(policy.max_semantic_plus_historical, total)
-    remaining = total - semantic_plus
-    historical_only = min(policy.max_historical_only, max(0, remaining // 2))
-    semantic_only = max(0, remaining - historical_only)
-    if semantic_only > policy.max_semantic_only:
-        overflow = semantic_only - policy.max_semantic_only
-        semantic_only = policy.max_semantic_only
-        historical_only = min(policy.max_historical_only, historical_only + overflow)
-
-    return CandidateWindowPolicy(
-        max_semantic_plus_historical=semantic_plus,
-        max_semantic_only=semantic_only,
-        max_historical_only=historical_only,
-        max_supporting_tickets_per_candidate=policy.max_supporting_tickets_per_candidate,
-    )
-
-
 def _is_good_historical_only(row: dict) -> bool:
     """Allow top-k historical priors while blocking impossible/empty rows."""
     hits = int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0)
-    best = _float(row.get("best_support_score"))
     direct = int(row.get("direct_count", 0) or 0)
     implied = int(row.get("implied_count", 0) or 0)
     weighted = _float(row.get("weighted_support", row.get("weighted_support_count")))
-    if best < MIN_HISTORICAL_CANDIDATE_SCORE:
-        return False
     return hits >= 1 or direct >= 1 or implied >= 1 or weighted > 0.0
 
 
@@ -404,7 +369,7 @@ def _is_strong_semantic_only(row: dict) -> bool:
 def _sort_semantic_plus_historical(row: dict) -> tuple:
     # Blend semantic + historical signals so a candidate with strong historical evidence
     # isn't buried under a marginally-better-semantic one that has only 1 hit. The whole
-    # point of this lane is "best of both" — the sort should reflect that.
+    # point of this lane is "best of both"; the sort should reflect that.
     semantic = _float(row.get("semantic_score"))
     hits = int(row.get("supporting_ticket_count", row.get("support_count", 0)) or 0)
     best_support = _float(row.get("best_support_score"))

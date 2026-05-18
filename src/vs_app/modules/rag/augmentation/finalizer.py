@@ -113,7 +113,6 @@ def generate_review_pool_value_streams(
                 candidate,
                 float(pick.get("confidence") or 0.0),
                 llm_reason=str(pick.get("reason") or "").strip(),
-                selection_type=str(pick.get("selection_type") or "").strip(),
             )
         )
 
@@ -123,15 +122,11 @@ def generate_review_pool_value_streams(
         candidates=candidates,
         min_target=max_select,
     )
-    selected = _exact_fill_review_pool(
-        selected=selected,
-        candidates=candidates,
-        target=max_select,
-    )
-    selected_count_limit_reason = (
-        "candidate_count_below_request"
-        if len(candidates) < requested
-        else "exact_request_satisfied"
+    selected_count_limit_reason = _selected_count_limit_reason(
+        selected_count=len(selected),
+        requested=requested,
+        max_select=max_select,
+        candidate_count=len(candidates),
     )
     rejected = _pass_rejected_candidates(
         selected=selected,
@@ -176,6 +171,20 @@ def generate_review_pool_value_streams(
         "candidates_used": candidates,
         "selected_count_limit_reason": selected_count_limit_reason,
     }
+
+
+def _selected_count_limit_reason(
+    *,
+    selected_count: int,
+    requested: int,
+    max_select: int,
+    candidate_count: int,
+) -> str:
+    if candidate_count < requested:
+        return "candidate_count_below_request"
+    if selected_count >= max_select:
+        return "request_satisfied"
+    return "defensible_candidate_count_below_request"
 
 
 def _empty_pass() -> dict:
@@ -241,7 +250,6 @@ def _build_selected_row(
     candidate: dict,
     confidence: float,
     llm_reason: str = "",
-    selection_type: str = "",
 ) -> dict:
     if llm_reason and not _has_score_language(llm_reason):
         reason = llm_reason
@@ -250,15 +258,11 @@ def _build_selected_row(
             candidate,
             fallback="Selected because the idea card has a defensible business connection to this value stream.",
         )
-    clean_selection_type = str(selection_type or "").lower().strip()
-    if clean_selection_type not in {"direct", "implied"}:
-        clean_selection_type = "direct" if confidence >= 0.75 else "implied"
     return {
         "entity_id": str(candidate.get("entity_id") or "").strip(),
         "entity_name": str(candidate.get("entity_name") or "").strip(),
         "confidence": max(0.0, min(1.0, confidence)),
         "reason": reason,
-        "selection_type": clean_selection_type,
         "selection_source": "llm_pick",
         "supporting_ticket_ids": list(candidate.get("supporting_ticket_ids") or [])[:5],
         "supporting_chunk_ids": list(candidate.get("supporting_chunk_ids") or [])[:5],
@@ -311,46 +315,6 @@ def _safe_backfill_review_pool(
         selected_keys.update(_selection_keys(candidate))
 
     return out
-
-
-def _exact_fill_review_pool(
-    *,
-    selected: List[dict],
-    candidates: List[dict],
-    target: int,
-) -> List[dict]:
-    """Guarantee exact review-pool size when enough candidates exist.
-
-    This runs after LLM picks and safe backfill, so these rows are intentionally
-    lower confidence and marked separately for downstream diagnostics.
-    """
-    if len(selected) >= target:
-        return selected[:target]
-
-    selected_keys: set[str] = set()
-    for row in selected:
-        selected_keys.update(_selection_keys(row))
-
-    out = list(selected)
-    for candidate in _backfill_order(candidates):
-        if len(out) >= target:
-            break
-        if selected_keys.intersection(_selection_keys(candidate)):
-            continue
-
-        filler = _build_selected_row(
-            candidate,
-            confidence=0.25,
-            llm_reason=(
-                "Added to complete the requested review-pool size based on candidate "
-                "ranking and available semantic or historical evidence."
-            ),
-        )
-        filler["selection_source"] = "exact_count_fill"
-        out.append(filler)
-        selected_keys.update(_selection_keys(candidate))
-
-    return out[:target]
 
 
 def _backfill_order(candidates: List[dict]) -> List[dict]:

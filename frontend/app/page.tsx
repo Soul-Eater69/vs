@@ -491,10 +491,15 @@ function selectedCountDisplay(
 function selectionLimitMessage(rawResponse?: unknown) {
   const raw = asRecord(rawResponse);
   const reason = String(raw?.selected_count_limit_reason || '');
-  if (reason !== 'candidate_count_below_request') return '';
   const budget = asRecord(raw?.selection_budget);
   const candidateCount = Number(budget?.candidate_count ?? raw?.selected_count ?? 0);
   const requested = Number(raw?.requested_final_output_count ?? 0);
+  if (reason === 'defensible_candidate_count_below_request') {
+    const selected = Number(raw?.selected_count ?? 0);
+    if (!Number.isFinite(candidateCount) || !Number.isFinite(selected)) return '';
+    return `Returned ${selected} defensible selections from ${candidateCount} candidates.`;
+  }
+  if (reason !== 'candidate_count_below_request') return '';
   if (!Number.isFinite(candidateCount) || !Number.isFinite(requested) || candidateCount >= requested) {
     return '';
   }
@@ -1014,7 +1019,10 @@ function FaissHitsPane({
     Number(hit.historical_evidence_score ?? hit.best_score ?? hit.score ?? hit['@search.score'] ?? 0) || 0
   );
   const best = Math.max(...hits.map(hit => hitScore(hit)), 0.0001);
-  const qualifiedCount = hits.filter(hit => String(hit.historical_evidence_status ?? '') === 'used_as_evidence').length;
+  const qualifiedCount = hits.filter(hit => {
+    const status = String(hit.historical_evidence_status ?? '');
+    return status === 'used_as_evidence' || status === 'used_as_historical_prior';
+  }).length;
   const ignoredCount = hits.filter(hit => String(hit.historical_evidence_status ?? '') === 'retrieved_but_not_used').length;
   return (
     <div className="space-y-2">
@@ -1049,7 +1057,7 @@ function FaissHitsPane({
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               <Pill tone="amber">historical ticket hit</Pill>
-              {status === 'used_as_evidence' && <Pill tone="green">Used as historical prior</Pill>}
+              {(status === 'used_as_evidence' || status === 'used_as_historical_prior') && <Pill tone="green">Used as historical prior</Pill>}
               {status === 'retrieved_but_not_used' && <Pill tone="amber">Retrieved but not used</Pill>}
               {hasClassified ? (
                 <>

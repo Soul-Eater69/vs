@@ -184,10 +184,15 @@ def test_azure_historical_backend_returns_support(monkeypatch) -> None:
         exclude_ticket_ids=["IDMT-1"],
     )
 
-    assert result["historical_source"] == "qualified_historical"
+    assert result["historical_source"] == "top_k_historical_prior"
     assert result["historical_backend_source"] == "summary_azure_ai_search"
+    assert result["historical_evidence_policy"]["mode"] == "top_k_prior_no_absolute_threshold"
     assert [hit["ticket_id"] for hit in result["historical_ticket_hits"]] == ["IDMT-2"]
     assert [hit["ticket_id"] for hit in result["historical_evidence_ticket_hits"]] == ["IDMT-2"]
+    assert (
+        result["historical_evidence_ticket_hits"][0]["historical_evidence_status"]
+        == "used_as_historical_prior"
+    )
     assert [row["entity_name"] for row in result["historical_value_stream_support"]] == [
         "Issue Payment"
     ]
@@ -220,6 +225,7 @@ def test_historical_hits_below_threshold_are_debug_only(monkeypatch) -> None:
     )
 
     assert result["historical_source"] == "none_qualified"
+    assert result["historical_evidence_policy"]["mode"] == "absolute_score_threshold"
     assert result["historical_evidence_ticket_hits"] == []
     assert [hit["ticket_id"] for hit in result["historical_ignored_ticket_hits"]] == ["IDMT-weak"]
     assert result["historical_value_stream_support"] == []

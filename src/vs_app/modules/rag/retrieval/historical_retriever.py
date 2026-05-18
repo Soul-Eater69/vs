@@ -152,10 +152,24 @@ def _historical_payload_from_hits(
     max_ticket_hits: int,
     backend_source: str,
 ) -> dict:
-    qualified_hits, ignored_hits = split_historical_evidence_hits(
-        filtered_hits,
-        min_evidence_score=min_evidence_score,
-    )
+    try:
+        threshold = float(min_evidence_score or 0.0)
+    except (TypeError, ValueError):
+        threshold = 0.0
+
+    if threshold <= 0.0:
+        qualified_hits = _top_k_prior_hits(filtered_hits)
+        ignored_hits: List[dict] = []
+        source = "top_k_historical_prior" if qualified_hits else "none"
+        mode = "top_k_prior_no_absolute_threshold"
+    else:
+        qualified_hits, ignored_hits = split_historical_evidence_hits(
+            filtered_hits,
+            min_evidence_score=threshold,
+        )
+        source = "qualified_historical" if qualified_hits else "none_qualified"
+        mode = "absolute_score_threshold"
+
     all_hits = sorted(
         qualified_hits + ignored_hits,
         key=lambda hit: int(hit.get("historical_evidence_rank", 0) or 0),
@@ -165,15 +179,35 @@ def _historical_payload_from_hits(
         "historical_evidence_ticket_hits": qualified_hits,
         "historical_ignored_ticket_hits": ignored_hits,
         "historical_value_stream_support": _build_support_from_faiss_hits(qualified_hits),
-        "historical_source": "qualified_historical" if qualified_hits else "none_qualified",
+        "historical_source": source,
         "historical_backend_source": backend_source,
         "historical_evidence_policy": _historical_evidence_policy(
-            min_evidence_score=min_evidence_score,
+            mode=mode,
+            min_evidence_score=threshold,
             max_ticket_hits=max_ticket_hits,
             qualified_count=len(qualified_hits),
             ignored_count=len(ignored_hits),
         ),
     }
+
+
+def _top_k_prior_hits(ticket_hits: List[dict]) -> List[dict]:
+    qualified: List[dict] = []
+    for rank, hit in enumerate(ticket_hits or [], start=1):
+        score = _historical_hit_score(hit)
+        enriched = dict(hit)
+        enriched["historical_evidence_rank"] = rank
+        enriched["historical_evidence_score"] = score
+        try:
+            best_score = float(enriched.get("best_score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            best_score = 0.0
+        if not best_score:
+            enriched["best_score"] = score
+        enriched["historical_evidence_status"] = "used_as_historical_prior"
+        enriched["historical_evidence_reason"] = "top_k_historical_prior"
+        qualified.append(enriched)
+    return qualified
 
 
 def split_historical_evidence_hits(
@@ -225,6 +259,7 @@ def _historical_hit_score(hit: dict) -> float:
 
 def _historical_evidence_policy(
     *,
+    mode: str = "absolute_score_threshold",
     min_evidence_score: float,
     max_ticket_hits: int,
     qualified_count: int,
@@ -235,6 +270,7 @@ def _historical_evidence_policy(
     except (TypeError, ValueError):
         threshold = 0.0
     return {
+        "mode": mode,
         "min_evidence_score": threshold,
         "max_ticket_hits": max_ticket_hits,
         "qualified_count": qualified_count,
@@ -269,8 +305,11 @@ def filter_historical_result(result: dict, exclude_ticket_ids: Optional[Iterable
     payload["historical_evidence_ticket_hits"] = evidence_hits
     payload["historical_ignored_ticket_hits"] = ignored_hits
     payload["historical_value_stream_support"] = _build_support_from_faiss_hits(evidence_hits)
-    payload["historical_source"] = "qualified_historical" if evidence_hits else "none_qualified"
     policy = dict(result.get("historical_evidence_policy", {}) or {})
+    if str(policy.get("mode") or "") == "top_k_prior_no_absolute_threshold":
+        payload["historical_source"] = "top_k_historical_prior" if evidence_hits else "none"
+    else:
+        payload["historical_source"] = "qualified_historical" if evidence_hits else "none_qualified"
     if policy:
         policy["qualified_count"] = len(evidence_hits)
         policy["ignored_count"] = len(ignored_hits)

@@ -27,7 +27,7 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     requested = max(1, int(final_output_count or 12))
 
     # Fixed broad retrieval. Retrieval is cheaper than the LLM call, so we don't
-    # shrink it with the requested output count — the user's slider only affects
+    # shrink it with the requested output count; the user's slider only affects
     # the *output* count, not how widely we search for evidence.
     semantic_fetch_k = 60
 
@@ -48,31 +48,11 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     # model has room to reject weak picks.
     llm_candidate_window = min(50, max(35, math.ceil(requested * 3.0)))
 
-    # Candidate lane caps. These are value-stream candidate caps, not historical
-    # ticket-hit caps. Historical ticket hits remain 6, but those prior hits may
-    # produce many value-stream candidates.
-    max_historical_only = min(
-        10,
-        max(
-            4,
-            math.ceil(llm_candidate_window * 0.20),
-            math.ceil(llm_candidate_window * 0.25),
-        ),
-    )
-    # Keep semantic-only near half the window at larger sizes so semantic
-    # fallback still has enough room when no historical analog qualifies.
-    max_semantic_only = min(
-        24,
-        max(
-            10,
-            math.ceil(llm_candidate_window * 0.45),
-            math.floor(llm_candidate_window * 0.48),
-        ),
-    )
-    max_semantic_plus_historical = max(
-        0,
-        llm_candidate_window - max_historical_only - max_semantic_only,
-    )
+    # Recall-friendly lane caps for value-stream candidates. The merger can reuse
+    # unused lane capacity, so semantic-only still fills the window when history is absent.
+    max_semantic_plus_historical = llm_candidate_window
+    max_historical_only = min(8, max(4, math.floor(llm_candidate_window * 0.16)))
+    max_semantic_only = 5
 
     return RagRuntimeConfig(
         final_output_count=requested,

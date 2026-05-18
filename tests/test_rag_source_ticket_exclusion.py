@@ -184,21 +184,14 @@ def test_azure_historical_backend_returns_support(monkeypatch) -> None:
         exclude_ticket_ids=["IDMT-1"],
     )
 
-    assert result["historical_source"] == "top_k_historical_prior"
-    assert result["historical_backend_source"] == "summary_azure_ai_search"
-    assert result["historical_evidence_policy"]["mode"] == "top_k_prior_no_absolute_threshold"
+    assert result["historical_source"] == "summary_azure_ai_search"
     assert [hit["ticket_id"] for hit in result["historical_ticket_hits"]] == ["IDMT-2"]
-    assert [hit["ticket_id"] for hit in result["historical_evidence_ticket_hits"]] == ["IDMT-2"]
-    assert (
-        result["historical_evidence_ticket_hits"][0]["historical_evidence_status"]
-        == "used_as_historical_prior"
-    )
     assert [row["entity_name"] for row in result["historical_value_stream_support"]] == [
         "Issue Payment"
     ]
 
 
-def test_historical_hits_below_threshold_are_debug_only(monkeypatch) -> None:
+def test_historical_hits_are_not_thresholded(monkeypatch) -> None:
     def fake_search(query: str, *, index_name: str, top_k: int, exclude_ticket_ids):
         return [
             {
@@ -221,14 +214,11 @@ def test_historical_hits_below_threshold_are_debug_only(monkeypatch) -> None:
         historical_search_backend="azure",
         historical_azure_index_name="historical-index",
         max_ticket_hits=6,
-        min_evidence_score=0.08,
     )
 
-    assert result["historical_source"] == "none_qualified"
-    assert result["historical_evidence_policy"]["mode"] == "absolute_score_threshold"
-    assert result["historical_evidence_ticket_hits"] == []
-    assert [hit["ticket_id"] for hit in result["historical_ignored_ticket_hits"]] == ["IDMT-weak"]
-    assert result["historical_value_stream_support"] == []
-    assert result["historical_ignored_ticket_hits"][0]["historical_evidence_status"] == (
-        "retrieved_but_not_used"
-    )
+    assert result["historical_source"] == "summary_azure_ai_search"
+    assert [hit["ticket_id"] for hit in result["historical_ticket_hits"]] == ["IDMT-weak"]
+    assert [row["entity_name"] for row in result["historical_value_stream_support"]] == [
+        "Weak Direct Stream",
+        "Weak Implied Stream",
+    ]

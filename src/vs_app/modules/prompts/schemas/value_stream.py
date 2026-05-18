@@ -3,7 +3,7 @@
 Covers three prompts:
   - value_stream_classification.yaml → VsClassificationResult
   - jira_value_stream_verifier.yaml  → VsVerifierResult
-  - review_pool_selection.yaml       → ReviewPoolPickResult
+  - selection.yaml / historical_rag_selection.yaml / historical_gap_selection.yaml → SelectionResult
 """
 
 from __future__ import annotations
@@ -46,6 +46,31 @@ class VsVerifierResult(BaseModel):
     mappings: list[VsVerifierMapping] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# value-stream selection prompts
+# ---------------------------------------------------------------------------
+
+class SelectedValueStream(BaseModel):
+    entity_id: str = Field(description="The entity ID of the value stream")
+    entity_name: str = Field(description="The name of the value stream")
+    confidence: float = Field(
+        description="0.8-1.0 strong direct alignment, 0.5-0.7 partial, 0.3-0.4 weak but plausible"
+    )
+    reason: str = Field(
+        description=(
+            "Brief business rationale: explain why the idea card maps to this value stream. "
+            "Do not mention retrieval score, rank, support count, similarity, or lane name."
+        )
+    )
+
+
+class SelectionResult(BaseModel):
+    selected_value_streams: list[SelectedValueStream] = Field(
+        default_factory=list,
+        description="Value streams that are relevant to the idea card",
+    )
+
+
 # Slim schema for the review-pool pass: the model picks IDs + confidence + a short
 # rationale. entity_name is filled in deterministically post-call from the candidate
 # dict so the LLM can't drop rows via name paraphrasing.
@@ -65,10 +90,6 @@ class ReviewPoolPick(BaseModel):
             "value stream maps to the idea card. Do not mention scores, ranks, or lanes."
         ),
     )
-    selection_type: str = Field(
-        default="",
-        description="Optional compatibility field; not required by the review-pool prompt.",
-    )
 
 
 class ReviewPoolPickResult(BaseModel):
@@ -82,6 +103,8 @@ __all__ = [
     "InferenceType",
     "ReviewPoolPick",
     "ReviewPoolPickResult",
+    "SelectedValueStream",
+    "SelectionResult",
     "VsClassificationItem",
     "VsClassificationResult",
     "VsVerifierMapping",

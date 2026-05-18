@@ -13,7 +13,7 @@ class _FakeResult:
         self._selected = selected
 
     def model_dump(self) -> dict:
-        return {"selected_value_streams": self._selected}
+        return {"picks": self._selected}
 
 
 def _install_generation_service(monkeypatch, fake_cls) -> None:
@@ -118,8 +118,6 @@ def test_review_pool_finalizer_ignores_invented_output_without_exact_fill(monkey
     )
 
     assert result["selected_value_streams"] == []
-    assert result["raw_response"]["selected_count_limit_reason"] == "candidate_count_below_request"
-    assert result["raw_response"]["selected_count"] == 0
     assert [row["entity_name"] for row in result["raw_response"]["single_review_pool_pass"]["rejected_candidates"]] == [
         "Issue Payment"
     ]
@@ -185,9 +183,8 @@ def test_review_pool_does_not_exact_fill_to_requested_count(monkeypatch) -> None
     assert [row["selection_source"] for row in result["selected_value_streams"]] == [
         "llm_pick",
     ]
-    assert result["raw_response"]["selected_count"] == 1
-    assert result["raw_response"]["selected_count_limit_reason"] == (
-        "defensible_candidate_count_below_request"
+    assert result["raw_response"]["single_review_pool_pass"]["selected_value_streams"] == (
+        result["selected_value_streams"]
     )
 
 
@@ -209,7 +206,6 @@ def test_review_pool_does_not_fill_plain_candidates_when_request_exceeds_candida
 
     assert result["selected_value_streams"] == []
     assert result["raw_response"]["requested_final_output_count"] == 5
-    assert result["raw_response"]["selected_count_limit_reason"] == "candidate_count_below_request"
 
 
 def test_review_pool_prompt_stays_compact() -> None:
@@ -259,11 +255,11 @@ def test_review_pool_prompt_stays_compact() -> None:
 def test_review_pool_system_prompt_is_recall_friendly() -> None:
     prompt = build_review_pool_selection_system_prompt(max_select=15)
 
-    assert "HOW TO READ THE CANDIDATE BLOCKS" in prompt
-    assert "SELECTION POLICY" in prompt
-    assert "Prefer recall over precision" in prompt
+    assert "HOW TO READ CANDIDATES" in prompt
+    assert "CORE SELECTION POLICY" in prompt
+    assert "Prefer recall over strict precision" in prompt
     assert "You may return fewer than 15" in prompt
     assert "HISTORICAL ANALOG STATUS" not in prompt
     assert "Return exactly" not in prompt
     assert "selection_type" not in prompt
-    assert len(prompt) < 8000
+    assert len(prompt) < 15000

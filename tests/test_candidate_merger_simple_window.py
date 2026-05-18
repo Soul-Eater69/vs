@@ -165,7 +165,7 @@ def test_low_score_historical_prior_can_reach_llm() -> None:
     assert result["merged_candidates"][0]["candidate_status"] == "sent_to_llm"
 
 
-def test_single_implied_historical_prior_can_reach_llm() -> None:
+def test_single_weak_implied_historical_prior_is_gated_out() -> None:
     result = merge_candidate_sources(
         [],
         [
@@ -187,12 +187,11 @@ def test_single_implied_historical_prior_can_reach_llm() -> None:
         ),
     )
 
-    assert [row["entity_name"] for row in result["llm_candidates"]] == [
-        "Implied Historical Stream"
-    ]
+    assert result["llm_candidates"] == []
+    assert result["merged_candidates"][0]["candidate_status"] == "outside_llm_window"
 
 
-def test_semantic_only_reuses_empty_historical_lane_capacity() -> None:
+def test_semantic_only_does_not_reuse_historical_lane_capacity() -> None:
     result = merge_candidate_sources(
         [
             {
@@ -211,8 +210,8 @@ def test_semantic_only_reuses_empty_historical_lane_capacity() -> None:
         max_llm_candidates=6,
     )
 
-    assert len(result["llm_candidates"]) == 6
-    assert result["candidate_window_counts"]["semantic_only"] == 6
+    assert len(result["llm_candidates"]) == 0
+    assert result["candidate_window_counts"]["semantic_only"] == 0
     assert all(row["lane"] == "semantic_only" for row in result["llm_candidates"])
 
 

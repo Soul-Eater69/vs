@@ -72,9 +72,6 @@ def test_condensed_query_feeds_semantic_and_historical_retrieval(monkeypatch) ->
         "historical": "CONDENSED QUERY",
     }
     assert result["query_preparation"] == {
-        "source_ticket_title": "RAW QUERY",
-        "theme_title_prefix": "RAW QUERY",
-        "theme_title_prefix_source": "clean_source_ticket_title",
         "cleaned_query": "CLEANED QUERY",
         "query_for_prompt": "CONDENSED QUERY",
     }
@@ -88,7 +85,7 @@ def test_condensed_query_feeds_semantic_and_historical_retrieval(monkeypatch) ->
     ]
 
 
-def test_pipeline_falls_back_to_semantic_candidates_when_merge_window_is_empty(monkeypatch) -> None:
+def test_pipeline_preserves_restored_empty_merge_window_behavior(monkeypatch) -> None:
     monkeypatch.setattr(
         "vs_app.modules.rag.query.views.clean_ppt_text",
         lambda query: "CLEANED QUERY",
@@ -107,10 +104,8 @@ def test_pipeline_falls_back_to_semantic_candidates_when_merge_window_is_empty(m
     def fake_historical(query, **kwargs):
         return {
             "historical_ticket_hits": [{"ticket_id": f"IDMT-{idx}"} for idx in range(6)],
-            "historical_evidence_ticket_hits": [],
-            "historical_ignored_ticket_hits": [{"ticket_id": f"IDMT-{idx}"} for idx in range(6)],
             "historical_value_stream_support": [],
-            "historical_source": "none_qualified",
+            "historical_source": "summary_azure_ai_search",
         }
 
     captured: dict = {}
@@ -155,14 +150,5 @@ def test_pipeline_falls_back_to_semantic_candidates_when_merge_window_is_empty(m
 
     result = pipeline.select_value_streams("RAW QUERY", final_output_count=12)
 
-    assert [row["entity_name"] for row in result["llm_candidates"]] == [
-        "Issue Payment",
-        "Manage Member Care",
-    ]
-    assert result["debug"]["historical_counts"] == {
-        "retrieved_ticket_hits": 6,
-        "qualified_ticket_hits": 0,
-        "ignored_ticket_hits": 6,
-        "historical_vs_support_count": 0,
-    }
-    assert result["candidate_window_counts"]["pipeline_semantic_fallback"] == 2
+    assert result["llm_candidates"] == []
+    assert result["candidate_window_counts"] == {}

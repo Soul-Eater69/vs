@@ -252,14 +252,34 @@ def test_review_pool_prompt_stays_compact() -> None:
     assert len(prompt) < 14000
 
 
-def test_review_pool_system_prompt_is_recall_friendly() -> None:
+def test_review_pool_system_prompt_is_final_selection_oriented() -> None:
     prompt = build_review_pool_selection_system_prompt(max_select=15)
+    lower_prompt = prompt.lower()
 
-    assert "HOW TO READ THE CANDIDATE BLOCKS" in prompt
-    assert "SELECTION POLICY" in prompt
-    assert "Prefer recall over precision" in prompt
-    assert "You may return fewer than 15" in prompt
+    assert "final value-stream mapping" in prompt
+    assert "final prediction set" in prompt
+    assert "requested size is an upper bound" in prompt
+    assert "Do not pad" in prompt
+    assert (
+        "Historical evidence can support selection, but cannot replace current-card business fit"
+        in prompt
+    )
+    assert "Establish Provider Network" in prompt
+    assert "Participate in Health Management Program" in prompt
+    assert "Adjudicate Claim" in prompt
+    assert "Manage Member Care" in prompt
+    assert "Onboard Partner" in prompt
+    assert "Manage Invoice and Payment Receipt" in prompt
+    assert "Issue Payment" in prompt
+    assert "Ensure Compliance" in prompt
+    assert "Manage Utilization Management Program" in prompt
+    assert "Administer Utilization Management Program" in prompt
+    assert "review pool" not in lower_prompt
+    assert "not final truth certification" not in prompt
+    assert "Prefer recall over precision" not in prompt
+    assert "Use lower confidence" not in prompt
     assert "HISTORICAL ANALOG STATUS" not in prompt
     assert "Return exactly" not in prompt
     assert "selection_type" not in prompt
+    assert "foundational/current-card value-stream signals" not in prompt
     assert len(prompt) < 15000

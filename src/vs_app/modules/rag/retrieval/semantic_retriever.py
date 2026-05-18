@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
 
 from ..query.views import normalize_for_search
 logger = logging.getLogger(__name__)
@@ -16,7 +16,17 @@ def retrieve_semantic_candidates(
     *,
     top_k: int = 12,
     client: Any = None,
+    allowed_value_stream_names: Optional[Iterable[str]] = None,
 ) -> List[dict]:
+    allowed_names = {
+        normalize_for_search(str(name))
+        for name in (allowed_value_stream_names or [])
+        if str(name or "").strip()
+    }
+    search_top_k = top_k
+    if allowed_names:
+        search_top_k = min(100, max(top_k, top_k * 2))
+
     if client is None:
         from vs_app.integrations.clients.azure_direct_client import AzureDirectSearchClient
 
@@ -26,7 +36,7 @@ def retrieve_semantic_candidates(
         search_query = _semantic_search_query(query)
         results = client.search_hybrid(
             search_query,
-            top_k=top_k,
+            top_k=search_top_k,
             use_semantic_rerank=True,
             filter_expression="node_type eq 'ValueStream'",
             search_fields=_SEMANTIC_SEARCH_FIELDS,
@@ -35,7 +45,7 @@ def retrieve_semantic_candidates(
         logger.warning("Hybrid semantic retrieval unavailable, falling back to vector search: %s", exc)
         results = client.search_vector(
             _semantic_search_query(query),
-            top_k=top_k,
+            top_k=search_top_k,
             filter_expression="node_type eq 'ValueStream'",
         )
 
@@ -47,6 +57,9 @@ def retrieve_semantic_candidates(
             continue
 
         name_key = normalize_for_search(name)
+        if allowed_names and name_key not in allowed_names:
+            continue
+
         score = float(
             row.get("@search.reranker_score")
             if row.get("@search.reranker_score") is not None

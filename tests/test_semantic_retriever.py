@@ -53,3 +53,84 @@ def test_retrieve_semantic_candidates_vector_fallback_uses_compact_query(monkeyp
     semantic_retriever.retrieve_semantic_candidates(long_query, top_k=5, client=FakeClient())
 
     assert len(captured["query"].split()) == semantic_retriever._SEMANTIC_QUERY_MAX_TERMS
+
+
+def test_retrieve_semantic_candidates_preserves_unfiltered_results() -> None:
+    class FakeClient:
+        def search_hybrid(self, query: str, **kwargs):
+            return [
+                {
+                    "entity_id": "vs-1",
+                    "entity_name": "Issue Payment",
+                    "content": "Processing and issuing payments.",
+                    "@search.score": 1.2,
+                },
+                {
+                    "entity_id": "vs-2",
+                    "entity_name": "Manage Claims",
+                    "content": "Claims intake and adjudication.",
+                    "@search.score": 0.9,
+                },
+            ]
+
+    rows = semantic_retriever.retrieve_semantic_candidates("payment", top_k=5, client=FakeClient())
+
+    assert [row["entity_name"] for row in rows] == ["Issue Payment", "Manage Claims"]
+
+
+def test_retrieve_semantic_candidates_filters_allowed_value_stream_names() -> None:
+    captured: dict = {}
+
+    class FakeClient:
+        def search_hybrid(self, query: str, **kwargs):
+            captured["kwargs"] = kwargs
+            return [
+                {
+                    "entity_id": "vs-1",
+                    "entity_name": "Issue Payment",
+                    "content": "Processing and issuing payments.",
+                    "@search.score": 1.2,
+                },
+                {
+                    "entity_id": "vs-2",
+                    "entity_name": "Manage Claims",
+                    "content": "Claims intake and adjudication.",
+                    "@search.score": 0.9,
+                },
+            ]
+
+    rows = semantic_retriever.retrieve_semantic_candidates(
+        "payment",
+        top_k=5,
+        client=FakeClient(),
+        allowed_value_stream_names=["Issue Payment"],
+    )
+
+    assert [row["entity_name"] for row in rows] == ["Issue Payment"]
+    assert captured["kwargs"]["top_k"] == 10
+
+
+def test_retrieve_semantic_candidates_empty_allowed_names_preserves_behavior() -> None:
+    captured: dict = {}
+
+    class FakeClient:
+        def search_hybrid(self, query: str, **kwargs):
+            captured["kwargs"] = kwargs
+            return [
+                {
+                    "entity_id": "vs-1",
+                    "entity_name": "Issue Payment",
+                    "content": "Processing and issuing payments.",
+                    "@search.score": 1.2,
+                }
+            ]
+
+    rows = semantic_retriever.retrieve_semantic_candidates(
+        "payment",
+        top_k=5,
+        client=FakeClient(),
+        allowed_value_stream_names=[],
+    )
+
+    assert [row["entity_name"] for row in rows] == ["Issue Payment"]
+    assert captured["kwargs"]["top_k"] == 5

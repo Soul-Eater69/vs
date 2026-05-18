@@ -255,9 +255,9 @@ def test_review_pool_prompt_stays_compact() -> None:
 def test_review_pool_system_prompt_is_recall_friendly() -> None:
     prompt = build_review_pool_selection_system_prompt(max_select=15)
 
-    assert "HOW TO READ CANDIDATES" in prompt
-    assert "CORE SELECTION POLICY" in prompt
-    assert "Prefer recall over strict precision" in prompt
+    assert "HOW TO READ THE CANDIDATE BLOCKS" in prompt
+    assert "SELECTION POLICY" in prompt
+    assert "Prefer recall over precision" in prompt
     assert "You may return fewer than 15" in prompt
     assert "HISTORICAL ANALOG STATUS" not in prompt
     assert "Return exactly" not in prompt

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import os
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,17 @@ class RagRuntimeConfig:
     historical_ticket_ids_per_candidate: int
 
 
+def _env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 100) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, value))
+
+
 def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfig:
     requested = max(1, int(final_output_count or 12))
 
@@ -28,7 +40,12 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     # shrink it with the requested output count — the user's slider only affects
     # the *output* count, not how widely we search for evidence.
     semantic_fetch_k = 60
-    historical_ticket_fetch_k = 60
+    historical_ticket_fetch_k = _env_int(
+        "RAG_HISTORICAL_TICKET_FETCH_K",
+        60,
+        min_value=1,
+        max_value=100,
+    )
 
     # Adaptive LLM candidate window. This is how many evidence-qualified candidates
     # the LLM may inspect, not how many it returns. Bigger than `requested` so the

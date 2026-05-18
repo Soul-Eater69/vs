@@ -16,3 +16,25 @@ Historical RAG in this repo means:
 5. Return value-stream prediction output.
 
 This repo does not expose plain/semantic/combined public modes.
+
+## Historical Ticket Fetch Count
+
+Stable baseline mode leaves `RAG_HISTORICAL_TICKET_FETCH_K` unset, which sets
+runtime `historical_ticket_fetch_k` to 60.
+
+For a top-6 experiment, set only this override before running eval:
+
+PowerShell:
+```powershell
+$env:RAG_HISTORICAL_TICKET_FETCH_K="6"
+```
+
+CMD:
+```bat
+set RAG_HISTORICAL_TICKET_FETCH_K=6
+```
+
+Bash:
+```bash
+export RAG_HISTORICAL_TICKET_FETCH_K=6
+```

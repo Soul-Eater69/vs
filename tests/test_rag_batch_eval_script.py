@@ -7,18 +7,58 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import evaluate_rag_batch as eval_script
 from evaluate_rag_batch import (
     apply_eval_llm_defaults,
+    build_miss_bucket_summary,
     build_missed_ground_truth_debug,
     classify_ground_truth_miss,
     compute_metrics,
     discover_items,
+    EvaluationItem,
     dynamic_output_count,
     is_transient_gateway_error,
     load_ground_truth_from_azure,
+    main,
     resolve_final_output_count,
     summarize,
+    TicketMetrics,
 )
+
+
+def _ticket_metrics(
+    ticket_id: str = "IDMT-1",
+    *,
+    missed_ground_truth_debug: list[dict] | None = None,
+) -> TicketMetrics:
+    return TicketMetrics(
+        ticket_id=ticket_id,
+        file_name=f"{ticket_id}.txt",
+        status="ok",
+        elapsed_seconds=1.0,
+        vs_seconds=1.0,
+        stage_seconds=0.0,
+        total_seconds=1.0,
+        precision=0.0,
+        recall=0.0,
+        f1=0.0,
+        true_positive_count=0,
+        false_positive_count=0,
+        false_negative_count=len(missed_ground_truth_debug or []),
+        predicted_count=0,
+        ground_truth_count=len(missed_ground_truth_debug or []),
+        predicted_value_streams=[],
+        ground_truth_value_streams=[],
+        true_positives=[],
+        false_positives=[],
+        false_negatives=[],
+        selected_count=0,
+        llm_candidate_count=0,
+        merged_candidate_count=0,
+        historical_hit_count=0,
+        excluded_ticket_ids=[],
+        missed_ground_truth_debug=missed_ground_truth_debug or [],
+    )
 
 
 def test_compute_metrics_reports_ticket_level_precision_recall() -> None:
@@ -190,6 +230,140 @@ def test_summarize_reports_macro_and_micro_scores() -> None:
     assert summary["avg_prompt_chars"] == 200.0
     assert summary["avg_system_prompt_chars"] == 60.0
     assert summary["avg_llm_ms"] == 1000.0
+
+
+def test_build_miss_bucket_summary_empty_results() -> None:
+    summary = build_miss_bucket_summary([])
+
+    assert summary == {
+        "bucket_counts": {},
+        "top_missed_gt_by_bucket": [],
+        "worst_tickets_by_misses": [],
+        "sent_to_llm_but_skipped_examples": [],
+    }
+
+
+def test_build_miss_bucket_summary_counts_multiple_buckets() -> None:
+    summary = build_miss_bucket_summary(
+        [
+            {
+                "ticket_id": "IDMT-1",
+                "missed_ground_truth_debug": [
+                    {
+                        "loss_bucket": "sent_to_llm_but_skipped",
+                        "ground_truth_name": "A",
+                        "llm_rank": 8,
+                        "merged_rank": 8,
+                    },
+                    {
+                        "loss_bucket": "merged_not_sent_to_llm",
+                        "ground_truth_name": "B",
+                    },
+                    {
+                        "loss_bucket": "sent_to_llm_but_skipped",
+                        "ground_truth_name": "A",
+                        "llm_rank": 10,
+                        "merged_rank": 10,
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert summary["bucket_counts"] == {
+        "sent_to_llm_but_skipped": 2,
+        "merged_not_sent_to_llm": 1,
+    }
+    assert summary["top_missed_gt_by_bucket"][0] == {
+        "bucket": "sent_to_llm_but_skipped",
+        "ground_truth_name": "A",
+        "count": 2,
+    }
+    assert summary["worst_tickets_by_misses"] == [
+        {
+            "ticket_id": "IDMT-1",
+            "total_misses": 3,
+            "buckets": {
+                "sent_to_llm_but_skipped": 2,
+                "merged_not_sent_to_llm": 1,
+            },
+        }
+    ]
+
+
+def test_build_miss_bucket_summary_sent_to_llm_examples_include_ranks() -> None:
+    summary = build_miss_bucket_summary(
+        [
+            {
+                "ticket_id": "IDMT-19761",
+                "missed_ground_truth_debug": [
+                    {
+                        "loss_bucket": "sent_to_llm_but_skipped",
+                        "ground_truth_name": "Issue Payment",
+                        "llm_rank": 10,
+                        "merged_rank": 7,
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert summary["sent_to_llm_but_skipped_examples"] == [
+        {
+            "ticket_id": "IDMT-19761",
+            "ground_truth_name": "Issue Payment",
+            "llm_rank": 10,
+            "merged_rank": 7,
+        }
+    ]
+
+
+def test_eval_json_payload_includes_miss_bucket_summary(tmp_path, monkeypatch) -> None:
+    idea_cards_dir = tmp_path / "idea_cards"
+    output_dir = tmp_path / "out"
+    idea_cards_dir.mkdir()
+    item = EvaluationItem(
+        ticket_id="IDMT-1",
+        path=idea_cards_dir / "IDMT-1.txt",
+        ground_truth=["A"],
+    )
+    item.path.write_text("idea", encoding="utf-8")
+    missed = [
+        {
+            "loss_bucket": "sent_to_llm_but_skipped",
+            "ground_truth_name": "A",
+            "llm_rank": 3,
+            "merged_rank": 2,
+        }
+    ]
+
+    monkeypatch.setattr(eval_script, "load_ground_truth", lambda **kwargs: {"IDMT-1": ["A"]})
+    monkeypatch.setattr(eval_script, "discover_items", lambda **kwargs: [item])
+    monkeypatch.setattr(
+        eval_script,
+        "run_batch",
+        lambda *args, **kwargs: [_ticket_metrics("IDMT-1", missed_ground_truth_debug=missed)],
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "evaluate_rag_batch.py",
+            "--idea-cards-dir",
+            str(idea_cards_dir),
+            "--output-dir",
+            str(output_dir),
+            "--no-shuffle",
+        ],
+    )
+
+    assert main() == 0
+
+    payload = eval_script.json.loads((output_dir / "rag_batch_eval.json").read_text(encoding="utf-8"))
+    assert payload["miss_bucket_summary"]["bucket_counts"] == {
+        "sent_to_llm_but_skipped": 1
+    }
+    assert payload["results"][0]["missed_ground_truth_debug"] == missed
 
 
 def test_missed_ground_truth_debug_classifies_loss_bucket() -> None:

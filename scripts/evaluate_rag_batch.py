@@ -11,6 +11,7 @@ index.
 from __future__ import annotations
 
 import argparse
+from collections import Counter, defaultdict
 import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
@@ -209,6 +210,8 @@ def main() -> int:
     )
 
     summary = summarize(results)
+    serialized_results = [serialize_result(row) for row in results]
+    miss_bucket_summary = build_miss_bucket_summary(serialized_results)
     payload = {
         "created_at": started.isoformat(),
         "idea_cards_dir": str(idea_cards_dir),
@@ -230,7 +233,8 @@ def main() -> int:
         "sweep_counts": sweep_counts if args.output_count_mode == "sweep" else None,
         "include_stage_predictions": bool(args.include_stages),
         "summary": summary,
-        "results": [serialize_result(row) for row in results],
+        "miss_bucket_summary": miss_bucket_summary,
+        "results": serialized_results,
     }
 
     json_path = output_dir / args.json_name
@@ -246,6 +250,7 @@ def main() -> int:
         write_json(sweep_summary_path, summarize_by_output_count(results))
 
     print_summary(summary)
+    print_miss_bucket_summary(miss_bucket_summary)
     print(f"Wrote JSON:  {json_path}")
     print(f"Wrote JSONL: {jsonl_path}")
     print(f"Wrote CSV:   {csv_path}")
@@ -1224,10 +1229,90 @@ def summarize(results: list[TicketMetrics]) -> dict[str, Any]:
     }
 
 
+def build_miss_bucket_summary(results: list[dict]) -> dict[str, Any]:
+    bucket_counts: Counter[str] = Counter()
+    gt_by_bucket: Counter[tuple[str, str]] = Counter()
+    ticket_buckets: defaultdict[str, Counter[str]] = defaultdict(Counter)
+    sent_to_llm_but_skipped_examples: list[dict[str, Any]] = []
+
+    for result in results or []:
+        if not isinstance(result, dict):
+            continue
+
+        ticket_id = str(result.get("ticket_id") or "").strip()
+        missed_rows = result.get("missed_ground_truth_debug") or []
+        if not isinstance(missed_rows, list):
+            continue
+
+        for miss in missed_rows:
+            if not isinstance(miss, dict):
+                continue
+
+            bucket = str(miss.get("loss_bucket") or "unknown").strip() or "unknown"
+            ground_truth_name = str(miss.get("ground_truth_name") or "").strip()
+            bucket_counts[bucket] += 1
+            gt_by_bucket[(bucket, ground_truth_name)] += 1
+            if ticket_id:
+                ticket_buckets[ticket_id][bucket] += 1
+
+            if (
+                bucket == "sent_to_llm_but_skipped"
+                and len(sent_to_llm_but_skipped_examples) < 30
+            ):
+                sent_to_llm_but_skipped_examples.append(
+                    {
+                        "ticket_id": ticket_id,
+                        "ground_truth_name": ground_truth_name,
+                        "llm_rank": miss.get("llm_rank"),
+                        "merged_rank": miss.get("merged_rank"),
+                    }
+                )
+
+    top_missed_gt_by_bucket = [
+        {
+            "bucket": bucket,
+            "ground_truth_name": ground_truth_name,
+            "count": count,
+        }
+        for (bucket, ground_truth_name), count in sorted(
+            gt_by_bucket.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )[:40]
+    ]
+
+    worst_tickets_by_misses = []
+    for ticket_id, buckets in sorted(
+        ticket_buckets.items(),
+        key=lambda item: (-sum(item[1].values()), item[0]),
+    )[:20]:
+        worst_tickets_by_misses.append(
+            {
+                "ticket_id": ticket_id,
+                "total_misses": sum(buckets.values()),
+                "buckets": dict(
+                    sorted(
+                        buckets.items(),
+                        key=lambda item: (-item[1], item[0]),
+                    )
+                ),
+            }
+        )
+
+    return {
+        "bucket_counts": dict(
+            sorted(
+                bucket_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ),
+        "top_missed_gt_by_bucket": top_missed_gt_by_bucket,
+        "worst_tickets_by_misses": worst_tickets_by_misses,
+        "sent_to_llm_but_skipped_examples": sent_to_llm_but_skipped_examples,
+    }
+
+
 def summarize_by_output_count(results: list[TicketMetrics]) -> dict[str, dict[str, Any]]:
     """Group sweep-mode results by final_output_count and run summarize() per group."""
-    from collections import defaultdict
-
     groups: dict[int, list[TicketMetrics]] = defaultdict(list)
     for row in results:
         groups[int(row.final_output_count or 0)].append(row)
@@ -1395,6 +1480,59 @@ def print_summary(summary: dict[str, Any]) -> None:
     print(f"  avg prompt chars:{summary['avg_prompt_chars']:.1f}")
     print(f"  avg system chars:{summary['avg_system_prompt_chars']:.1f}")
     print(f"  avg LLM ms:      {summary['avg_llm_ms']:.1f}")
+
+
+def print_miss_bucket_summary(miss_summary: dict[str, Any]) -> None:
+    bucket_counts = dict(miss_summary.get("bucket_counts") or {})
+
+    print("")
+    print("MISS BUCKET SUMMARY")
+    if not bucket_counts:
+        print("  no missed_ground_truth_debug rows found")
+        return
+
+    for bucket, count in bucket_counts.items():
+        print(f"  {bucket:<30} {int(count):>6}")
+
+    top_missed = list(miss_summary.get("top_missed_gt_by_bucket") or [])
+    if top_missed:
+        print("")
+        print("TOP MISSED GT BY BUCKET")
+        for row in top_missed:
+            print(
+                f"  {int(row.get('count') or 0):>2} | "
+                f"{str(row.get('bucket') or ''):<28} | "
+                f"{str(row.get('ground_truth_name') or '')}"
+            )
+
+    worst_tickets = list(miss_summary.get("worst_tickets_by_misses") or [])
+    if worst_tickets:
+        print("")
+        print("WORST TICKETS BY MISSES")
+        for row in worst_tickets:
+            print(
+                f"  {str(row.get('ticket_id') or '')} | "
+                f"total_misses={int(row.get('total_misses') or 0)}"
+            )
+            buckets = dict(row.get("buckets") or {})
+            for bucket, count in buckets.items():
+                print(f"    {bucket:<30} {int(count):>6}")
+
+    skipped_examples = list(miss_summary.get("sent_to_llm_but_skipped_examples") or [])
+    if skipped_examples:
+        print("")
+        print("SENT TO LLM BUT SKIPPED EXAMPLES")
+        for row in skipped_examples:
+            print(
+                f"  {str(row.get('ticket_id') or '')} | "
+                f"{str(row.get('ground_truth_name') or '')} | "
+                f"llm_rank={_display_rank(row.get('llm_rank'))} | "
+                f"merged_rank={_display_rank(row.get('merged_rank'))}"
+            )
+
+
+def _display_rank(value: Any) -> str:
+    return "" if value is None else str(value)
 
 
 if __name__ == "__main__":

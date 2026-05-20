@@ -32,14 +32,30 @@ def extract_uploaded_file_text(
     return _extract_auto(file_bytes, filename, clean=clean)
 
 
+def extracted_rag_text(result: dict) -> str:
+    backend = str(result.get("backend") or "").strip().lower()
+    markdown = str(result.get("markdown") or "").strip()
+    text = str(result.get("text") or "").strip()
+
+    if backend == "unstructured" and markdown:
+        return markdown
+    return text or markdown
+
+
 def render_extraction_debug(result: dict, *, backend_requested: str, preview_chars: int = 1500) -> dict:
     metadata = dict(result.get("metadata") or {})
     text = str(result.get("text") or "")
+    markdown = str(result.get("markdown") or "")
+    backend_used = str(result.get("backend") or "")
+    rag_input_kind = "markdown" if backend_used.strip().lower() == "unstructured" and markdown.strip() else "text"
     return {
         "backend_requested": _normalize_backend(backend_requested),
-        "backend_used": str(result.get("backend") or ""),
+        "backend_used": backend_used,
         "filename": str(result.get("filename") or ""),
         "chars": int(metadata.get("chars") or len(text)),
+        "rag_input_kind": rag_input_kind,
+        "text_chars": len(text),
+        "markdown_chars": len(markdown),
         "words": int(metadata.get("words") or _word_count(text)),
         "element_count": int(metadata.get("element_count") or 0),
         "tables_detected": int(metadata.get("tables_detected") or 0),

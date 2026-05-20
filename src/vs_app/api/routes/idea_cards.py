@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from vs_app.modules.rag.extraction.backends import (
     extract_uploaded_file_text,
+    extracted_rag_text,
     render_extraction_debug,
 )
 from vs_app.shared.text_cleaning import clean_extracted_text
@@ -68,18 +69,22 @@ async def extract_idea_card(
     try:
         if suffix in {".txt", ".md", ".markdown"}:
             text = clean_extracted_text(file_bytes.decode("utf-8", errors="replace"))
+            markdown = text
+            rag_text = text
             extraction_debug = {
                 "backend_requested": "current",
                 "backend_used": "current",
                 "filename": clean_filename,
                 "chars": len(text),
+                "rag_input_kind": "text",
+                "text_chars": len(text),
+                "markdown_chars": len(markdown),
                 "words": len(text.split()),
                 "element_count": 1 if text else 0,
                 "tables_detected": 1 if "|" in text else 0,
                 "warnings": [],
                 "preview": text[:1500],
             }
-            markdown = text
         else:
             extracted = extract_uploaded_file_text(
                 file_bytes,
@@ -88,6 +93,7 @@ async def extract_idea_card(
             )
             text = str(extracted.get("text") or "").strip()
             markdown = str(extracted.get("markdown") or "")
+            rag_text = extracted_rag_text(extracted)
             extraction_debug = render_extraction_debug(
                 extracted,
                 backend_requested=extraction_backend,
@@ -95,13 +101,15 @@ async def extract_idea_card(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not extract idea card: {exc}") from exc
 
-    if not text.strip():
+    if not rag_text.strip():
         raise HTTPException(status_code=422, detail="No text could be extracted from this idea card")
 
     return {
         "filename": clean_filename,
         "text": text,
         "markdown": markdown,
+        "rag_text": rag_text,
         "char_count": len(text),
+        "rag_char_count": len(rag_text),
         "extraction_debug": extraction_debug,
     }

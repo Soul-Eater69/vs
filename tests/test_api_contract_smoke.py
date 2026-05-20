@@ -100,6 +100,97 @@ def test_idea_cards_list_and_text_extract(monkeypatch) -> None:
         )
         assert extract_response.status_code == 200
         assert extract_response.json()["text"] == "uploaded idea card"
+        assert extract_response.json()["rag_text"] == "uploaded idea card"
+        assert extract_response.json()["rag_char_count"] == len("uploaded idea card")
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_idea_card_extract_response_uses_unstructured_markdown_for_rag_text(monkeypatch) -> None:
+    markdown = "[NarrativeText | page 1]\nStructured body"
+
+    monkeypatch.setattr(
+        idea_cards,
+        "extract_uploaded_file_text",
+        lambda *args, **kwargs: {
+            "backend": "unstructured",
+            "filename": "upload.pdf",
+            "text": "Structured body",
+            "markdown": markdown,
+            "metadata": {"chars": len("Structured body"), "words": 2, "element_count": 1},
+        },
+    )
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/idea-cards/extract?filename=upload.pdf&extraction_backend=unstructured",
+        content=b"pdf bytes",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["text"] == "Structured body"
+    assert payload["markdown"] == markdown
+    assert payload["rag_text"] == markdown
+    assert payload["rag_char_count"] == len(markdown)
+    assert payload["extraction_debug"]["rag_input_kind"] == "markdown"
+
+
+def test_idea_card_extract_response_uses_current_text_for_rag_text(monkeypatch) -> None:
+    monkeypatch.setattr(
+        idea_cards,
+        "extract_uploaded_file_text",
+        lambda *args, **kwargs: {
+            "backend": "current",
+            "filename": "upload.pdf",
+            "text": "Current text",
+            "markdown": "[Slide]\nCurrent text",
+            "metadata": {"chars": len("Current text"), "words": 2, "element_count": 1},
+        },
+    )
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/idea-cards/extract?filename=upload.pdf&extraction_backend=current",
+        content=b"pdf bytes",
+        headers={"Content-Type": "application/octet-stream"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["rag_text"] == "Current text"
+    assert payload["rag_char_count"] == len("Current text")
+    assert payload["extraction_debug"]["rag_input_kind"] == "text"
+
+
+def test_local_ticket_unstructured_extraction_uses_markdown_for_rag_text(monkeypatch) -> None:
+    scratch = Path("pytest-cache-files-local-rag-extract-test")
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir()
+    try:
+        (scratch / "IDMT-77.pdf").write_bytes(b"pdf bytes")
+        markdown = "[Title | page 1]\nStructured local body"
+
+        monkeypatch.setattr(rag, "_IDEA_CARDS_DIR", scratch)
+        monkeypatch.setattr(
+            rag,
+            "extract_uploaded_file_text",
+            lambda *args, **kwargs: {
+                "backend": "unstructured",
+                "filename": "IDMT-77.pdf",
+                "text": "Structured local body",
+                "markdown": markdown,
+                "metadata": {"chars": len("Structured local body"), "words": 3, "element_count": 1},
+            },
+        )
+
+        text, debug = rag._idea_card_text_from_request(
+            ValueStreamRagRequest(ticket_id="IDMT-77", extraction_backend="unstructured")
+        )
+
+        assert text == markdown
+        assert debug["rag_input_kind"] == "markdown"
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

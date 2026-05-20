@@ -17,6 +17,7 @@ from vs_app.integrations.files import idea_card_extractor
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
 from vs_app.modules.rag.extraction.backends import (
     extract_uploaded_file_text,
+    extracted_rag_text,
     render_extraction_debug,
 )
 from vs_app.modules.rag.service import ValueStreamRagCommand
@@ -100,7 +101,7 @@ def _ground_truth_for_ticket(ticket_id: str | None) -> list[str]:
 
 
 def _idea_card_text_from_request(request: ValueStreamRagRequest) -> tuple[str, dict]:
-    """Load the idea-card body used for prediction, without extracting labels."""
+    """Load the idea-card body used for prediction."""
     raw_text = request.idea_card_text or ""
     if raw_text or not request.ticket_id:
         return raw_text, dict(request.extraction_debug or {})
@@ -127,6 +128,9 @@ def _idea_card_text_from_request(request: ValueStreamRagRequest) -> tuple[str, d
                 "backend_used": "current",
                 "filename": path.name,
                 "chars": len(text),
+                "rag_input_kind": "text",
+                "text_chars": len(text),
+                "markdown_chars": len(text),
                 "words": len(text.split()),
                 "element_count": 1 if text.strip() else 0,
                 "tables_detected": 1 if "|" in text else 0,
@@ -139,7 +143,7 @@ def _idea_card_text_from_request(request: ValueStreamRagRequest) -> tuple[str, d
             path.name,
             backend=request.extraction_backend,
         )
-        return str(extracted.get("text") or ""), render_extraction_debug(
+        return extracted_rag_text(extracted), render_extraction_debug(
             extracted,
             backend_requested=request.extraction_backend,
         )

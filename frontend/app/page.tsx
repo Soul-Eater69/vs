@@ -174,6 +174,9 @@ interface ExtractionDebug {
   backend_used?: string;
   filename?: string;
   chars?: number;
+  rag_input_kind?: string;
+  text_chars?: number;
+  markdown_chars?: number;
   words?: number;
   element_count?: number;
   tables_detected?: number;
@@ -1349,6 +1352,7 @@ function RuntimeDebugPane({
   const historicalCounts = (asRecord(debug?.historical_counts) ?? {}) as Record<string, unknown>;
   const windowCounts = (asRecord(debug?.candidate_window_counts) ?? {}) as Record<string, unknown>;
   const extractionDebug = (asRecord(debug?.extraction_debug) ?? {}) as Record<string, unknown>;
+  const hasExtractionDebugField = (key: string) => Object.prototype.hasOwnProperty.call(extractionDebug, key);
 
   const item = (label: string, value: unknown) => (
     <div className="flex items-center justify-between gap-4 rounded border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900">
@@ -1408,7 +1412,10 @@ function RuntimeDebugPane({
           <div className="grid grid-cols-1 gap-2 md:grid-cols-3 xl:grid-cols-6">
             {item('Backend requested', extractionDebug.backend_requested)}
             {item('Backend used', extractionDebug.backend_used)}
+            {hasExtractionDebugField('rag_input_kind') && item('RAG input kind', extractionDebug.rag_input_kind)}
             {item('Chars', extractionDebug.chars)}
+            {hasExtractionDebugField('text_chars') && item('Text chars', extractionDebug.text_chars)}
+            {hasExtractionDebugField('markdown_chars') && item('Markdown chars', extractionDebug.markdown_chars)}
             {item('Words', extractionDebug.words)}
             {item('Elements', extractionDebug.element_count)}
             {item('Tables', extractionDebug.tables_detected)}
@@ -1675,6 +1682,7 @@ export default function Home() {
   const [count, setCount] = useState(15);
   const [uploadedIdeaText, setUploadedIdeaText] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState('');
+  const [uploadedExtractedCharCount, setUploadedExtractedCharCount] = useState<number | null>(null);
   const [uploadedExtractionDebug, setUploadedExtractionDebug] = useState<ExtractionDebug | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -1755,12 +1763,20 @@ export default function Home() {
       const payload = await res.json() as {
         filename?: string;
         text?: string;
+        rag_text?: string;
         char_count?: number;
+        rag_char_count?: number;
         extraction_debug?: ExtractionDebug;
       };
-      if (!payload.text?.trim()) throw new Error('No text could be extracted from this idea card.');
-      setUploadedIdeaText(payload.text);
+      const ragText = payload.rag_text?.trim() || payload.text?.trim() || '';
+      if (!ragText) throw new Error('No text could be extracted from this idea card.');
+      setUploadedIdeaText(ragText);
       setUploadedFileName(payload.filename || file.name);
+      setUploadedExtractedCharCount(
+        typeof payload.char_count === 'number' && Number.isFinite(payload.char_count)
+          ? payload.char_count
+          : ragText.length,
+      );
       setUploadedExtractionDebug(payload.extraction_debug ?? null);
       setResult(null);
       setErr(null);
@@ -1769,6 +1785,7 @@ export default function Home() {
     } catch (error: unknown) {
       setUploadedIdeaText('');
       setUploadedFileName('');
+      setUploadedExtractedCharCount(null);
       setUploadedExtractionDebug(null);
       setUploadError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1794,6 +1811,7 @@ export default function Home() {
   const clearUpload = useCallback(() => {
     setUploadedIdeaText('');
     setUploadedFileName('');
+    setUploadedExtractedCharCount(null);
     setUploadedExtractionDebug(null);
     setUploadError(null);
   }, []);
@@ -1994,7 +2012,7 @@ export default function Home() {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <div className="font-semibold text-teal-900 dark:text-teal-200">{uploadedFileName}</div>
-                        <div className="mt-1 text-zinc-500 dark:text-zinc-400">{uploadedIdeaText.length.toLocaleString()} extracted characters</div>
+                        <div className="mt-1 text-zinc-500 dark:text-zinc-400">{(uploadedExtractedCharCount ?? uploadedIdeaText.length).toLocaleString()} extracted characters</div>
                         {uploadedExtractionDebug && (
                           <div className="mt-1 text-zinc-500 dark:text-zinc-400">
                             Backend {String(uploadedExtractionDebug.backend_used ?? '-')} · {String(uploadedExtractionDebug.words ?? '-')} words · {String(uploadedExtractionDebug.element_count ?? '-')} elements

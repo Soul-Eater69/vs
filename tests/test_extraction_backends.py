@@ -7,6 +7,8 @@ import types
 from vs_app.modules.rag.extraction.backends import (
     _render_unstructured_elements,
     extract_uploaded_file_text,
+    extracted_rag_text,
+    render_extraction_debug,
 )
 
 
@@ -38,6 +40,62 @@ def test_current_backend_routes_by_extension(monkeypatch) -> None:
     assert pdf["metadata"]["tables_detected"] == 1
     assert "docx section text" in docx["markdown"]
     assert calls == ["pptx:60", "pdf:False:50", "docx"]
+
+
+def test_extracted_rag_text_returns_text_for_current_backend() -> None:
+    result = {
+        "backend": "current",
+        "text": "clean joined text",
+        "markdown": "[Slide]\nstructured markdown",
+    }
+
+    assert extracted_rag_text(result) == "clean joined text"
+
+
+def test_extracted_rag_text_returns_markdown_for_unstructured_backend() -> None:
+    result = {
+        "backend": "unstructured",
+        "text": "clean joined text",
+        "markdown": "[NarrativeText | page 1]\nclean joined text",
+    }
+
+    assert extracted_rag_text(result) == "[NarrativeText | page 1]\nclean joined text"
+
+
+def test_extracted_rag_text_falls_back_to_text_for_unstructured_without_markdown() -> None:
+    result = {
+        "backend": "unstructured",
+        "text": "clean joined text",
+        "markdown": "",
+    }
+
+    assert extracted_rag_text(result) == "clean joined text"
+
+
+def test_extracted_rag_text_returns_markdown_when_auto_selected_unstructured() -> None:
+    result = {
+        "backend": "unstructured",
+        "text": "auto selected plain text",
+        "markdown": "[Title | page 1]\nauto selected plain text",
+    }
+
+    assert extracted_rag_text(result) == "[Title | page 1]\nauto selected plain text"
+
+
+def test_render_extraction_debug_reports_rag_input_kind_and_lengths() -> None:
+    result = {
+        "backend": "unstructured",
+        "filename": "sample.pdf",
+        "text": "plain text",
+        "markdown": "[NarrativeText | page 1]\nplain text",
+        "metadata": {"chars": 10, "words": 2},
+    }
+
+    debug = render_extraction_debug(result, backend_requested="auto")
+
+    assert debug["rag_input_kind"] == "markdown"
+    assert debug["text_chars"] == len("plain text")
+    assert debug["markdown_chars"] == len("[NarrativeText | page 1]\nplain text")
 
 
 def test_unstructured_backend_handles_import_error_gracefully(monkeypatch) -> None:

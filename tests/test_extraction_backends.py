@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+from pathlib import Path
 import sys
 import types
 
@@ -121,6 +122,36 @@ def test_unstructured_backend_handles_import_error_gracefully(monkeypatch) -> No
     assert any("unstructured is not installed" in warning for warning in result["metadata"]["warnings"])
 
 
+def test_unstructured_backend_passes_closed_temp_file_to_partition(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_partition(filename: str) -> list[FakeElement]:
+        tmp_path = Path(filename)
+        captured["exists_during_partition"] = tmp_path.exists()
+        captured["name"] = tmp_path.name
+        captured["suffix"] = tmp_path.suffix
+        captured["bytes"] = tmp_path.read_bytes()
+        return [FakeElement("NarrativeText", "temp body", page_number=1)]
+
+    _install_fake_unstructured(monkeypatch, fake_partition)
+
+    result = extract_uploaded_file_text(
+        b"fake pdf bytes",
+        "nested/sample.pdf",
+        backend="unstructured",
+        clean=False,
+    )
+
+    assert captured["exists_during_partition"] is True
+    assert captured["name"] == "sample.pdf"
+    assert captured["suffix"] == ".pdf"
+    assert captured["bytes"] == b"fake pdf bytes"
+    assert result["backend"] == "unstructured"
+    assert result["filename"] == "sample.pdf"
+    assert "[NarrativeText | page 1]" in result["markdown"]
+    assert result["text"] == "temp body"
+
+
 def test_auto_backend_falls_back_to_unstructured_when_current_text_is_weak(monkeypatch) -> None:
     monkeypatch.setattr(
         "vs_app.integrations.files.pptx_extractor.extract_pptx",
@@ -168,11 +199,11 @@ class FakeElement:
         self.metadata = FakeMetadata(**metadata)
 
 
-def _install_fake_unstructured(monkeypatch, elements: list[FakeElement]) -> None:
+def _install_fake_unstructured(monkeypatch, elements: list[FakeElement] | object) -> None:
     unstructured_module = types.ModuleType("unstructured")
     partition_module = types.ModuleType("unstructured.partition")
     auto_module = types.ModuleType("unstructured.partition.auto")
-    auto_module.partition = lambda filename: elements
+    auto_module.partition = elements if callable(elements) else lambda filename: elements
     partition_module.auto = auto_module
     unstructured_module.partition = partition_module
     monkeypatch.setitem(sys.modules, "unstructured", unstructured_module)

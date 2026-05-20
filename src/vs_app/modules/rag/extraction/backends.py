@@ -140,10 +140,16 @@ def _extract_unstructured(file_bytes: bytes, filename: str, *, clean: bool) -> d
             warnings=[f"unstructured is not installed: {exc}"],
         )
 
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=True) as tmp:
-        tmp.write(file_bytes)
-        tmp.flush()
-        elements = list(partition(filename=tmp.name) or [])
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        safe_name = Path(filename or f"input{ext}").name
+        if not Path(safe_name).suffix:
+            safe_name = f"{safe_name}{ext}"
+
+        tmp_path = Path(tmp_dir) / safe_name
+        tmp_path.write_bytes(file_bytes)
+
+        # Windows keeps NamedTemporaryFile handles locked; this path is closed before partition reads it.
+        elements = list(partition(filename=str(tmp_path)) or [])
 
     markdown, text, tables_detected = _render_unstructured_elements(elements)
     if clean:

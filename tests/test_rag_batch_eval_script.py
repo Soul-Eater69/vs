@@ -578,6 +578,60 @@ def test_evaluate_one_unstructured_passes_markdown_to_rag(tmp_path, monkeypatch)
     assert (
         tmp_path / "out" / "extraction_debug" / "IDMT-1.unstructured.rag_input.md"
     ).read_text(encoding="utf-8") == markdown
+    assert (
+        tmp_path / "out" / "extraction_debug" / "IDMT-1.unstructured.extracted_text.txt"
+    ).read_text(encoding="utf-8") == "Structured body"
+    assert (
+        tmp_path / "out" / "extraction_debug" / "IDMT-1.unstructured.extracted_markdown.md"
+    ).read_text(encoding="utf-8") == markdown
+    debug_payload = eval_script.json.loads(
+        (
+            tmp_path
+            / "out"
+            / "extraction_debug"
+            / "IDMT-1.unstructured.extraction_debug.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert debug_payload["backend_used"] == "unstructured"
+    assert debug_payload["rag_input_chars"] == len(markdown)
+    assert debug_payload["text_chars"] == len("Structured body")
+    assert debug_payload["markdown_chars"] == len(markdown)
+
+
+def test_write_extraction_debug_artifacts_writes_all_files(tmp_path) -> None:
+    paths = eval_script.write_extraction_debug_artifacts(
+        output_dir=tmp_path,
+        ticket_id="IDMT-9",
+        extraction_backend="auto",
+        rag_input_text="[Title | page 1]\nRAG body",
+        extraction_debug={
+            "backend_requested": "auto",
+            "backend_used": "unstructured",
+            "rag_input_kind": "markdown",
+            "warnings": ["sample"],
+        },
+        extracted_result={
+            "backend": "unstructured",
+            "filename": "IDMT-9.pdf",
+            "text": "plain body",
+            "markdown": "[Title | page 1]\nRAG body",
+            "metadata": {"warnings": ["sample"], "element_count": 1},
+        },
+    )
+
+    assert set(paths) == {
+        "rag_input",
+        "extracted_text",
+        "extracted_markdown",
+        "extraction_debug",
+    }
+    assert paths["rag_input"].read_text(encoding="utf-8") == "[Title | page 1]\nRAG body"
+    assert paths["extracted_text"].read_text(encoding="utf-8") == "plain body"
+    assert paths["extracted_markdown"].read_text(encoding="utf-8") == "[Title | page 1]\nRAG body"
+    debug_payload = eval_script.json.loads(paths["extraction_debug"].read_text(encoding="utf-8"))
+    assert debug_payload["ticket_id"] == "IDMT-9"
+    assert debug_payload["backend_used"] == "unstructured"
+    assert debug_payload["extracted_metadata"]["element_count"] == 1
 
 
 def test_evaluate_one_text_files_use_cleaned_direct_text(tmp_path, monkeypatch) -> None:
@@ -618,6 +672,34 @@ def test_evaluate_one_text_files_use_cleaned_direct_text(tmp_path, monkeypatch) 
     assert row.extraction_backend_used == "current"
     assert row.extraction_rag_input_kind == "text"
     assert row.extraction_text_chars == len("Alpha beta")
+
+
+def test_extract_eval_rag_input_returns_extracted_result_for_text_file(tmp_path) -> None:
+    path = tmp_path / "IDMT-3.txt"
+    path.write_text("One    two", encoding="utf-8")
+
+    text, extraction_debug, extracted_result = eval_script.extract_eval_rag_input(
+        EvaluationItem(ticket_id="IDMT-3", path=path, ground_truth=[]),
+        extraction_backend="auto",
+    )
+
+    assert text == "One two"
+    assert extraction_debug["backend_requested"] == "auto"
+    assert extraction_debug["backend_used"] == "current"
+    assert extracted_result == {
+        "backend": "current",
+        "filename": "IDMT-3.txt",
+        "text": "One two",
+        "markdown": "One two",
+        "metadata": {
+            "extension": ".txt",
+            "chars": len("One two"),
+            "words": 2,
+            "element_count": 1,
+            "tables_detected": 0,
+            "warnings": [],
+        },
+    }
 
 
 def test_serialize_result_includes_extraction_debug_fields() -> None:

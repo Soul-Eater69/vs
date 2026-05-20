@@ -140,20 +140,35 @@ def _extract_unstructured(file_bytes: bytes, filename: str, *, clean: bool) -> d
             warnings=[f"unstructured is not installed: {exc}"],
         )
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        safe_name = Path(filename or f"input{ext}").name
-        if not Path(safe_name).suffix:
-            safe_name = f"{safe_name}{ext}"
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            safe_name = Path(filename or f"input{ext}").name
+            if not Path(safe_name).suffix:
+                safe_name = f"{safe_name}{ext}"
 
-        tmp_path = Path(tmp_dir) / safe_name
-        tmp_path.write_bytes(file_bytes)
+            tmp_path = Path(tmp_dir) / safe_name
+            tmp_path.write_bytes(file_bytes)
 
-        # Windows keeps NamedTemporaryFile handles locked; this path is closed before partition reads it.
-        elements = list(partition(filename=str(tmp_path)) or [])
+            # Windows keeps NamedTemporaryFile handles locked; this path is closed before partition reads it.
+            elements = list(partition(filename=str(tmp_path)) or [])
 
-    markdown, text, tables_detected = _render_unstructured_elements(elements)
-    if clean:
-        text = clean_extracted_text(text)
+        markdown, text, tables_detected = _render_unstructured_elements(elements)
+        if clean:
+            text = clean_extracted_text(text)
+    except Exception as exc:
+        return _result(
+            backend="unstructured",
+            filename=filename,
+            extension=ext,
+            text="",
+            markdown="",
+            element_count=0,
+            tables_detected=0,
+            warnings=[
+                "unstructured failed; fell back to current extractor: "
+                f"{type(exc).__name__}: {exc}"
+            ],
+        )
     return _result(
         backend="unstructured",
         filename=filename,

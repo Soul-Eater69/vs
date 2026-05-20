@@ -656,7 +656,7 @@ def extract_eval_rag_input(
     item: EvaluationItem,
     *,
     extraction_backend: str = "current",
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
     from vs_app.modules.rag.extraction.backends import (
         extract_uploaded_file_text,
         extracted_rag_text,
@@ -666,36 +666,86 @@ def extract_eval_rag_input(
 
     suffix = item.path.suffix.lower()
     if suffix in {".txt", ".md", ".markdown"}:
-        text = clean_extracted_text(item.path.read_text(encoding="utf-8"))
-        extraction_debug = {
-            "backend_requested": extraction_backend,
-            "backend_used": "current",
+        extracted_text = clean_extracted_text(item.path.read_text(encoding="utf-8"))
+        extracted_result = {
+            "backend": "current",
             "filename": item.path.name,
-            "chars": len(text),
-            "rag_input_kind": "text",
-            "text_chars": len(text),
-            "markdown_chars": len(text),
-            "words": len(text.split()),
-            "element_count": 1 if text else 0,
-            "tables_detected": 1 if "|" in text else 0,
-            "warnings": [],
-            "preview": text[:1500],
+            "text": extracted_text,
+            "markdown": extracted_text,
+            "metadata": {
+                "extension": suffix,
+                "chars": len(extracted_text),
+                "words": len(extracted_text.split()),
+                "element_count": 1 if extracted_text else 0,
+                "tables_detected": 1 if "|" in extracted_text else 0,
+                "warnings": [],
+            },
         }
     else:
-        extracted = extract_uploaded_file_text(
+        extracted_result = extract_uploaded_file_text(
             item.path.read_bytes(),
             item.path.name,
             backend=extraction_backend,
         )
-        text = extracted_rag_text(extracted)
-        extraction_debug = render_extraction_debug(
-            extracted,
-            backend_requested=extraction_backend,
-        )
+
+    text = extracted_rag_text(extracted_result)
+    extraction_debug = render_extraction_debug(
+        extracted_result,
+        backend_requested=extraction_backend,
+    )
 
     if not text.strip():
         raise ValueError(f"No text could be extracted from {item.path}")
-    return text, extraction_debug
+    return text, extraction_debug, extracted_result
+
+
+def write_extraction_debug_artifacts(
+    *,
+    output_dir: str | Path,
+    ticket_id: str,
+    extraction_backend: str,
+    rag_input_text: str,
+    extraction_debug: dict[str, Any],
+    extracted_result: dict[str, Any],
+) -> dict[str, Path]:
+    debug_dir = Path(output_dir) / "extraction_debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    safe_ticket_id = safe_filename_part(ticket_id or "ticket")
+    safe_backend = safe_filename_part(extraction_backend or "current")
+    base = f"{safe_ticket_id}.{safe_backend}"
+
+    text = str(extracted_result.get("text") or "")
+    markdown = str(extracted_result.get("markdown") or "")
+    metadata = extracted_result.get("metadata") or {}
+
+    paths = {
+        "rag_input": debug_dir / f"{base}.rag_input.md",
+        "extracted_text": debug_dir / f"{base}.extracted_text.txt",
+        "extracted_markdown": debug_dir / f"{base}.extracted_markdown.md",
+        "extraction_debug": debug_dir / f"{base}.extraction_debug.json",
+    }
+    paths["rag_input"].write_text(rag_input_text, encoding="utf-8")
+    paths["extracted_text"].write_text(text, encoding="utf-8")
+    paths["extracted_markdown"].write_text(markdown, encoding="utf-8")
+    paths["extraction_debug"].write_text(
+        json.dumps(
+            {
+                "ticket_id": ticket_id,
+                "extraction_backend_requested": extraction_backend,
+                "extraction_debug": extraction_debug,
+                "extracted_metadata": metadata if isinstance(metadata, dict) else {},
+                "backend_used": extracted_result.get("backend"),
+                "filename": extracted_result.get("filename"),
+                "rag_input_chars": len(rag_input_text),
+                "text_chars": len(text),
+                "markdown_chars": len(markdown),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return paths
 
 
 def write_extraction_debug_input(
@@ -705,13 +755,21 @@ def write_extraction_debug_input(
     extraction_backend: str,
     text: str,
 ) -> Path:
-    debug_dir = Path(output_dir) / "extraction_debug"
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    safe_ticket_id = safe_filename_part(ticket_id or "ticket")
-    safe_backend = safe_filename_part(extraction_backend or "current")
-    path = debug_dir / f"{safe_ticket_id}.{safe_backend}.rag_input.md"
-    path.write_text(text, encoding="utf-8")
-    return path
+    paths = write_extraction_debug_artifacts(
+        output_dir=output_dir,
+        ticket_id=ticket_id,
+        extraction_backend=extraction_backend,
+        rag_input_text=text,
+        extraction_debug={},
+        extracted_result={
+            "backend": extraction_backend,
+            "filename": "",
+            "text": text,
+            "markdown": text,
+            "metadata": {},
+        },
+    )
+    return paths["rag_input"]
 
 
 def safe_filename_part(value: str) -> str:
@@ -888,16 +946,18 @@ def evaluate_one(
     from vs_app.modules.rag.pipeline import select_value_streams
 
     total_start = time.perf_counter()
-    text, extraction_debug = extract_eval_rag_input(
+    text, extraction_debug, extracted_result = extract_eval_rag_input(
         item,
         extraction_backend=extraction_backend,
     )
     if write_extraction_debug:
-        write_extraction_debug_input(
+        write_extraction_debug_artifacts(
             output_dir=output_dir,
             ticket_id=item.ticket_id,
             extraction_backend=extraction_backend,
-            text=text,
+            rag_input_text=text,
+            extraction_debug=extraction_debug,
+            extracted_result=extracted_result,
         )
     exclude_ids = [item.ticket_id] if exclude_source_ticket else None
 

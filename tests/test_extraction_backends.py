@@ -152,6 +152,53 @@ def test_unstructured_backend_passes_closed_temp_file_to_partition(monkeypatch) 
     assert result["text"] == "temp body"
 
 
+def test_unstructured_backend_falls_back_to_current_when_partition_fails(monkeypatch) -> None:
+    def raise_partition(filename: str) -> list[FakeElement]:
+        raise RuntimeError("parser exploded")
+
+    _install_fake_unstructured(monkeypatch, raise_partition)
+    monkeypatch.setattr(
+        "vs_app.integrations.files.pdf_extractor.extract_pdf",
+        lambda file_bytes, *, ocr_enabled=False, max_pages=50: {
+            "chunks": [{"text": "fallback current pdf text"}]
+        },
+    )
+
+    result = extract_uploaded_file_text(b"pdf", "sample.pdf", backend="unstructured")
+
+    assert result["backend"] == "current"
+    assert result["text"] == "fallback current pdf text"
+    assert any(
+        "unstructured failed; fell back to current extractor: RuntimeError: parser exploded"
+        in warning
+        for warning in result["metadata"]["warnings"]
+    )
+
+
+def test_auto_backend_keeps_current_when_unstructured_partition_fails(monkeypatch) -> None:
+    def raise_partition(filename: str) -> list[FakeElement]:
+        raise RuntimeError("pdfinfo missing")
+
+    _install_fake_unstructured(monkeypatch, raise_partition)
+    monkeypatch.setattr(
+        "vs_app.integrations.files.pdf_extractor.extract_pdf",
+        lambda file_bytes, *, ocr_enabled=False, max_pages=50: {
+            "chunks": [{"text": "tiny"}]
+        },
+    )
+
+    result = extract_uploaded_file_text(b"pdf", "sample.pdf", backend="auto")
+
+    assert result["backend"] == "current"
+    assert result["text"] == "tiny"
+    assert any("auto backend kept current extraction" in warning for warning in result["metadata"]["warnings"])
+    assert any(
+        "unstructured failed; fell back to current extractor: RuntimeError: pdfinfo missing"
+        in warning
+        for warning in result["metadata"]["warnings"]
+    )
+
+
 def test_auto_backend_falls_back_to_unstructured_when_current_text_is_weak(monkeypatch) -> None:
     monkeypatch.setattr(
         "vs_app.integrations.files.pptx_extractor.extract_pptx",

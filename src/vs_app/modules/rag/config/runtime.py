@@ -62,6 +62,36 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
         5,
         max(1, llm_candidate_window - max_semantic_plus_historical - max_historical_only),
     )
+    idea_card_prompt_chars = _env_int(
+        "RAG_IDEA_CARD_PROMPT_CHARS",
+        2400,
+        min_value=500,
+        max_value=6000,
+    )
+    candidate_description_chars = _env_int(
+        "RAG_CANDIDATE_DESCRIPTION_CHARS",
+        160,
+        min_value=50,
+        max_value=500,
+    )
+    analogs_per_candidate = _env_int(
+        "RAG_ANALOGS_PER_CANDIDATE",
+        2,
+        min_value=0,
+        max_value=5,
+    )
+    analog_chars = _env_int(
+        "RAG_ANALOG_CHARS",
+        140,
+        min_value=40,
+        max_value=400,
+    )
+    historical_ticket_ids_per_candidate = _env_int(
+        "RAG_HISTORICAL_TICKET_IDS_PER_CANDIDATE",
+        3,
+        min_value=0,
+        max_value=5,
+    )
 
     return RagRuntimeConfig(
         final_output_count=requested,
@@ -72,9 +102,9 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
         max_semantic_only=max_semantic_only,
         max_historical_only=max_historical_only,
         max_supporting_tickets_per_candidate=2,
-        idea_card_prompt_chars=1800,
-        candidate_description_chars=100,
-        analogs_per_candidate=2,
-        analog_chars=80,
-        historical_ticket_ids_per_candidate=2,
+        idea_card_prompt_chars=idea_card_prompt_chars,
+        candidate_description_chars=candidate_description_chars,
+        analogs_per_candidate=analogs_per_candidate,
+        analog_chars=analog_chars,
+        historical_ticket_ids_per_candidate=historical_ticket_ids_per_candidate,
     )

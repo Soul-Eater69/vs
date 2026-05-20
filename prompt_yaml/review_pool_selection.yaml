@@ -73,6 +73,34 @@ system: |
   These are reasoning categories, not automatic selections.
   Select a candidate only when the current-card workflow reasonably affects that operation.
 
+  IMPACT-CHAIN AUDIT
+
+  Before finalizing, internally check the business impact chain:
+
+  1. What business capability, product, process, policy, service, or data flow is being changed?
+  2. What upstream or downstream operations must change because of it?
+  3. Which candidate value streams represent those affected operations?
+
+  Do not stop at the project headline. A value stream can be correct when it represents work
+  that must happen because of the idea card, even if the stream is not the main theme.
+
+  For changes involving product setup, benefit design, coverage, tiering, eligibility, group
+  setup, pricing, quoting, enrollment, provider network, claim handling, clinical review,
+  payment, billing, invoice, refund, reconciliation, compliance, reporting, inquiry, service,
+  outreach, or member/provider/employer support:
+
+  - check whether the candidate represents an operational workflow that must be configured,
+    executed, paid, billed, reconciled, reviewed, reported, monitored, or supported.
+  - select the candidate with lower confidence when the impact is indirect but still defensible.
+  - reject the candidate only when the current-card workflow does not actually affect that
+    operation.
+
+  Late-ranked candidates are not automatically weaker. Review every candidate using the same
+  evidence rule, regardless of rank.
+
+  Keep the existing false-positive guard. The prompt should still reject generic adjacency and
+  unsupported assumptions.
+
   COMMON FALSE POSITIVE CHECK
 
   Before selecting any candidate, verify that it is actually impacted by the idea card.
@@ -111,10 +139,12 @@ user: |
   TASK:
   Select the impacted value streams from the candidate list.
 
-  Include direct impacts and strong implied operational impacts.
-  Do not pad with unrelated streams.
+  Include direct impacts and defensible implied operational impacts.
+  Before finalizing, audit whether any candidate represents a downstream operation that must
+  change because of the idea card.
   Do not require literal wording match.
-  Use historical analog evidence as support when it fits the current card.
+  Do not pad with unrelated streams.
+  Use historical analog evidence as support only when it fits the current card.
 
   CANDIDATE VALUE STREAMS:
 

@@ -61,6 +61,46 @@ def _ticket_metrics(
     )
 
 
+def _minimal_rag_payload() -> dict:
+    return {
+        "selected_value_streams": [
+            {
+                "entity_id": "vs-a",
+                "entity_name": "A",
+                "selection_source": "llm_pick",
+            }
+        ],
+        "semantic_candidate_value_streams": [],
+        "historical_value_stream_support": [],
+        "merged_candidate_value_streams": [],
+        "historical_ticket_hits": [],
+        "historical_evidence_ticket_hits": [],
+        "historical_ignored_ticket_hits": [],
+        "historical_excluded_ticket_ids": [],
+        "llm_candidates": [],
+        "rag_runtime_config": {
+            "final_output_count": 1,
+            "semantic_fetch_k": 2,
+            "historical_ticket_fetch_k": 3,
+            "llm_candidate_window": 4,
+        },
+        "debug": {
+            "prompt_debug": {
+                "candidate_count": 1,
+                "prompt_chars": 10,
+                "system_prompt_chars": 5,
+            },
+            "timing_ms": {
+                "final_llm": 3,
+                "total": 4,
+            },
+            "candidate_window_counts": {},
+        },
+        "raw_response": {},
+        "query_preparation": {},
+    }
+
+
 def test_compute_metrics_reports_ticket_level_precision_recall() -> None:
     metrics = compute_metrics(
         ["Establish Product Offering", "Issue Payment", "Issue Payment"],
@@ -455,3 +495,164 @@ def test_eval_defaults_and_transient_detector(monkeypatch) -> None:
     assert os.environ["GENERATION_LLM_REASONING_EFFORT"] == "medium"
     assert is_transient_gateway_error(RuntimeError("504 Gateway Time-out"))
     assert not is_transient_gateway_error(ValueError("bad local file"))
+
+
+def test_parse_args_extraction_backend_defaults_to_current(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["evaluate_rag_batch.py"])
+
+    args = eval_script.parse_args()
+
+    assert args.extraction_backend == "current"
+    assert args.write_extraction_debug is False
+
+
+def test_parse_args_accepts_unstructured_extraction_backend(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "evaluate_rag_batch.py",
+            "--extraction-backend",
+            "unstructured",
+            "--write-extraction-debug",
+        ],
+    )
+
+    args = eval_script.parse_args()
+
+    assert args.extraction_backend == "unstructured"
+    assert args.write_extraction_debug is True
+
+
+def test_evaluate_one_unstructured_passes_markdown_to_rag(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "IDMT-1.pdf"
+    path.write_bytes(b"pdf")
+    markdown = "[NarrativeText | page 1]\nStructured body"
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "vs_app.modules.rag.extraction.backends.extract_uploaded_file_text",
+        lambda *args, **kwargs: {
+            "backend": "unstructured",
+            "filename": "IDMT-1.pdf",
+            "text": "Structured body",
+            "markdown": markdown,
+            "metadata": {
+                "chars": len("Structured body"),
+                "words": 2,
+                "element_count": 1,
+                "tables_detected": 0,
+                "warnings": ["sample warning"],
+            },
+        },
+    )
+
+    def fake_select_value_streams(query: str, **kwargs) -> dict:
+        captured["query"] = query
+        captured["kwargs"] = kwargs
+        return _minimal_rag_payload()
+
+    monkeypatch.setattr(
+        "vs_app.modules.rag.pipeline.select_value_streams",
+        fake_select_value_streams,
+    )
+
+    row = eval_script.evaluate_one(
+        EvaluationItem(ticket_id="IDMT-1", path=path, ground_truth=["A"]),
+        historical_faiss_dir="faiss",
+        historical_search_backend="azure",
+        historical_azure_index_name="hist",
+        exclude_source_ticket=True,
+        output_dir=tmp_path / "out",
+        extraction_backend="unstructured",
+        write_extraction_debug=True,
+        final_output_count=1,
+    )
+
+    assert captured["query"] == markdown
+    assert row.extraction_backend_requested == "unstructured"
+    assert row.extraction_backend_used == "unstructured"
+    assert row.extraction_rag_input_kind == "markdown"
+    assert row.extraction_markdown_chars == len(markdown)
+    assert row.extraction_warnings == ["sample warning"]
+    assert (
+        tmp_path / "out" / "extraction_debug" / "IDMT-1.unstructured.rag_input.md"
+    ).read_text(encoding="utf-8") == markdown
+
+
+def test_evaluate_one_text_files_use_cleaned_direct_text(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "IDMT-2.md"
+    path.write_text("Alpha    beta\n\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fail_extraction(*args, **kwargs):
+        raise AssertionError("document extractor should not be used for markdown files")
+
+    monkeypatch.setattr(
+        "vs_app.modules.rag.extraction.backends.extract_uploaded_file_text",
+        fail_extraction,
+    )
+
+    def fake_select_value_streams(query: str, **kwargs) -> dict:
+        captured["query"] = query
+        return _minimal_rag_payload()
+
+    monkeypatch.setattr(
+        "vs_app.modules.rag.pipeline.select_value_streams",
+        fake_select_value_streams,
+    )
+
+    row = eval_script.evaluate_one(
+        EvaluationItem(ticket_id="IDMT-2", path=path, ground_truth=["A"]),
+        historical_faiss_dir="faiss",
+        historical_search_backend="azure",
+        historical_azure_index_name="hist",
+        exclude_source_ticket=True,
+        output_dir=tmp_path / "out",
+        extraction_backend="unstructured",
+        final_output_count=1,
+    )
+
+    assert captured["query"] == "Alpha beta"
+    assert row.extraction_backend_requested == "unstructured"
+    assert row.extraction_backend_used == "current"
+    assert row.extraction_rag_input_kind == "text"
+    assert row.extraction_text_chars == len("Alpha beta")
+
+
+def test_serialize_result_includes_extraction_debug_fields() -> None:
+    row = _ticket_metrics()
+    row.extraction_backend_requested = "auto"
+    row.extraction_backend_used = "unstructured"
+    row.extraction_rag_input_kind = "markdown"
+    row.extraction_chars = 12
+    row.extraction_text_chars = 12
+    row.extraction_markdown_chars = 30
+    row.extraction_words = 2
+    row.extraction_element_count = 1
+    row.extraction_tables_detected = 0
+    row.extraction_warnings = ["auto selected unstructured"]
+
+    data = eval_script.serialize_result(row)
+
+    assert data["extraction_backend_requested"] == "auto"
+    assert data["extraction_backend_used"] == "unstructured"
+    assert data["extraction_rag_input_kind"] == "markdown"
+    assert data["extraction_markdown_chars"] == 30
+    assert data["extraction_warnings"] == ["auto selected unstructured"]
+
+
+def test_write_csv_includes_extraction_debug_fields(tmp_path) -> None:
+    row = _ticket_metrics()
+    row.extraction_backend_requested = "unstructured"
+    row.extraction_backend_used = "unstructured"
+    row.extraction_rag_input_kind = "markdown"
+    row.extraction_warnings = ["warning one", "warning two"]
+
+    path = tmp_path / "eval.csv"
+    eval_script.write_csv(path, [row])
+
+    text = path.read_text(encoding="utf-8")
+    assert "extraction_backend_requested" in text
+    assert "unstructured" in text
+    assert "warning one; warning two" in text

@@ -96,6 +96,16 @@ class TicketMetrics:
     merged_candidate_count: int
     historical_hit_count: int
     excluded_ticket_ids: list[str]
+    extraction_backend_requested: str = ""
+    extraction_backend_used: str = ""
+    extraction_rag_input_kind: str = ""
+    extraction_chars: int = 0
+    extraction_text_chars: int = 0
+    extraction_markdown_chars: int = 0
+    extraction_words: int = 0
+    extraction_element_count: int = 0
+    extraction_tables_detected: int = 0
+    extraction_warnings: list[str] | None = None
     historical_evidence_top_k: int = 0
     min_historical_evidence_score: float = 0.0
     qualified_historical_hit_count: int = 0
@@ -186,6 +196,7 @@ def main() -> int:
         f"exclude_source={not args.include_source_ticket}, "
         f"min_truth_streams={args.min_ground_truth_streams}, "
         f"historical_backend={args.historical_search_backend}, "
+        f"extraction_backend={args.extraction_backend}, "
         f"output_count_mode={args.output_count_mode}, "
         f"include_stages={args.include_stages}"
         + (f", sweep_counts={sweep_counts}" if args.output_count_mode == "sweep" else "")
@@ -200,6 +211,9 @@ def main() -> int:
         exclude_source_ticket=not args.include_source_ticket,
         retries=args.retries,
         retry_backoff_seconds=args.retry_backoff_seconds,
+        output_dir=output_dir,
+        extraction_backend=args.extraction_backend,
+        write_extraction_debug=args.write_extraction_debug,
         output_count_mode=args.output_count_mode,
         final_output_count=args.final_output_count,
         gt_buffer=args.gt_buffer,
@@ -219,6 +233,8 @@ def main() -> int:
         "historical_search_backend": args.historical_search_backend,
         "historical_azure_index_name": args.historical_azure_index_name,
         "ground_truth_source": args.ground_truth_source,
+        "extraction_backend": args.extraction_backend,
+        "write_extraction_debug": bool(args.write_extraction_debug),
         "limit": args.limit,
         "concurrency": args.concurrency,
         "retries": args.retries,
@@ -281,6 +297,17 @@ def parse_args() -> argparse.Namespace:
         choices=["azure", "faiss"],
         default="azure",
         help="Source for eval ground-truth labels.",
+    )
+    parser.add_argument(
+        "--extraction-backend",
+        choices=["current", "unstructured", "auto"],
+        default="current",
+        help="Idea-card extraction backend for local files before condense/RAG.",
+    )
+    parser.add_argument(
+        "--write-extraction-debug",
+        action="store_true",
+        help="Write extracted RAG input text per ticket for debugging.",
     )
     parser.add_argument("--output-dir", default="output/rag_eval")
     parser.add_argument("--json-name", default="rag_batch_eval.json")
@@ -625,6 +652,73 @@ def discover_items(
     return candidates[: max(0, limit)]
 
 
+def extract_eval_rag_input(
+    item: EvaluationItem,
+    *,
+    extraction_backend: str = "current",
+) -> tuple[str, dict[str, Any]]:
+    from vs_app.modules.rag.extraction.backends import (
+        extract_uploaded_file_text,
+        extracted_rag_text,
+        render_extraction_debug,
+    )
+    from vs_app.shared.text_cleaning import clean_extracted_text
+
+    suffix = item.path.suffix.lower()
+    if suffix in {".txt", ".md", ".markdown"}:
+        text = clean_extracted_text(item.path.read_text(encoding="utf-8"))
+        extraction_debug = {
+            "backend_requested": extraction_backend,
+            "backend_used": "current",
+            "filename": item.path.name,
+            "chars": len(text),
+            "rag_input_kind": "text",
+            "text_chars": len(text),
+            "markdown_chars": len(text),
+            "words": len(text.split()),
+            "element_count": 1 if text else 0,
+            "tables_detected": 1 if "|" in text else 0,
+            "warnings": [],
+            "preview": text[:1500],
+        }
+    else:
+        extracted = extract_uploaded_file_text(
+            item.path.read_bytes(),
+            item.path.name,
+            backend=extraction_backend,
+        )
+        text = extracted_rag_text(extracted)
+        extraction_debug = render_extraction_debug(
+            extracted,
+            backend_requested=extraction_backend,
+        )
+
+    if not text.strip():
+        raise ValueError(f"No text could be extracted from {item.path}")
+    return text, extraction_debug
+
+
+def write_extraction_debug_input(
+    *,
+    output_dir: str | Path,
+    ticket_id: str,
+    extraction_backend: str,
+    text: str,
+) -> Path:
+    debug_dir = Path(output_dir) / "extraction_debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    safe_ticket_id = safe_filename_part(ticket_id or "ticket")
+    safe_backend = safe_filename_part(extraction_backend or "current")
+    path = debug_dir / f"{safe_ticket_id}.{safe_backend}.rag_input.md"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def safe_filename_part(value: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value or ""))
+    return safe.strip("._") or "item"
+
+
 def run_batch(
     items: list[EvaluationItem],
     *,
@@ -635,6 +729,9 @@ def run_batch(
     exclude_source_ticket: bool,
     retries: int,
     retry_backoff_seconds: float,
+    output_dir: str | Path = "output/rag_eval",
+    extraction_backend: str = "current",
+    write_extraction_debug: bool = False,
     output_count_mode: str,
     final_output_count: int,
     gt_buffer: int,
@@ -684,6 +781,9 @@ def run_batch(
                 exclude_source_ticket=exclude_source_ticket,
                 retries=retries,
                 retry_backoff_seconds=retry_backoff_seconds,
+                output_dir=output_dir,
+                extraction_backend=extraction_backend,
+                write_extraction_debug=write_extraction_debug,
                 final_output_count=count,
                 output_count_mode=mode_tag,
                 gt_buffer=buffer_used,
@@ -706,6 +806,7 @@ def run_batch(
                     output_count_mode=mode_tag,
                     final_output_count=count,
                     gt_buffer=buffer_used,
+                    extraction_backend_requested=extraction_backend,
                 )
             results.append(result)
             if result.status == "ok":
@@ -729,6 +830,9 @@ def evaluate_one_with_retries(
     exclude_source_ticket: bool,
     retries: int,
     retry_backoff_seconds: float,
+    output_dir: str | Path = "output/rag_eval",
+    extraction_backend: str = "current",
+    write_extraction_debug: bool = False,
     final_output_count: int,
     output_count_mode: str = "fixed",
     gt_buffer: int = 0,
@@ -744,6 +848,9 @@ def evaluate_one_with_retries(
                 historical_search_backend=historical_search_backend,
                 historical_azure_index_name=historical_azure_index_name,
                 exclude_source_ticket=exclude_source_ticket,
+                output_dir=output_dir,
+                extraction_backend=extraction_backend,
+                write_extraction_debug=write_extraction_debug,
                 final_output_count=final_output_count,
                 output_count_mode=output_count_mode,
                 gt_buffer=gt_buffer,
@@ -770,16 +877,28 @@ def evaluate_one(
     historical_search_backend: str | None,
     historical_azure_index_name: str | None,
     exclude_source_ticket: bool,
+    output_dir: str | Path = "output/rag_eval",
+    extraction_backend: str = "current",
+    write_extraction_debug: bool = False,
     final_output_count: int,
     output_count_mode: str = "fixed",
     gt_buffer: int = 0,
     include_stages: bool = False,
 ) -> TicketMetrics:
-    from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
     from vs_app.modules.rag.pipeline import select_value_streams
 
     total_start = time.perf_counter()
-    text = extract_idea_card_text(input_path=item.path)
+    text, extraction_debug = extract_eval_rag_input(
+        item,
+        extraction_backend=extraction_backend,
+    )
+    if write_extraction_debug:
+        write_extraction_debug_input(
+            output_dir=output_dir,
+            ticket_id=item.ticket_id,
+            extraction_backend=extraction_backend,
+            text=text,
+        )
     exclude_ids = [item.ticket_id] if exclude_source_ticket else None
 
     vs_start = time.perf_counter()
@@ -791,6 +910,8 @@ def evaluate_one(
         historical_azure_index_name=historical_azure_index_name,
         exclude_ticket_ids=exclude_ids,
     )
+    payload["debug"] = dict(payload.get("debug", {}) or {})
+    payload["debug"]["extraction_debug"] = extraction_debug
     payload["include_stage_predictions"] = bool(include_stages)
     vs_seconds = time.perf_counter() - vs_start
 
@@ -820,6 +941,11 @@ def evaluate_one(
     timing_ms = debug_fields["timing_ms"]
     window_counts = debug_fields["candidate_window_counts"]
     source_counts = count_selection_sources(selected_rows)
+    extraction_warnings = extraction_debug.get("warnings") or []
+    if not isinstance(extraction_warnings, list):
+        extraction_warnings = [str(extraction_warnings)]
+    else:
+        extraction_warnings = [str(warning) for warning in extraction_warnings]
 
     return TicketMetrics(
         ticket_id=item.ticket_id,
@@ -847,6 +973,16 @@ def evaluate_one(
         merged_candidate_count=len(payload.get("merged_candidate_value_streams", []) or []),
         historical_hit_count=len(payload.get("historical_ticket_hits", []) or []),
         excluded_ticket_ids=list(payload.get("historical_excluded_ticket_ids", []) or []),
+        extraction_backend_requested=str(extraction_debug.get("backend_requested") or ""),
+        extraction_backend_used=str(extraction_debug.get("backend_used") or ""),
+        extraction_rag_input_kind=str(extraction_debug.get("rag_input_kind") or ""),
+        extraction_chars=int(extraction_debug.get("chars") or 0),
+        extraction_text_chars=int(extraction_debug.get("text_chars") or 0),
+        extraction_markdown_chars=int(extraction_debug.get("markdown_chars") or 0),
+        extraction_words=int(extraction_debug.get("words") or 0),
+        extraction_element_count=int(extraction_debug.get("element_count") or 0),
+        extraction_tables_detected=int(extraction_debug.get("tables_detected") or 0),
+        extraction_warnings=extraction_warnings,
         historical_evidence_top_k=int(runtime_config.get("historical_evidence_top_k") or 0),
         min_historical_evidence_score=float(
             runtime_config.get("min_historical_evidence_score") or 0.0
@@ -1114,6 +1250,7 @@ def failed_result(
     output_count_mode: str = "fixed",
     final_output_count: int = 0,
     gt_buffer: int = 0,
+    extraction_backend_requested: str = "",
 ) -> TicketMetrics:
     return TicketMetrics(
         ticket_id=item.ticket_id,
@@ -1141,6 +1278,7 @@ def failed_result(
         merged_candidate_count=0,
         historical_hit_count=0,
         excluded_ticket_ids=[],
+        extraction_backend_requested=extraction_backend_requested,
         output_count_mode=output_count_mode,
         final_output_count=final_output_count,
         gt_buffer=gt_buffer,
@@ -1423,6 +1561,16 @@ def write_csv(path: Path, results: list[TicketMetrics]) -> None:
         "llm_candidate_count",
         "merged_candidate_count",
         "historical_hit_count",
+        "extraction_backend_requested",
+        "extraction_backend_used",
+        "extraction_rag_input_kind",
+        "extraction_chars",
+        "extraction_text_chars",
+        "extraction_markdown_chars",
+        "extraction_words",
+        "extraction_element_count",
+        "extraction_tables_detected",
+        "extraction_warnings",
         "historical_evidence_top_k",
         "min_historical_evidence_score",
         "qualified_historical_hit_count",

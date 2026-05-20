@@ -13,7 +13,12 @@ from fastapi.responses import StreamingResponse
 from vs_app.api.dependencies import ApiContainer, get_container
 from vs_app.api.schemas.rag_requests import ValueStreamRagRequest
 from vs_app.api.schemas.rag_responses import ValueStreamRagResponse
+from vs_app.integrations.files import idea_card_extractor
 from vs_app.ingestion.persistence.azure_historical_index import load_historical_summary_rows
+from vs_app.modules.rag.extraction.backends import (
+    extract_uploaded_file_text,
+    render_extraction_debug,
+)
 from vs_app.modules.rag.service import ValueStreamRagCommand
 from vs_app.modules.stages.pipeline import predict_stages
 from vs_app.modules.themes.title_builder import (
@@ -94,18 +99,49 @@ def _ground_truth_for_ticket(ticket_id: str | None) -> list[str]:
     return _ground_truth_from_azure(ticket_id)
 
 
-def _idea_card_text_from_request(request: ValueStreamRagRequest) -> str:
+def _idea_card_text_from_request(request: ValueStreamRagRequest) -> tuple[str, dict]:
     """Load the idea-card body used for prediction, without extracting labels."""
     raw_text = request.idea_card_text or ""
     if raw_text or not request.ticket_id:
-        return raw_text
+        return raw_text, dict(request.extraction_debug or {})
 
     try:
-        from vs_app.integrations.files.idea_card_extractor import extract_idea_card_text
+        if request.extraction_backend == "current":
+            return (
+                idea_card_extractor.extract_idea_card_text(
+                    doc_id=request.ticket_id,
+                    local_card_dir=_IDEA_CARDS_DIR,
+                ),
+                {},
+            )
 
-        return extract_idea_card_text(
+        path = idea_card_extractor.resolve_idea_card_path(
             doc_id=request.ticket_id,
             local_card_dir=_IDEA_CARDS_DIR,
+        )
+        suffix = path.suffix.lower()
+        if suffix in {".txt", ".md", ".markdown"}:
+            text = path.read_text(encoding="utf-8")
+            return text, {
+                "backend_requested": request.extraction_backend,
+                "backend_used": "current",
+                "filename": path.name,
+                "chars": len(text),
+                "words": len(text.split()),
+                "element_count": 1 if text.strip() else 0,
+                "tables_detected": 1 if "|" in text else 0,
+                "warnings": [],
+                "preview": text[:1500],
+            }
+
+        extracted = extract_uploaded_file_text(
+            path.read_bytes(),
+            path.name,
+            backend=request.extraction_backend,
+        )
+        return str(extracted.get("text") or ""), render_extraction_debug(
+            extracted,
+            backend_requested=request.extraction_backend,
         )
     except Exception as exc:
         logger.warning(
@@ -113,11 +149,11 @@ def _idea_card_text_from_request(request: ValueStreamRagRequest) -> str:
             request.ticket_id,
             exc,
         )
-        return ""
+        return "", {}
 
 
 def _command_from_request(request: ValueStreamRagRequest) -> ValueStreamRagCommand:
-    idea_card_text = _idea_card_text_from_request(request)
+    idea_card_text, extraction_debug = _idea_card_text_from_request(request)
     return ValueStreamRagCommand(
         ticket_id=request.ticket_id,
         idea_card_text=request.idea_card_text or idea_card_text or None,
@@ -128,6 +164,7 @@ def _command_from_request(request: ValueStreamRagRequest) -> ValueStreamRagComma
         historical_search_backend=_HISTORICAL_BACKEND,
         historical_azure_index_name=_HISTORICAL_AZURE_INDEX,
         exclude_source_ticket_from_historical=request.exclude_source_ticket_from_historical,
+        extraction_debug=extraction_debug,
     )
 
 
@@ -161,6 +198,8 @@ def _response_from_result(result: object, request: ValueStreamRagRequest) -> Val
             )
 
     response.debug = dict(response.debug or {})
+    if request.extraction_debug:
+        response.debug["extraction_debug"] = dict(request.extraction_debug)
     if request.include_stage_predictions and response.selected_value_streams:
         condensed_idea_card = (
             query_preparation.get("query_for_prompt")

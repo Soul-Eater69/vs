@@ -31,6 +31,7 @@ def test_rag_public_schema_requires_query_input() -> None:
     assert not hasattr(ValueStreamRagRequest(ticket_id="IDMT-123"), "mode")
     assert ValueStreamRagRequest(ticket_id="IDMT-123").exclude_source_ticket_from_historical is True
     assert ValueStreamRagRequest(ticket_id="IDMT-123").include_stage_predictions is False
+    assert ValueStreamRagRequest(ticket_id="IDMT-123").extraction_backend == "current"
 
     try:
         ValueStreamRagRequest()
@@ -192,6 +193,26 @@ def test_response_adds_theme_payloads_after_prediction(monkeypatch) -> None:
     assert response.stage_candidate_debug == []
     assert response.debug["stage_prediction_enabled"] is False
     assert response.debug["stage_prediction_seconds"] == 0.0
+
+
+def test_response_includes_request_extraction_debug(monkeypatch) -> None:
+    monkeypatch.setattr(rag, "_ground_truth_for_ticket", lambda ticket_id: [])
+    request = ValueStreamRagRequest(
+        idea_card_text="Idea text",
+        extraction_backend="auto",
+        extraction_debug={
+            "backend_requested": "auto",
+            "backend_used": "unstructured",
+            "chars": 123,
+        },
+    )
+
+    response = rag._response_from_result(SimpleNamespace(), request)
+
+    assert response.debug["extraction_debug"]["backend_requested"] == "auto"
+    assert response.debug["extraction_debug"]["backend_used"] == "unstructured"
+    assert response.debug["extraction_debug"]["chars"] == 123
+    assert response.debug["stage_prediction_enabled"] is False
 
 
 def test_response_runs_stage_prediction_only_when_requested(monkeypatch) -> None:

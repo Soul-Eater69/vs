@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ValueStreamRagRequest(BaseModel):
@@ -15,6 +17,8 @@ class ValueStreamRagRequest(BaseModel):
     final_output_count: int = 12
     exclude_source_ticket_from_historical: bool = True
     include_stage_predictions: bool = False
+    extraction_backend: Literal["current", "unstructured", "auto"] = "current"
+    extraction_debug: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_query_input(self) -> "ValueStreamRagRequest":

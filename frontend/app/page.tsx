@@ -41,6 +41,7 @@ type Tab =
   | 'runtime'
   | 'reference'
   | 'raw';
+type ExtractionBackend = 'current' | 'unstructured' | 'auto';
 
 interface IdeaCard {
   doc_id: string;
@@ -166,6 +167,19 @@ interface PipelineResult {
   stage_candidate_debug?: Record<string, unknown>[];
   source_doc_id?: string;
   canonical_value_streams?: CanonicalVS[];
+}
+
+interface ExtractionDebug {
+  backend_requested?: string;
+  backend_used?: string;
+  filename?: string;
+  chars?: number;
+  words?: number;
+  element_count?: number;
+  tables_detected?: number;
+  warnings?: string[];
+  preview?: string;
+  [k: string]: unknown;
 }
 
 // --- Colors ---------------------------------------------------------------
@@ -1334,6 +1348,7 @@ function RuntimeDebugPane({
   const timing = (asRecord(debug?.timing_ms) ?? asRecord(raw?.timing_ms) ?? {}) as Record<string, unknown>;
   const historicalCounts = (asRecord(debug?.historical_counts) ?? {}) as Record<string, unknown>;
   const windowCounts = (asRecord(debug?.candidate_window_counts) ?? {}) as Record<string, unknown>;
+  const extractionDebug = (asRecord(debug?.extraction_debug) ?? {}) as Record<string, unknown>;
 
   const item = (label: string, value: unknown) => (
     <div className="flex items-center justify-between gap-4 rounded border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900">
@@ -1384,6 +1399,31 @@ function RuntimeDebugPane({
               .map((key) => (
                 <div key={key}>{item(TIMING_LABELS[key] ?? key, `${timing[key] ?? '-'} ms`)}</div>
               ))}
+      </div>
+      <div className="space-y-2 xl:col-span-4">
+        <div className="text-xs font-bold uppercase tracking-wide text-zinc-500">Extraction Debug</div>
+        {Object.keys(extractionDebug).length === 0 ? (
+          item('No extraction metadata', '-')
+        ) : (
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-3 xl:grid-cols-6">
+            {item('Backend requested', extractionDebug.backend_requested)}
+            {item('Backend used', extractionDebug.backend_used)}
+            {item('Chars', extractionDebug.chars)}
+            {item('Words', extractionDebug.words)}
+            {item('Elements', extractionDebug.element_count)}
+            {item('Tables', extractionDebug.tables_detected)}
+            {Array.isArray(extractionDebug.warnings) && extractionDebug.warnings.length > 0 && (
+              <div className="md:col-span-3 xl:col-span-6">
+                {item('Warnings', extractionDebug.warnings.join('; '))}
+              </div>
+            )}
+            {typeof extractionDebug.preview === 'string' && extractionDebug.preview && (
+              <pre className="md:col-span-3 xl:col-span-6 max-h-44 overflow-auto rounded border border-zinc-200 bg-white p-3 text-[11px] leading-relaxed text-zinc-600 whitespace-pre-wrap dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+                {extractionDebug.preview}
+              </pre>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1635,9 +1675,11 @@ export default function Home() {
   const [count, setCount] = useState(15);
   const [uploadedIdeaText, setUploadedIdeaText] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState('');
+  const [uploadedExtractionDebug, setUploadedExtractionDebug] = useState<ExtractionDebug | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [extractionBackend, setExtractionBackend] = useState<ExtractionBackend>('current');
   const [excludeSourceTicketFromHistorical, setExcludeSourceTicketFromHistorical] = useState(true);
   const [includeStagePredictions, setIncludeStagePredictions] = useState(false);
   const [dark, setDark] = useState(() => {
@@ -1697,7 +1739,11 @@ export default function Home() {
     setUploadError(null);
     setUploading(true);
     try {
-      const res = await fetch(`${API}/api/idea-cards/extract?filename=${encodeURIComponent(file.name)}`, {
+      const params = new URLSearchParams({
+        filename: file.name,
+        extraction_backend: extractionBackend,
+      });
+      const res = await fetch(`${API}/api/idea-cards/extract?${params.toString()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: await file.arrayBuffer(),
@@ -1706,10 +1752,16 @@ export default function Home() {
         const failure = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(failure.detail ?? 'Could not extract idea card.');
       }
-      const payload = await res.json() as { filename?: string; text?: string; char_count?: number };
+      const payload = await res.json() as {
+        filename?: string;
+        text?: string;
+        char_count?: number;
+        extraction_debug?: ExtractionDebug;
+      };
       if (!payload.text?.trim()) throw new Error('No text could be extracted from this idea card.');
       setUploadedIdeaText(payload.text);
       setUploadedFileName(payload.filename || file.name);
+      setUploadedExtractionDebug(payload.extraction_debug ?? null);
       setResult(null);
       setErr(null);
       setStep('idle');
@@ -1717,12 +1769,13 @@ export default function Home() {
     } catch (error: unknown) {
       setUploadedIdeaText('');
       setUploadedFileName('');
+      setUploadedExtractionDebug(null);
       setUploadError(error instanceof Error ? error.message : String(error));
     } finally {
       setUploading(false);
       setDragActive(false);
     }
-  }, []);
+  }, [extractionBackend]);
 
   const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1741,6 +1794,7 @@ export default function Home() {
   const clearUpload = useCallback(() => {
     setUploadedIdeaText('');
     setUploadedFileName('');
+    setUploadedExtractionDebug(null);
     setUploadError(null);
   }, []);
 
@@ -1764,10 +1818,12 @@ export default function Home() {
         final_output_count: outputCount,
         exclude_source_ticket_from_historical: excludeSourceTicketFromHistorical,
         include_stage_predictions: includeStagePredictions,
+        extraction_backend: extractionBackend,
       };
       if (selectedCard?.display_name) body.source_ticket_title = selectedCard.display_name;
       if (uploadedIdeaText.trim()) {
         body.idea_card_text = uploadedIdeaText.trim();
+        if (uploadedExtractionDebug) body.extraction_debug = uploadedExtractionDebug;
         if (selectedTicketId) body.ticket_id = selectedTicketId;
       } else if (selectedTicketId) {
         body.ticket_id = selectedTicketId;
@@ -1832,7 +1888,7 @@ export default function Home() {
       setStep('error');
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [count, excludeSourceTicketFromHistorical, includeStagePredictions, selectedCard, selectedTicketId, uploadedIdeaText]);
+  }, [count, excludeSourceTicketFromHistorical, extractionBackend, includeStagePredictions, selectedCard, selectedTicketId, uploadedExtractionDebug, uploadedIdeaText]);
 
   const busy = step !== 'idle' && step !== 'done' && step !== 'error';
   const card = selectedCard;
@@ -1939,6 +1995,11 @@ export default function Home() {
                       <div>
                         <div className="font-semibold text-teal-900 dark:text-teal-200">{uploadedFileName}</div>
                         <div className="mt-1 text-zinc-500 dark:text-zinc-400">{uploadedIdeaText.length.toLocaleString()} extracted characters</div>
+                        {uploadedExtractionDebug && (
+                          <div className="mt-1 text-zinc-500 dark:text-zinc-400">
+                            Backend {String(uploadedExtractionDebug.backend_used ?? '-')} · {String(uploadedExtractionDebug.words ?? '-')} words · {String(uploadedExtractionDebug.element_count ?? '-')} elements
+                          </div>
+                        )}
                       </div>
                       <button onClick={clearUpload} className="rounded-md border border-zinc-300 bg-white px-2 py-1 font-semibold text-zinc-600 hover:border-teal-400 hover:text-teal-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800">
                         Clear
@@ -1979,6 +2040,21 @@ export default function Home() {
                     Choose how many final value streams you want in the human review pool. The backend will automatically decide retrieval breadth, historical search depth, and the LLM candidate window.
                   </p>
                 </div>
+                <label className="block rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">
+                  <span className="mb-1 block text-xs font-semibold text-zinc-700 dark:text-zinc-200">Extraction backend</span>
+                  <select
+                    value={extractionBackend}
+                    onChange={e => setExtractionBackend(e.target.value as ExtractionBackend)}
+                    className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-800 outline-none transition focus:border-hcsc focus:ring-2 focus:ring-teal-400/25 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  >
+                    <option value="current">Current</option>
+                    <option value="unstructured">Unstructured</option>
+                    <option value="auto">Auto</option>
+                  </select>
+                  <span className="mt-1 block text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+                    Optional extraction experiment for uploaded files.
+                  </span>
+                </label>
                 <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/50">
                   <span className="min-w-0">
                     <span className="block text-xs font-semibold text-zinc-700 dark:text-zinc-200">Exclude source ticket</span>

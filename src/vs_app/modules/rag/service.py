@@ -21,6 +21,7 @@ class ValueStreamRagCommand:
     llm_candidate_window: int = 36
     final_output_count: int | None = None
     exclude_source_ticket_from_historical: bool = True
+    extraction_debug: dict[str, Any] | None = None
     progress_callback: ProgressCallback | None = None
 
 
@@ -87,10 +88,14 @@ class ValueStreamRagService:
         if command.progress_callback is not None:
             kwargs["progress_callback"] = command.progress_callback
 
-        return (self.pipeline_fn or select_value_streams)(
+        payload = (self.pipeline_fn or select_value_streams)(
             query,
             **kwargs,
         )
+        if command.extraction_debug:
+            payload["debug"] = dict(payload.get("debug", {}) or {})
+            payload["debug"]["extraction_debug"] = dict(command.extraction_debug)
+        return payload
 
     @staticmethod
     def _resolve_query(command: ValueStreamRagCommand) -> str:

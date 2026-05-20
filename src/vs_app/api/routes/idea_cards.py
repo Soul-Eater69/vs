@@ -5,7 +5,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
-from vs_app.integrations.files.markitdown_extractor import extract_markdown
+from vs_app.modules.rag.extraction.backends import (
+    extract_uploaded_file_text,
+    render_extraction_debug,
+)
 from vs_app.shared.text_cleaning import clean_extracted_text
 
 router = APIRouter(prefix="/api", tags=["idea-cards"])
@@ -48,7 +51,11 @@ def list_idea_cards() -> dict:
 
 
 @router.post("/idea-cards/extract")
-async def extract_idea_card(request: Request, filename: str = "idea-card") -> dict:
+async def extract_idea_card(
+    request: Request,
+    filename: str = "idea-card",
+    extraction_backend: str = "current",
+) -> dict:
     clean_filename = Path(filename or "idea-card").name
     suffix = Path(clean_filename).suffix.lower()
     if suffix and suffix not in SUPPORTED_EXTENSIONS:
@@ -61,8 +68,30 @@ async def extract_idea_card(request: Request, filename: str = "idea-card") -> di
     try:
         if suffix in {".txt", ".md", ".markdown"}:
             text = clean_extracted_text(file_bytes.decode("utf-8", errors="replace"))
+            extraction_debug = {
+                "backend_requested": "current",
+                "backend_used": "current",
+                "filename": clean_filename,
+                "chars": len(text),
+                "words": len(text.split()),
+                "element_count": 1 if text else 0,
+                "tables_detected": 1 if "|" in text else 0,
+                "warnings": [],
+                "preview": text[:1500],
+            }
+            markdown = text
         else:
-            text = clean_extracted_text(extract_markdown(file_bytes, clean_filename))
+            extracted = extract_uploaded_file_text(
+                file_bytes,
+                clean_filename,
+                backend=extraction_backend,
+            )
+            text = str(extracted.get("text") or "").strip()
+            markdown = str(extracted.get("markdown") or "")
+            extraction_debug = render_extraction_debug(
+                extracted,
+                backend_requested=extraction_backend,
+            )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not extract idea card: {exc}") from exc
 
@@ -72,6 +101,7 @@ async def extract_idea_card(request: Request, filename: str = "idea-card") -> di
     return {
         "filename": clean_filename,
         "text": text,
+        "markdown": markdown,
         "char_count": len(text),
+        "extraction_debug": extraction_debug,
     }
-

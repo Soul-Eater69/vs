@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from types import ModuleType
 
@@ -188,6 +189,62 @@ def test_azure_historical_backend_returns_support(monkeypatch) -> None:
     assert [hit["ticket_id"] for hit in result["historical_ticket_hits"]] == ["IDMT-2"]
     assert [row["entity_name"] for row in result["historical_value_stream_support"]] == [
         "Issue Payment"
+    ]
+
+
+def test_historical_support_preserves_structured_ticket_evidence(monkeypatch) -> None:
+    def fake_search(query: str, *, index_name: str, top_k: int, exclude_ticket_ids):
+        return [
+            {
+                "ticket_id": "IDMT-2",
+                "title": "Payment workflow modernization",
+                "best_score": 0.91,
+                "summary_preview": "Prior ticket changed payment operations and reconciliation.",
+                "value_streams_json": json.dumps(
+                    [
+                        {
+                            "vs_name": "Issue Payment",
+                            "vs_id": "vs-pay",
+                            "inference_type": "implied",
+                            "reason": "Payment issuance had to change downstream.",
+                        }
+                    ]
+                ),
+                "direct_functions_canonical": ["Configure benefit"],
+                "implied_functions_canonical": ["Issue payment", "Reconcile payment"],
+                "direct_vs_names": [],
+                "implied_vs_names": ["Issue Payment"],
+                "label_source": "summary_azure_ai_search",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "vs_app.ingestion.persistence.azure_historical_index.search_historical_summaries",
+        fake_search,
+    )
+
+    result = retrieve_historical_support(
+        "query",
+        historical_search_backend="azure",
+        historical_azure_index_name="historical-index",
+        max_ticket_hits=6,
+    )
+
+    support = result["historical_value_stream_support"][0]
+    assert support["entity_name"] == "Issue Payment"
+    assert support["historical_reasons"][0].startswith("[IDMT-2 / implied]")
+    assert support["historical_evidence"] == [
+        {
+            "ticket_id": "IDMT-2",
+            "title": "Payment workflow modernization",
+            "summary_preview": "Prior ticket changed payment operations and reconciliation.",
+            "inference_type": "implied",
+            "reason": "Payment issuance had to change downstream.",
+            "direct_functions_canonical": ["Configure benefit"],
+            "implied_functions_canonical": ["Issue payment", "Reconcile payment"],
+            "direct_vs_names": [],
+            "implied_vs_names": ["Issue Payment"],
+        }
     ]
 
 

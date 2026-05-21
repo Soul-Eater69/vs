@@ -32,11 +32,11 @@ def test_runtime_config_for_review_pool_20(monkeypatch) -> None:
     assert cfg.max_semantic_plus_historical == 50
     assert cfg.max_semantic_only == 1
     assert cfg.max_historical_only == 8
-    assert cfg.idea_card_prompt_chars == 2400
-    assert cfg.candidate_description_chars == 160
+    assert cfg.idea_card_prompt_chars == 1800
+    assert cfg.candidate_description_chars == 100
     assert cfg.analogs_per_candidate == 2
-    assert cfg.analog_chars == 140
-    assert cfg.historical_ticket_ids_per_candidate == 3
+    assert cfg.analog_chars == 80
+    assert cfg.historical_ticket_ids_per_candidate == 2
 
 
 def test_runtime_config_historical_fetch_k_env_override(monkeypatch) -> None:

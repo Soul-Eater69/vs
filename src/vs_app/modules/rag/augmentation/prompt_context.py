@@ -141,8 +141,13 @@ def format_review_pool_candidate_blocks(
             if tickets:
                 lines.append(f"Supporting tickets: {', '.join(tickets)}")
 
+            evidence_rows = _ordered_historical_evidence(row.get("historical_evidence") or [])[:analog_limit]
             analogs = _ordered_analog_reasons(row.get("historical_reasons") or [])[:analog_limit]
-            if analogs:
+            if evidence_rows:
+                lines.append("Evidence:")
+                for evidence in evidence_rows:
+                    lines.extend(_format_historical_evidence(evidence, analog_chars))
+            elif analogs:
                 lines.append("Evidence:")
                 for reason in analogs:
                     clean = " ".join(str(reason).split())
@@ -327,6 +332,50 @@ def _historical_support_lines(row: dict, *, prefix: str = "Historical support") 
     ]
 
 
+def _ordered_historical_evidence(values: Iterable[object]) -> List[dict]:
+    rows = [dict(value) for value in values if isinstance(value, dict)]
+    direct_rows = [row for row in rows if str(row.get("inference_type") or "").lower() == "direct"]
+    implied_rows = [row for row in rows if str(row.get("inference_type") or "").lower() == "implied"]
+    other_rows = [row for row in rows if row not in direct_rows and row not in implied_rows]
+    return direct_rows + implied_rows + other_rows
+
+
+def _format_historical_evidence(row: dict, chars: int) -> List[str]:
+    ticket_id = str(row.get("ticket_id") or "").strip() or "historical ticket"
+    inference_type = str(row.get("inference_type") or "").strip().lower() or "support"
+    title = _clip_text(row.get("title"), min(max(chars, 60), 140))
+    reason = _clip_text(row.get("reason"), chars)
+    summary = _clip_text(row.get("summary_preview"), chars)
+    direct_functions = _text_list(row.get("direct_functions_canonical") or [])[:3]
+    implied_functions = _text_list(row.get("implied_functions_canonical") or [])[:3]
+
+    header = f"- {ticket_id} / {inference_type}"
+    if title and title.lower() != ticket_id.lower():
+        header = f"{header}: {title}"
+
+    lines = [header]
+    if reason:
+        lines.append(f"  Why this stream: {reason}")
+    if summary:
+        lines.append(f"  Prior ticket summary: {summary}")
+
+    function_parts = []
+    if direct_functions:
+        function_parts.append("direct functions: " + ", ".join(direct_functions))
+    if implied_functions:
+        function_parts.append("implied functions: " + ", ".join(implied_functions))
+    if function_parts:
+        lines.append(f"  Supporting functions: {'; '.join(function_parts)}")
+    return lines
+
+
+def _clip_text(value: object, chars: int) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    return text[: max(1, int(chars or 1))]
+
+
 def _ordered_analog_reasons(values: Iterable[object]) -> List[str]:
     reasons = _text_list(values)
     direct_reasons = [reason for reason in reasons if "/ direct]" in reason]
@@ -342,7 +391,13 @@ def _ordered_analog_reasons(values: Iterable[object]) -> List[str]:
 def _text_list(values: Iterable[object]) -> List[str]:
     out: List[str] = []
     seen: set[str] = set()
-    for value in values:
+    if isinstance(values, str):
+        iterable = [values]
+    elif isinstance(values, Iterable):
+        iterable = values
+    else:
+        iterable = []
+    for value in iterable:
         text = str(value).strip()
         key = text.lower()
         if not text or key in seen:

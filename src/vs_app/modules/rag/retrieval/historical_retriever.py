@@ -158,10 +158,13 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
 
     for hit in ticket_hits:
         ticket_id = hit.get("ticket_id", "")
+        title = str(hit.get("title") or "").strip()
         score = float(hit.get("best_score", 0.0))
         summary_preview = str(hit.get("summary_preview") or "").strip()[:200]
-        direct_funcs: List[str] = [f for f in (hit.get("direct_functions_canonical") or []) if f]
-        implied_funcs: List[str] = [f for f in (hit.get("implied_functions_canonical") or []) if f]
+        direct_funcs = _dedupe_text_list(hit.get("direct_functions_canonical") or [])
+        implied_funcs = _dedupe_text_list(hit.get("implied_functions_canonical") or [])
+        direct_vs_names = _dedupe_text_list(hit.get("direct_vs_names") or [])
+        implied_vs_names = _dedupe_text_list(hit.get("implied_vs_names") or [])
 
         for item in _extract_hit_value_stream_support(hit):
             vs_name = item["entity_name"]
@@ -187,6 +190,7 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
                     "supporting_ticket_ids": [],
                     "label_sources": [],
                     "historical_reasons": [],
+                    "historical_evidence": [],
                 },
             )
 
@@ -219,6 +223,35 @@ def _build_support_from_faiss_hits(ticket_hits: List[dict]) -> List[dict]:
                 if parts:
                     prefix = f"[{ticket_id} / {inference_type}]"
                     entry["historical_reasons"].append(f"{prefix} {' | '.join(parts)}")
+
+            evidence_item = {
+                "ticket_id": str(ticket_id or "").strip(),
+                "title": title,
+                "summary_preview": summary_preview,
+                "inference_type": inference_type,
+                "reason": classifier_reason,
+                "direct_functions_canonical": direct_funcs,
+                "implied_functions_canonical": implied_funcs,
+                "direct_vs_names": direct_vs_names,
+                "implied_vs_names": implied_vs_names,
+            }
+            if _evidence_has_content(evidence_item):
+                evidence_key = (
+                    evidence_item["ticket_id"].lower(),
+                    evidence_item["inference_type"],
+                    evidence_item["reason"].lower(),
+                )
+                existing_keys = {
+                    (
+                        str(row.get("ticket_id") or "").lower(),
+                        str(row.get("inference_type") or ""),
+                        str(row.get("reason") or "").lower(),
+                    )
+                    for row in entry["historical_evidence"]
+                    if isinstance(row, dict)
+                }
+                if evidence_key not in existing_keys:
+                    entry["historical_evidence"].append(evidence_item)
 
     rows: List[dict] = []
     for row in support_by_name.values():
@@ -341,10 +374,29 @@ def _extract_structured_value_stream_support(hit: dict) -> List[dict]:
     return rows
 
 
-def _dedupe_text_list(values: List[str]) -> List[str]:
+def _evidence_has_content(row: dict) -> bool:
+    return any(
+        [
+            str(row.get("ticket_id") or "").strip(),
+            str(row.get("title") or "").strip(),
+            str(row.get("summary_preview") or "").strip(),
+            str(row.get("reason") or "").strip(),
+            row.get("direct_functions_canonical"),
+            row.get("implied_functions_canonical"),
+        ]
+    )
+
+
+def _dedupe_text_list(values: object) -> List[str]:
     out: List[str] = []
     seen: set[str] = set()
-    for value in values or []:
+    if isinstance(values, str):
+        iterable = [values]
+    elif isinstance(values, Iterable):
+        iterable = values
+    else:
+        iterable = []
+    for value in iterable:
         clean = str(value).strip()
         key = clean.lower()
         if not clean or key in seen:

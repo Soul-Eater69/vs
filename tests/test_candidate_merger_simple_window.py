@@ -138,6 +138,45 @@ def test_supporting_ticket_count_is_unique_and_support_count_alias_remains() -> 
     assert row["weighted_support"] == 2.0
 
 
+def test_historical_evidence_is_preserved_without_affecting_window() -> None:
+    result = merge_candidate_sources(
+        [],
+        [
+            {
+                "entity_name": "Issue Payment",
+                "supporting_ticket_ids": ["H1", "H2", "H3"],
+                "support_count": 3,
+                "direct_count": 1,
+                "implied_count": 2,
+                "best_support_score": 0.86,
+                "avg_support_score": 0.82,
+                "historical_evidence": [
+                    {
+                        "ticket_id": "H1",
+                        "inference_type": "direct",
+                        "reason": "Payment was directly tagged.",
+                    },
+                    {
+                        "ticket_id": "H2",
+                        "inference_type": "implied",
+                        "reason": "Payment changed downstream.",
+                    },
+                    {
+                        "ticket_id": "H3",
+                        "inference_type": "implied",
+                        "reason": "Extra evidence is capped for prompt size.",
+                    },
+                ],
+            }
+        ],
+        policy=CandidateWindowPolicy(max_supporting_tickets_per_candidate=2),
+    )
+
+    row = result["merged_candidates"][0]
+    assert [item["ticket_id"] for item in row["historical_evidence"]] == ["H1", "H2"]
+    assert [row["entity_name"] for row in result["llm_candidates"]] == ["Issue Payment"]
+
+
 def test_low_score_historical_prior_can_reach_llm() -> None:
     result = merge_candidate_sources(
         [],

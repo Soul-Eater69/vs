@@ -130,6 +130,9 @@ def merge_candidate_sources(
                 "historical_reasons": _unique_text(row.get("historical_reasons") or [])[
                     : active_policy.max_supporting_tickets_per_candidate
                 ],
+                "historical_evidence": _unique_evidence(row.get("historical_evidence") or [])[
+                    : active_policy.max_supporting_tickets_per_candidate
+                ],
                 "label_sources": _unique_text(row.get("label_sources") or []),
             }
         )
@@ -278,6 +281,7 @@ def _base_candidate(*, entity_id: str, entity_name: str, description: str) -> di
         "supporting_ticket_ids": [],
         "supporting_chunk_ids": [],
         "historical_reasons": [],
+        "historical_evidence": [],
         "label_sources": [],
         "ranking_score": 0.0,
         "historical_strength": 0.0,
@@ -424,4 +428,25 @@ def _unique_text(values: Iterable[object]) -> list[str]:
             continue
         seen.add(key)
         out.append(text)
+    return out
+
+
+def _unique_evidence(values: Iterable[object]) -> list[dict]:
+    out: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        ticket_id = str(value.get("ticket_id") or "").strip()
+        inference_type = str(value.get("inference_type") or "").strip().lower()
+        reason = str(value.get("reason") or "").strip()
+        key = (ticket_id.lower(), inference_type, reason.lower())
+        if not any(key) or key in seen:
+            continue
+        seen.add(key)
+        row = dict(value)
+        row["ticket_id"] = ticket_id
+        row["inference_type"] = inference_type or "direct"
+        row["reason"] = reason
+        out.append(row)
     return out

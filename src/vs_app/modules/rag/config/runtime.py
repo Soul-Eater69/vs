@@ -64,13 +64,13 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     )
     idea_card_prompt_chars = _env_int(
         "RAG_IDEA_CARD_PROMPT_CHARS",
-        2400,
+        1800,
         min_value=500,
         max_value=6000,
     )
     candidate_description_chars = _env_int(
         "RAG_CANDIDATE_DESCRIPTION_CHARS",
-        160,
+        100,
         min_value=50,
         max_value=500,
     )
@@ -82,13 +82,13 @@ def derive_rag_runtime_config(final_output_count: int | None) -> RagRuntimeConfi
     )
     analog_chars = _env_int(
         "RAG_ANALOG_CHARS",
-        140,
+        80,
         min_value=40,
         max_value=400,
     )
     historical_ticket_ids_per_candidate = _env_int(
         "RAG_HISTORICAL_TICKET_IDS_PER_CANDIDATE",
-        3,
+        2,
         min_value=0,
         max_value=5,
     )

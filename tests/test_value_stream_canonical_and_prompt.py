@@ -54,3 +54,46 @@ def test_candidate_prompt_has_no_anchor_signal_text() -> None:
 
     assert "Found" + "ational signal" not in block
     assert "Trusted " + "anchor " + "signal" not in block
+
+
+def test_candidate_prompt_formats_structured_historical_evidence() -> None:
+    block = format_review_pool_candidate_blocks(
+        [
+            {
+                "entity_name": "Issue Payment",
+                "entity_id": "vs1",
+                "lane": "semantic_plus_historical",
+                "from_historical": True,
+                "supporting_ticket_count": 1,
+                "support_count": 1,
+                "direct_count": 0,
+                "implied_count": 1,
+                "best_support_score": 0.91,
+                "avg_support_score": 0.91,
+                "weighted_support": 0.6,
+                "supporting_ticket_ids": ["IDMT-2"],
+                "historical_evidence": [
+                    {
+                        "ticket_id": "IDMT-2",
+                        "title": "Payment workflow modernization",
+                        "summary_preview": "Prior ticket changed payment operations and reconciliation.",
+                        "inference_type": "implied",
+                        "reason": "Payment issuance had to change downstream.",
+                        "direct_functions_canonical": ["Configure benefit"],
+                        "implied_functions_canonical": ["Issue payment", "Reconcile payment"],
+                    }
+                ],
+            }
+        ],
+        prompt_budget={
+            "analogs_per_candidate": 2,
+            "analog_chars": 120,
+            "historical_ticket_ids_per_candidate": 2,
+        },
+    )
+
+    assert "Evidence:" in block
+    assert "- IDMT-2 / implied: Payment workflow modernization" in block
+    assert "Why this stream: Payment issuance had to change downstream." in block
+    assert "Prior ticket summary: Prior ticket changed payment operations and reconciliation." in block
+    assert "Supporting functions: direct functions: Configure benefit; implied functions: Issue payment, Reconcile payment" in block

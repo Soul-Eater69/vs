@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import sys
 
 import pytest
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from evaluate_stage_batch import _idea_card_text
 
 from vs_app.modules.stages.stage_canonicalizer import canonicalize_stage
 from vs_app.modules.stages.stage_catalog import get_allowed_stages, load_stage_catalog
@@ -153,6 +161,17 @@ async def test_ground_truth_builder_groups_verified_stages_by_value_stream() -> 
         "key": "IDMT-19761",
         "fields": {
             "summary": "CP 2026 Women's and Family Health",
+            "description": {
+                "type": "doc",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {"type": "text", "text": "IDMT-only description text."}
+                        ],
+                    }
+                ],
+            },
             "issuetype": {"name": "Engagement Request"},
             "issuelinks": [
                 {
@@ -188,6 +207,51 @@ async def test_ground_truth_builder_groups_verified_stages_by_value_stream() -> 
     assert result["gt_by_value_stream"] == {
         "Manage Utilization Management Program": ["Manage UM"]
     }
+    assert result["idmt_description"] == "IDMT-only description text."
+
+
+@pytest.mark.anyio
+async def test_stage_eval_fallback_uses_only_idmt_summary_and_description() -> None:
+    ticket = {
+        "idmt_summary": "IDMT summary only",
+        "idmt_description": "IDMT description only",
+        "linked_themes": [
+            {
+                "theme_summary": "LEAK Theme summary",
+                "business_needs_raw": "LEAK Value Stage: Manage UM",
+                "verified_stages": [{"canonical": "LEAK verified"}],
+                "child_issues": [{"summary": "LEAK child issue"}],
+            }
+        ],
+        "gt_by_value_stream": {"LEAK VS": ["LEAK stage"]},
+    }
+
+    text = await _idea_card_text("IDMT-19761", ticket, jira_client=None)
+
+    assert text == "IDMT summary only\n\nIDMT description only"
+    assert "LEAK Theme summary" not in text
+    assert "LEAK Value Stage" not in text
+    assert "LEAK verified" not in text
+    assert "LEAK child issue" not in text
+    assert "LEAK VS" not in text
+
+
+@pytest.mark.anyio
+async def test_stage_eval_fallback_returns_summary_when_description_missing() -> None:
+    ticket = {
+        "idmt_summary": "IDMT summary only",
+        "linked_themes": [
+            {
+                "theme_summary": "LEAK Theme summary",
+                "business_needs_raw": "LEAK Business Needs",
+            }
+        ],
+    }
+
+    text = await _idea_card_text("IDMT-19761", ticket, jira_client=None)
+
+    assert text == "IDMT summary only"
+    assert "LEAK" not in text
 
 
 def test_stage_selector_drops_invalid_model_picks() -> None:

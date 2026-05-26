@@ -145,6 +145,7 @@ async def build_ticket_stage_ground_truth(
     return {
         "idmt_key": idmt_key,
         "idmt_summary": _clean_text(fields.get("summary")),
+        "idmt_description": _clean_text(_coerce_text(fields.get("description"))),
         "linked_themes": linked_themes,
         "gt_by_value_stream": gt_by_value_stream,
         "warnings": warnings,

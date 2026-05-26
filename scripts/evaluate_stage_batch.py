@@ -199,10 +199,10 @@ async def _idea_card_text(
         except Exception:
             pass
 
-    parts = [str(ticket.get("idmt_summary") or "")]
-    for theme in ticket.get("linked_themes") or []:
-        parts.append(str(theme.get("theme_summary") or ""))
-        parts.append(str(theme.get("business_needs_raw") or ""))
+    parts = [
+        str(ticket.get("idmt_summary") or ""),
+        str(ticket.get("idmt_description") or ""),
+    ]
     return "\n\n".join(part for part in parts if part.strip())
 
 

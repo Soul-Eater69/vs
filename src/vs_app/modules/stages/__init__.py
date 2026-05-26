@@ -4,7 +4,7 @@ from .catalog import get_stages_for_value_stream, normalize_stage
 from .finalizer import select_stages_with_llm
 from .pipeline import predict_stages
 from .stage_canonicalizer import canonicalize_stage
-from .stage_catalog import get_allowed_stages, load_stage_catalog
+from .stage_catalog import get_allowed_stages, load_stage_catalog, summarize_stage_catalog
 from .stage_ground_truth import (
     build_ticket_stage_ground_truth,
     extract_raw_stage_mentions_from_business_needs,
@@ -27,4 +27,5 @@ __all__ = [
     "predict_stages",
     "predict_value_stream_stages",
     "select_stages_with_llm",
+    "summarize_stage_catalog",
 ]

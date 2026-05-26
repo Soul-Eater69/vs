@@ -11,7 +11,7 @@ from vs_app import settings as config
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_DEFAULT_JSON_CATALOG = _REPO_ROOT / "data" / "value_stream_stage_catalog.json"
+_DEFAULT_JSON_CATALOG = _REPO_ROOT / "data" / "value_stream_stage_map.json"
 _VALUE_STREAM_SELECT_FIELDS = [
     "entity_id",
     "entity_name",
@@ -71,6 +71,24 @@ def get_value_stream_catalog_entry(
     return None
 
 
+def summarize_stage_catalog(catalog: dict, limit: int = 5) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for value_stream_name, entry in list((catalog or {}).items())[: max(0, int(limit or 0))]:
+        stages = [
+            str(stage.get("name") or "").strip()
+            for stage in (entry or {}).get("stages") or []
+            if str(stage.get("name") or "").strip()
+        ]
+        rows.append(
+            {
+                "value_stream": str(value_stream_name),
+                "stage_count": len(stages),
+                "stages": stages,
+            }
+        )
+    return rows
+
+
 def normalize_catalog_name(value: Any) -> str:
     text = str(value or "").lower().replace("&", " and ")
     text = re.sub(r"[^a-z0-9]+", " ", text)
@@ -82,14 +100,86 @@ def _load_catalog_from_json(path: Path) -> dict[str, dict[str, Any]]:
         raise FileNotFoundError(f"Stage catalog JSON not found: {path}")
 
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("Stage catalog JSON must be an object keyed by value stream name")
+    catalog: dict[str, dict[str, Any]] = {}
+    if isinstance(payload, dict):
+        for value_stream_name, raw_entry in payload.items():
+            entry = _normalize_catalog_entry(str(value_stream_name), raw_entry)
+            if entry["stages"]:
+                catalog[str(value_stream_name)] = entry
+    elif isinstance(payload, list):
+        catalog = _catalog_from_list_rows(payload)
+
+    if not catalog:
+        raise ValueError(_empty_catalog_error(path, payload))
+    return catalog
+
+
+def _catalog_from_list_rows(rows: list[Any]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        value_stream_name = _text(
+            row.get("value_stream")
+            or row.get("value_stream_name")
+            or row.get("entity_name")
+            or row.get("name")
+        )
+        if not value_stream_name:
+            continue
+        group = grouped.setdefault(
+            value_stream_name,
+            {
+                "value_stream_id": _text(
+                    row.get("value_stream_id")
+                    or row.get("entity_id")
+                    or row.get("id")
+                ),
+                "description": _text(
+                    row.get("description") or row.get("value_stream_description")
+                ),
+                "category": _text(row.get("category") or row.get("value_stream_category")),
+                "trigger": _text(row.get("trigger") or row.get("value_stream_trigger")),
+                "stakeholders": _text(
+                    row.get("stakeholders") or row.get("value_stream_stakeholders")
+                ),
+                "created_date": _text(
+                    row.get("created_date") or row.get("value_stream_created_date")
+                ),
+                "stages": [],
+                "aliases": _list_text(row.get("aliases") or row.get("value_stream_aliases")),
+            },
+        )
+        if not group.get("value_stream_id"):
+            group["value_stream_id"] = _text(
+                row.get("value_stream_id")
+                or row.get("entity_id")
+                or row.get("id")
+            )
+        if not group.get("aliases"):
+            group["aliases"] = _list_text(row.get("aliases") or row.get("value_stream_aliases"))
+        for target_key, source_keys in (
+            ("description", ("description", "value_stream_description")),
+            ("category", ("category", "value_stream_category")),
+            ("trigger", ("trigger", "value_stream_trigger")),
+            ("stakeholders", ("stakeholders", "value_stream_stakeholders")),
+            ("created_date", ("created_date", "value_stream_created_date")),
+        ):
+            if group.get(target_key):
+                continue
+            group[target_key] = _text(next((row.get(key) for key in source_keys if row.get(key)), ""))
+
+        row_stages = _extract_stage_defs(row, row.get("content"))
+        if row_stages:
+            group["stages"].extend(row_stages)
+        else:
+            group["stages"].append(row)
 
     catalog: dict[str, dict[str, Any]] = {}
-    for value_stream_name, raw_entry in payload.items():
-        entry = _normalize_catalog_entry(str(value_stream_name), raw_entry)
+    for value_stream_name, raw_entry in grouped.items():
+        entry = _normalize_catalog_entry(value_stream_name, raw_entry)
         if entry["stages"]:
-            catalog[str(value_stream_name)] = entry
+            catalog[value_stream_name] = entry
     return catalog
 
 
@@ -129,12 +219,28 @@ def _normalize_catalog_entry(value_stream_name: str, raw_entry: Any) -> dict[str
             or raw_entry.get("id")
             or raw_entry.get("entity_id")
         )
+        description = _text(raw_entry.get("description") or raw_entry.get("value_stream_description"))
+        category = _text(raw_entry.get("category") or raw_entry.get("value_stream_category"))
+        trigger = _text(raw_entry.get("trigger") or raw_entry.get("value_stream_trigger"))
+        stakeholders = _text(raw_entry.get("stakeholders") or raw_entry.get("value_stream_stakeholders"))
+        created_date = _text(raw_entry.get("created_date") or raw_entry.get("value_stream_created_date"))
         aliases = _list_text(raw_entry.get("aliases") or raw_entry.get("value_stream_aliases"))
         raw_stages = _extract_stage_defs(raw_entry, raw_entry.get("content"))
     else:
         raw_stages = []
         value_stream_id = ""
+        description = ""
+        category = ""
+        trigger = ""
+        stakeholders = ""
+        created_date = ""
         aliases = []
+    if isinstance(raw_entry, list):
+        description = ""
+        category = ""
+        trigger = ""
+        stakeholders = ""
+        created_date = ""
 
     stages: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -148,6 +254,11 @@ def _normalize_catalog_entry(value_stream_name: str, raw_entry: Any) -> dict[str
 
     return {
         "value_stream_id": value_stream_id,
+        "description": description,
+        "category": category,
+        "trigger": trigger,
+        "stakeholders": stakeholders,
+        "created_date": created_date,
         "stages": stages,
         "aliases": aliases,
     }
@@ -189,6 +300,7 @@ def _normalize_stage_def(raw_stage: Any) -> dict[str, Any]:
 
     name = _text(
         raw_stage.get("name")
+        or raw_stage.get("stage")
         or raw_stage.get("stage_name")
         or raw_stage.get("value_stream_stage_name")
         or raw_stage.get("stage_display_name")
@@ -210,8 +322,38 @@ def _normalize_stage_def(raw_stage: Any) -> dict[str, Any]:
         "name": name,
         "id": stage_id,
         "description": description,
+        "sequence": _to_int(raw_stage.get("sequence") or raw_stage.get("stage_sequence")),
+        "display_name": _text(raw_stage.get("display_name") or raw_stage.get("stage_display_name")),
+        "entrance_criteria": _text(raw_stage.get("entrance_criteria") or raw_stage.get("stage_entrance_criteria")),
+        "exit_criteria": _text(raw_stage.get("exit_criteria") or raw_stage.get("stage_exit_criteria")),
+        "value_items": _text(raw_stage.get("value_items") or raw_stage.get("stage_value_items")),
+        "stakeholders": _text(raw_stage.get("stakeholders") or raw_stage.get("stage_stakeholders")),
         "aliases": aliases,
     }
+
+
+def _empty_catalog_error(path: Path, payload: Any) -> str:
+    if isinstance(payload, dict):
+        preview: Any = list(payload.keys())[:5]
+    elif isinstance(payload, list):
+        preview = payload[:3]
+    else:
+        preview = repr(payload)[:500]
+
+    return (
+        "Stage catalog JSON loaded but no stages were found.\n"
+        f"path: {path}\n"
+        f"top-level JSON type: {type(payload).__name__}\n"
+        f"preview: {preview!r}\n"
+        "Expected supported shapes:\n"
+        "- {\"Value Stream\": [\"Stage A\", \"Stage B\"]}\n"
+        "- {\"Value Stream\": {\"stages\": [\"Stage A\", \"Stage B\"]}}\n"
+        "- {\"Value Stream\": {\"value_stream_id\": \"VSR...\", \"stages\": [{\"name\": \"Stage A\"}]}}\n"
+        "- [{\"value_stream_name\": \"Value Stream\", \"stage_name\": \"Stage A\"}]\n"
+        "- [{\"value_stream_name\": \"Value Stream\", \"value_stream_id\": \"VSR...\", \"stages\": [\"Stage A\"]}]\n"
+        "- [{\"value_stream_name\": \"Value Stream\", \"value_stream_description\": \"...\", "
+        "\"stages\": [{\"stage_name\": \"Stage A\", \"stage_id\": \"VSS...\"}]}]"
+    )
 
 
 def _extract_stages_from_content(content: str) -> list[str]:
@@ -289,9 +431,17 @@ def _text(value: Any) -> str:
     return " ".join(str(value or "").split())
 
 
+def _to_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 __all__ = [
     "get_allowed_stages",
     "get_value_stream_catalog_entry",
     "load_stage_catalog",
     "normalize_catalog_name",
+    "summarize_stage_catalog",
 ]

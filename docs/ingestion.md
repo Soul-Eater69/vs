@@ -273,18 +273,21 @@ flowchart LR
 
 Key decisions encoded in the consolidator:
 
-- **Document budget = 4** by default. Anything beyond that is ignored.
-- **Attachment ranking** (`_rank_document_attachment`):
-  1. Filename contains `idea` or `card` (strong primary)
-  2. Filename contains `business case`, `proposal`, `deck`, `initiative`
-  3. Extension rank: `pptx` < `pdf` < `docx` < `ppt` < `doc`
-  4. Smaller files first (treated as more concise idea cards)
-  This biases consolidation toward the **idea card itself**, not 200-slide
-  decks.
-- **Supported attachment types**: `pptx`, `ppt`, `pdf`, `docx`, `doc`.
-  Everything else is logged as "skipped unsupported".
+- **Document budget = 4** by default (`max_documents`). The budget counts
+  *accepted* documents, not attempted ones — anything that fails the size
+  or weak-text gate is silently skipped and the next ranked attachment is
+  tried.
+- **Supported attachment types**: only `pptx`, `ppt`, `pdf`, `docx`, `doc`
+  enter the ranking. Everything else (png, xlsx, eml, csv, …) is dropped at
+  the extension filter with `ATTACHMENT skipped unsupported` and doesn't
+  even compete for a slot.
 - **Pre-extracted text reuse**: if Jira-side extraction already attached
   `extracted.text`, it's used as-is (saves a re-download and re-parse).
+  This is a *speed* benefit only — pre-extracted attachments sort at the
+  same rank they otherwise would. The one place pre-extracted text
+  overrides anything is the size gate: an oversized attachment
+  (`> 60 MB`) is normally skipped, but it's accepted if pre-extracted
+  text already exists.
 - **Weak-text rejection**: anything under 30 words is treated as junk
   (`_should_skip_extracted_text`) and the next-ranked attachment is
   tried.
@@ -295,6 +298,90 @@ Key decisions encoded in the consolidator:
   bot noise and acks are filtered out by `extract_substantive_comments`.
 - **Size guard**: attachments with `size > max_prefetch_attachment_size`
   (60 MB) are skipped unless they have pre-extracted text.
+
+#### Attachment priority — the exact ranking
+
+Among the eligible attachments, [_rank_document_attachment](../src/vs_app/ingestion/summary/text_consolidator.py#L138-L155)
+sorts them by a **5-key tuple**:
+
+```python
+return (-primary_name_score, -secondary_name_score, ext_rank, size, filename)
+```
+
+Lower tuple wins. In plain English, in this order:
+
+| # | Key                       | Effect                                                                                 |
+| - | ------------------------- | -------------------------------------------------------------------------------------- |
+| 1 | **primary name score**    | Filename contains **`idea`** or **`card`** → top tier. Beats every other key below.   |
+| 2 | **secondary name score**  | Filename contains **`business case`**, **`proposal`**, **`deck`**, or **`initiative`** → second tier. |
+| 3 | **extension rank**        | `pptx` (0) < `pdf` (1) < `docx` (2) < `ppt` (3) < `doc` (4)                           |
+| 4 | **file size**             | **Smaller first** — concise documents are more likely the idea card itself than a 200-slide all-hands deck. |
+| 5 | **filename**              | Alphabetical tie-breaker. Stable order across re-ingests.                              |
+
+> The keys are **lexicographic**, not weighted. A `.pptx` named
+> `meeting_notes.pptx` (no `idea`/`card` token) loses to a `.doc` named
+> `Idea_Card_v3.doc` because the name token wins before extension is even
+> looked at. The primary/secondary scores are binary (`0` or `1`), so
+> `Idea_Card_Idea.pptx` does not beat `Idea_Card.pptx`.
+
+**Worked example.** Given these attachments on a ticket:
+
+| Filename                          | Ext  | Size      |
+| --------------------------------- | ---- | --------- |
+| `org_chart.png`                   | png  |   480 KB  |
+| `Q1 Business Case Deck.pdf`       | pdf  |  3.4 MB   |
+| `Coupe_Health_Idea_Card.pptx`     | pptx |  1.2 MB   |
+| `meeting_notes.docx`              | docx |    35 KB  |
+| `Strategy_Initiative_Brief.docx`  | docx |   210 KB  |
+| `appendix.pdf`                    | pdf  |  5.0 MB   |
+
+`org_chart.png` is dropped at the extension filter. The rest sort as:
+
+| Rank | Filename                          | Key tuple                                              |
+| ---: | --------------------------------- | ------------------------------------------------------ |
+| 1    | `Coupe_Health_Idea_Card.pptx`     | `(-1, 0, 0, 1_200_000, 'coupe_health_idea_card.pptx')` |
+| 2    | `Q1 Business Case Deck.pdf`       | `(0, -1, 1, 3_400_000, 'q1 business case deck.pdf')`   |
+| 3    | `Strategy_Initiative_Brief.docx`  | `(0, -1, 2,   210_000, 'strategy_initiative_brief.docx')` |
+| 4    | `appendix.pdf`                    | `(0, 0,  1, 5_000_000, 'appendix.pdf')`                |
+| 5    | `meeting_notes.docx`              | `(0, 0,  2,    35_000, 'meeting_notes.docx')`          |
+
+The pipeline walks this list and accepts up to `max_documents=4`. The
+budget refers to *accepted* documents — anything failing the size gate
+(`> 60 MB`) or the weak-text gate (`< 30 words`) is silently skipped and
+the next one is tried, so a real ticket commonly ends up with **2–3
+actually-kept documents** even though the cap is 4.
+
+**Why these particular tokens?**
+
+- **`idea`, `card`** → matches "Idea Card", "IdeaCard_v3", "idmt-card.pptx" —
+  the canonical filename convention analysts use to mark the *one document*
+  that *is* the idea card.
+- **`business case`, `proposal`, `deck`, `initiative`** → second-tier
+  signals when no explicit idea card exists. These usually point at the
+  executive summary deck rather than appendices or design docs.
+- **Smaller size after extension** → discourages picking 200-slide
+  all-hands decks when a 20-slide concept deck is also attached.
+
+**No per-ticket override.** The only tuning lever today is
+`JiraIngestionConfig.max_documents` (raise it to e.g. 8 if you want the
+pipeline to keep going past 4). If a specific attachment is being
+unfairly demoted, the cleanest workaround is to rename it in Jira to
+contain `idea` or `card`.
+
+**To see this live on a ticket**, run [docs/ingestion_pipeline_walkthrough.ipynb](ingestion_pipeline_walkthrough.ipynb)
+— the consolidate cell prints exactly which attachments were attempted /
+accepted / skipped, e.g.:
+
+```text
+ATTACHMENTS found=7 supported_docs=5 max_documents=4
+ATTACHMENT skipped unsupported: org_chart.png
+ATTACHMENT attempting 1/5: Coupe_Health_Idea_Card.pptx size=1200000
+ATTACHMENT accepted 1/4: Coupe_Health_Idea_Card.pptx words=842 chars=5621
+ATTACHMENT attempting 2/5: Q1 Business Case Deck.pdf size=3400000
+ATTACHMENT accepted 2/4: Q1 Business Case Deck.pdf words=621 chars=4109
+ATTACHMENT attempting 3/5: meeting_notes.docx size=35000
+ATTACHMENT skipped weak_text: meeting_notes.docx reason=too_few_words<30 words=12 chars=68
+```
 
 ### 5.4 Structured summarization (LLM #1)
 

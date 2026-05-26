@@ -10,7 +10,6 @@ from typing import Any
 from vs_app.modules.tickets.text_formatting import (
     clean_text,
     extract_description_text,
-    extract_substantive_comments,
 )
 from vs_app.shared.text_cleaning import clean_extracted_text
 
@@ -18,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 _MAX_DESCRIPTION_CHARS = 8_000
 _MAX_ATTACHMENT_CHARS = 12_000
-_MAX_COMMENT_CHARS = 1_500
 _MAX_TOTAL_CHARS = 20_000
 
 _DEFAULT_MAX_DOCUMENTS = 4
@@ -39,10 +37,6 @@ async def consolidate_ticket_text(
     ticket_key = str(ticket_data.get("key") or "")
 
     description_text = clean_text(extract_description_text(fields.get("description")))
-    comment_texts = extract_substantive_comments(
-        comment_field=fields.get("comment") or {},
-        max_comments=3,
-    )
 
     api_attachments = _jira_attachments(ticket_data, fields)
     max_docs = int(getattr(cfg, "max_documents", _DEFAULT_MAX_DOCUMENTS) or _DEFAULT_MAX_DOCUMENTS)
@@ -58,8 +52,6 @@ async def consolidate_ticket_text(
     if description_text:
         parts.append(f"[DESCRIPTION]\n{description_text[:_MAX_DESCRIPTION_CHARS]}")
     parts.extend(doc_parts)
-    for idx, comment in enumerate(comment_texts, start=1):
-        parts.append(f"[COMMENT {idx}]\n{comment[:_MAX_COMMENT_CHARS]}")
 
     logger.debug("%s: %d Jira doc(s)", ticket_key or "<unknown>", len(doc_parts))
     if not doc_parts:

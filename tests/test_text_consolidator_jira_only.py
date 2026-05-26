@@ -54,6 +54,31 @@ async def test_only_max_documents_downloaded_and_ordered(monkeypatch) -> None:
     assert "SharePoint" not in text
 
 
+@pytest.mark.anyio
+async def test_jira_comments_are_not_added_to_consolidated_text() -> None:
+    ticket = {
+        "key": "IDMT-1",
+        "fields": {
+            "description": "Description body",
+            "comment": {
+                "comments": [
+                    {
+                        "author": {"displayName": "Analyst"},
+                        "body": "This Jira comment should not be ingested.",
+                    }
+                ]
+            },
+        },
+        "attachments": [],
+    }
+
+    text = await consolidate_ticket_text(ticket, JiraClient(), Cfg())
+
+    assert "[DESCRIPTION]\nDescription body" in text
+    assert "[COMMENT" not in text
+    assert "This Jira comment should not be ingested." not in text
+
+
 def test_description_links_are_not_converted_into_attachments() -> None:
     issue = {
         "key": "IDMT-1",

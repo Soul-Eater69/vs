@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from vs_app.container import build_ticket_fetcher, normalize_ticket_source
 from vs_app.modules.tickets.text_assembly import build_retrieval_text
-from vs_app.modules.tickets.text_processing import clean_description, extract_comment_texts
+from vs_app.modules.tickets.text_processing import clean_description
 
 from .corpus_models import RawTicket
 
@@ -56,12 +56,10 @@ def _project_raw_ticket(
     description = clean_description(fields.get("description"))
     title = str(fields.get("summary") or ticket_id)
     vs_labels = _dedupe_labels(ticket_data.get("value_stream_names"))
-    comment_texts = extract_comment_texts(fields.get("comment") or {})
     raw_text = build_retrieval_text(
         title=title,
         description_cleaned=description,
         attachment_texts=attachment_texts,
-        comment_texts=comment_texts,
     )
 
     return RawTicket(

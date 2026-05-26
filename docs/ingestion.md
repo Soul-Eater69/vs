@@ -57,7 +57,7 @@ flowchart TD
     F -- "no" --> X[ensure_value_stream_labels<br/>resolve from issuelinks]
     F -- "yes" --> G[ingest_ticket_summary_payload]
     X --> G
-    G --> H[consolidate_ticket_text<br/>description + docs + comments]
+    G --> H[consolidate_ticket_text<br/>description + docs]
     H --> I[summarize_ticket<br/>structured LLM JSON]
     I --> J[classify_ticket_value_streams<br/>direct vs implied]
     J --> K[embed format_structured_summary_text]
@@ -198,7 +198,7 @@ sequenceDiagram
 ([src/vs_app/integrations/jira/client.py](../src/vs_app/integrations/jira/client.py))
 authenticates against Jira REST v2, requests a fixed list of fields
 (`summary, description, reporter, assignee, created, updated, status,
-priority, issuetype, labels, components, attachment, issuelinks, comment,
+priority, issuetype, labels, components, attachment, issuelinks,
 parent, subtasks`), and hands the raw issue JSON to
 `build_ticket_payload`
 ([src/vs_app/ingestion/jira/mapper.py](../src/vs_app/ingestion/jira/mapper.py)),
@@ -264,10 +264,8 @@ flowchart LR
     G --> I
     I -- "no" --> E
     I -- "yes" --> J[Keep up to 12k chars]
-    B2[fields.comment] --> K[top 3 substantive<br/>comments, 1.5k chars each]
     Z --> OUT
     J --> OUT
-    K --> OUT
     OUT[Concatenate &<br/>cap 20k chars]
 ```
 
@@ -291,11 +289,9 @@ Key decisions encoded in the consolidator:
 - **Weak-text rejection**: anything under 30 words is treated as junk
   (`_should_skip_extracted_text`) and the next-ranked attachment is
   tried.
-- **Per-source caps**: description ≤ 8k, each document ≤ 12k, each
-  comment ≤ 1.5k, total ≤ 20k chars. These caps keep prompt size stable
+- **Per-source caps**: description ≤ 8k, each document ≤ 12k,
+  total ≤ 20k chars. These caps keep prompt size stable
   for `gpt-5-mini-idp` while still leaving room for structured output.
-- **Comments**: only the top 3 substantive comments are pulled; routine
-  bot noise and acks are filtered out by `extract_substantive_comments`.
 - **Size guard**: attachments with `size > max_prefetch_attachment_size`
   (60 MB) are skipped unless they have pre-extracted text.
 

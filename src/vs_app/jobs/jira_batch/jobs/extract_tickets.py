@@ -1,7 +1,7 @@
 """
 Extract Jira tickets to individual JSON files — no Azure, no enrichment.
 
-Saves raw extraction output (description, attachments, comments, value streams)
+Saves raw extraction output (description, attachments, value streams)
 to jira_extraction/<TICKET-ID>.json.
 
 Usage:

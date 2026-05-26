@@ -89,7 +89,7 @@ class JiraTicketClient(TicketFetcher):
         "summary", "description", "reporter", "assignee",
         "created", "updated", "status", "priority", "issuetype",
         "labels", "components", "attachment", "issuelinks",
-        "comment", "parent", "subtasks",
+        "parent", "subtasks",
     ]
 
     def __init__(

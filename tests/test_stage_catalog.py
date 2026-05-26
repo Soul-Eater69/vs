@@ -286,6 +286,52 @@ def test_stage_catalog_loader_supports_actual_value_stream_stage_map_schema(tmp_
     }
 
 
+def test_stage_catalog_loader_supports_wrapped_value_streams_map_schema(tmp_path) -> None:
+    path = tmp_path / "value_stream_stage_map.json"
+    path.write_text(
+        json.dumps(
+            {
+                "source_file": "value_stream_stage_map.txt",
+                "value_stream_count": 1,
+                "value_streams": [
+                    {
+                        "value_stream_id": "VSR00168130",
+                        "value_stream_name": "Manage Utilization Management Program",
+                        "value_stream_description": "The end-to-end perspective.",
+                        "stages": [
+                            {
+                                "stage_id": "VSS00939329",
+                                "stage_sequence": 1,
+                                "stage_name": "Manage UM Guidelines",
+                            },
+                            {
+                                "stage_id": "VSS00939330",
+                                "stage_sequence": 2,
+                                "stage_name": "Review UM Program",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = load_stage_catalog(path=path, source="json")
+
+    assert get_allowed_stages("Manage Utilization Management Program", catalog) == [
+        "Manage UM Guidelines",
+        "Review UM Program",
+    ]
+    assert summarize_stage_catalog(catalog) == [
+        {
+            "value_stream": "Manage Utilization Management Program",
+            "stage_count": 2,
+            "stages": ["Manage UM Guidelines", "Review UM Program"],
+        }
+    ]
+
+
 def test_summarize_stage_catalog_returns_stage_counts(tmp_path) -> None:
     path = tmp_path / "value_stream_stage_map.json"
     path.write_text(

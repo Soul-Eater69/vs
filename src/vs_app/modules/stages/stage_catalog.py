@@ -19,6 +19,16 @@ _VALUE_STREAM_SELECT_FIELDS = [
     "properties",
     "node_type",
 ]
+_LIST_WRAPPER_KEYS = (
+    "value_streams",
+    "items",
+    "data",
+    "results",
+    "rows",
+    "catalog",
+    "value_stream_stage_map",
+    "value_stream_stage_catalog",
+)
 
 
 def load_stage_catalog(
@@ -102,16 +112,28 @@ def _load_catalog_from_json(path: Path) -> dict[str, dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     catalog: dict[str, dict[str, Any]] = {}
     if isinstance(payload, dict):
-        for value_stream_name, raw_entry in payload.items():
-            entry = _normalize_catalog_entry(str(value_stream_name), raw_entry)
-            if entry["stages"]:
-                catalog[str(value_stream_name)] = entry
+        wrapped_rows = _wrapped_catalog_rows(payload)
+        if wrapped_rows is not None:
+            catalog = _catalog_from_list_rows(wrapped_rows)
+        else:
+            for value_stream_name, raw_entry in payload.items():
+                entry = _normalize_catalog_entry(str(value_stream_name), raw_entry)
+                if entry["stages"]:
+                    catalog[str(value_stream_name)] = entry
     elif isinstance(payload, list):
         catalog = _catalog_from_list_rows(payload)
 
     if not catalog:
         raise ValueError(_empty_catalog_error(path, payload))
     return catalog
+
+
+def _wrapped_catalog_rows(payload: dict[str, Any]) -> list[Any] | None:
+    for key in _LIST_WRAPPER_KEYS:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    return None
 
 
 def _catalog_from_list_rows(rows: list[Any]) -> dict[str, dict[str, Any]]:

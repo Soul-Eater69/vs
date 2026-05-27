@@ -18,11 +18,13 @@ from vs_app.modules.stages.stage_catalog import get_allowed_stages, load_stage_c
 from vs_app.modules.stages.stage_ground_truth import (
     BUSINESS_NEEDS_FIELD,
     BUSINESS_VALUE_STREAM_FIELD,
-    _collect_child_issues,
     build_theme_stage_ground_truth,
     build_ticket_stage_ground_truth,
+    extract_stage_from_child_epic_summary,
     extract_raw_stage_mentions_from_business_needs,
+    fetch_direct_child_epics,
     parse_business_value_stream,
+    find_linked_theme_issues,
 )
 from vs_app.modules.stages.stage_metrics import compute_stage_metrics, evaluate_stage_predictions
 from vs_app.modules.stages.stage_selector import predict_value_stream_stages
@@ -76,6 +78,37 @@ def test_business_needs_extracts_first_stage_from_pipe_segment() -> None:
     assert mentions[0]["source"] == "business_needs"
 
 
+def test_idmt_issue_links_find_themes() -> None:
+    issue = {
+        "key": "IDMT-19761",
+        "fields": {
+            "issuelinks": [
+                {
+                    "type": {"name": "implements"},
+                    "outwardIssue": {
+                        "key": "GROUP-22223",
+                        "fields": {
+                            "summary": "Theme summary",
+                            "issuetype": {"name": "Theme"},
+                        },
+                    },
+                },
+                {
+                    "type": {"name": "relates"},
+                    "outwardIssue": {
+                        "key": "GROUP-99999",
+                        "fields": {"issuetype": {"name": "Theme"}},
+                    },
+                },
+            ]
+        },
+    }
+
+    assert find_linked_theme_issues(issue) == [
+        {"key": "GROUP-22223", "summary": "Theme summary", "issue_type": "Theme"}
+    ]
+
+
 def test_business_needs_does_not_create_stage_ground_truth() -> None:
     theme = {
         "key": "GROUP-22223",
@@ -93,7 +126,8 @@ def test_business_needs_does_not_create_stage_ground_truth() -> None:
                 "stages": [{"name": "Deliver Response", "id": "", "description": "", "aliases": []}]
             }
         },
-        child_issues=[],
+        child_epics=[],
+        child_lookup_debug={},
     )
 
     assert result["verified_stages"] == []
@@ -121,11 +155,20 @@ def test_child_epic_summary_creates_stage_ground_truth() -> None:
             "issuetype": {"name": "Epic"},
         },
     }
+    mention = extract_stage_from_child_epic_summary(
+        child_issue=child,
+        value_stream_name="Manage Utilization Management Program",
+    )
+
+    assert mention is not None
+    assert mention["raw_stage"] == "Manage UM Operations"
+    assert mention["source"] == "child_epic_summary"
 
     result = build_theme_stage_ground_truth(
         theme_issue=theme,
         catalog=_operations_catalog(),
-        child_issues=[child],
+        child_epics=[child],
+        child_lookup_debug={},
     )
 
     assert result["verified_stages"][0]["canonical"] == "Manage UM Operations"
@@ -176,7 +219,8 @@ def test_duplicate_child_epic_stages_collapse_to_one_canonical_stage() -> None:
     result = build_theme_stage_ground_truth(
         theme_issue=theme,
         catalog=_operations_catalog(),
-        child_issues=children,
+        child_epics=children,
+        child_lookup_debug={},
     )
 
     assert len(result["verified_stages"]) == 1
@@ -253,6 +297,8 @@ class _SearchFakeJira(_FakeJira):
 
     async def search_issues(self, jql: str, start_at=0, max_results=100, fields=None):
         self.seen_jqls.append(jql)
+        if "childIssuesOf" in jql:
+            raise AssertionError("childIssuesOf must not be called for stage GT")
         if jql in self.error_jqls:
             raise RuntimeError("unsupported JQL")
         issues = list(self.search_results.get(jql) or [])
@@ -298,25 +344,27 @@ async def test_ground_truth_builder_groups_verified_stages_by_value_stream() -> 
             "issuetype": {"name": "Theme"},
             BUSINESS_VALUE_STREAM_FIELD: "Manage Utilization Management Program {VSR00168130}",
             BUSINESS_NEEDS_FIELD: "Value Stage: Manage UM | Fertility PA",
-            "subtasks": [
-                {
-                    "key": "GROUP-22805",
-                    "fields": {
-                        "summary": (
-                            "CP 2026 Women's and Family Health : "
-                            "Manage Utilization Management Program - Manage UM Operations (PA)"
-                        ),
-                        "status": {"name": "Cancelled"},
-                        "issuetype": {"name": "Epic"},
-                    },
-                }
-            ],
+            "subtasks": [],
+        },
+    }
+    child = {
+        "key": "GROUP-22805",
+        "fields": {
+            "summary": (
+                "CP 2026 Women's and Family Health : "
+                "Manage Utilization Management Program - Manage UM Operations (PA)"
+            ),
+            "status": {"name": "Cancelled"},
+            "issuetype": {"name": "Epic"},
         },
     }
 
     result = await build_ticket_stage_ground_truth(
         ticket_key="IDMT-19761",
-        jira_client=_FakeJira({"IDMT-19761": idmt, "GROUP-22223": theme}),
+        jira_client=_SearchFakeJira(
+            {"IDMT-19761": idmt, "GROUP-22223": theme},
+            search_results={'"Parent Link" = GROUP-22223 AND issuetype = Epic': [child]},
+        ),
         catalog=_operations_catalog(),
     )
 
@@ -327,14 +375,7 @@ async def test_ground_truth_builder_groups_verified_stages_by_value_stream() -> 
 
 
 @pytest.mark.anyio
-async def test_child_lookup_uses_reverse_parent_link_jql() -> None:
-    theme = {
-        "key": "GROUP-22223",
-        "fields": {
-            "summary": "CP 2026 Women's and Family Health : Manage Utilization Management Program",
-            "subtasks": [],
-        },
-    }
+async def test_parent_link_lookup_returns_child_epics() -> None:
     child_a = {
         "key": "GROUP-22805",
         "fields": {
@@ -360,34 +401,27 @@ async def test_child_lookup_uses_reverse_parent_link_jql() -> None:
         },
     }
     jira = _SearchFakeJira(
-        {"GROUP-22223": theme},
+        {},
         search_results={
-            '"Parent Link" = GROUP-22223': [child_a, child_b],
-            'issuekey in childIssuesOf("GROUP-22223")': [child_a, child_b],
-            "parent = GROUP-22223": [],
+            '"Parent Link" = GROUP-22223 AND issuetype = Epic': [child_a, child_b],
         },
     )
 
-    child_issues, lookup = await _collect_child_issues(
+    child_issues, lookup = await fetch_direct_child_epics(
         jira_client=jira,
-        theme_issue=theme,
-        fetch_child_issues=True,
+        theme_key="GROUP-22223",
     )
 
     assert [issue["key"] for issue in child_issues] == ["GROUP-22805", "GROUP-22838"]
     assert lookup["child_issue_keys"] == ["GROUP-22805", "GROUP-22838"]
-    assert [attempt["jql"] for attempt in lookup["jql_attempts"]] == [
-        '"Parent Link" = GROUP-22223',
-        'issuekey in childIssuesOf("GROUP-22223")',
-        "parent = GROUP-22223",
-    ]
+    assert lookup["lookup_strategy"] == "parent_link_only"
+    assert lookup["jql_attempts"][0]["jql"] == '"Parent Link" = GROUP-22223 AND issuetype = Epic'
     assert lookup["jql_attempts"][0]["count"] == 2
-    assert lookup["jql_attempts"][1]["count"] == 2
-    assert lookup["jql_attempts"][2]["count"] == 0
+    assert jira.seen_jqls == ['"Parent Link" = GROUP-22223 AND issuetype = Epic']
 
 
 @pytest.mark.anyio
-async def test_unsupported_child_lookup_jql_is_recorded_and_gt_continues() -> None:
+async def test_no_parent_link_children_leaves_stage_ground_truth_empty() -> None:
     idmt = {
         "key": "IDMT-19761",
         "fields": {
@@ -418,43 +452,29 @@ async def test_unsupported_child_lookup_jql_is_recorded_and_gt_continues() -> No
             "subtasks": [],
         },
     }
-    child = {
-        "key": "GROUP-22805",
-        "fields": {
-            "summary": (
-                "CP 2026 Women's and Family Health : "
-                "Manage Utilization Management Program - Manage UM Operations (PA)"
-            ),
-            "status": {"name": "Cancelled"},
-            "issuetype": {"name": "Epic"},
-            "customfield_11401": "GROUP-22223",
-        },
-    }
     jira = _SearchFakeJira(
         {"IDMT-19761": idmt, "GROUP-22223": theme},
         search_results={
-            '"Parent Link" = GROUP-22223': [child],
-            "parent = GROUP-22223": [],
+            '"Parent Link" = GROUP-22223 AND issuetype = Epic': [],
         },
-        error_jqls={'issuekey in childIssuesOf("GROUP-22223")'},
     )
 
     result = await build_ticket_stage_ground_truth(
         ticket_key="IDMT-19761",
         jira_client=jira,
         catalog=_operations_catalog(),
-        fetch_child_issues=True,
     )
 
     theme_gt = result["linked_themes"][0]
-    attempts = theme_gt["child_issue_lookup"]["jql_attempts"]
-    assert attempts[0]["jql"] == '"Parent Link" = GROUP-22223'
-    assert attempts[1]["jql"] == 'issuekey in childIssuesOf("GROUP-22223")'
-    assert "unsupported JQL" in attempts[1]["error"]
-    assert theme_gt["child_issue_lookup"]["child_issue_keys"] == ["GROUP-22805"]
+    assert theme_gt["verified_stages"] == []
     assert result["gt_by_value_stream"] == {
-        "Manage Utilization Management Program": ["Manage UM Operations"]
+        "Manage Utilization Management Program": []
     }
+    assert any(
+        "no direct Parent Link child Epics found" in warning
+        for warning in theme_gt["warnings"]
+    )
+    assert jira.seen_jqls == ['"Parent Link" = GROUP-22223 AND issuetype = Epic']
 
 
 @pytest.mark.anyio

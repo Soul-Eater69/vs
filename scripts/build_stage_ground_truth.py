@@ -151,7 +151,6 @@ async def async_main() -> int:
         path=args.stage_catalog,
         source=args.stage_catalog_source,
     )
-    llm = None if args.no_llm_canonicalization else _make_generation_service_if_configured()
     tickets: dict[str, Any] = {}
 
     async with JiraApiClient(
@@ -166,17 +165,13 @@ async def async_main() -> int:
                 ticket_key=ticket_key,
                 jira_client=jira_client,
                 catalog=catalog,
-                fetch_child_issues=bool(args.fetch_child_issues),
-                include_unverified=bool(args.include_unverified),
-                llm=llm,
-                debug=bool(args.debug),
             )
 
     output = {
         "source": "jira",
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "stage_catalog_source": args.stage_catalog_source,
-        "include_unverified": bool(args.include_unverified),
+        "stage_gt_lookup_strategy": "parent_link_only",
         "tickets": tickets,
     }
     print(f"Writing output file: {args.output}")
@@ -210,21 +205,6 @@ def parse_args() -> argparse.Namespace:
         choices=["json", "azure"],
         default="json",
         help="Approved stage catalog source.",
-    )
-    parser.add_argument(
-        "--fetch-child-issues",
-        action="store_true",
-        help="Also search Jira for child issues using parent = THEMEKEY.",
-    )
-    parser.add_argument(
-        "--include-unverified",
-        action="store_true",
-        help="Include unresolved raw stage names in gt_by_value_stream.",
-    )
-    parser.add_argument(
-        "--no-llm-canonicalization",
-        action="store_true",
-        help="Disable LLM fallback for unresolved/ambiguous raw stage canonicalization.",
     )
     parser.add_argument(
         "--output",
@@ -279,27 +259,6 @@ def write_outputs(payload: dict[str, Any], output_path: Path, *, debug: bool = F
             fh.write(
                 json.dumps({"ticket_id": ticket_key, **ticket}, ensure_ascii=False) + "\n"
             )
-
-
-def _make_generation_service_if_configured() -> Any | None:
-    configured = any(
-        os.getenv(name)
-        for name in (
-            "LLM_BASE_URL",
-            "OPENAI_API_KEY",
-            "IDP_AUTH_URL",
-            "IDP_CLIENT_ID",
-            "IDP_CLIENT_SECRET",
-        )
-    )
-    if not configured:
-        return None
-    try:
-        from vs_app.integrations.clients.generation_service import GenerationService
-
-        return GenerationService()
-    except Exception:
-        return None
 
 
 def _ticket_keys_from_json(payload: Any) -> list[str]:

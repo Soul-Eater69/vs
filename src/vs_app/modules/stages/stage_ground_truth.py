@@ -11,15 +11,16 @@ from vs_app.modules.stages.stage_catalog import (
 
 BUSINESS_VALUE_STREAM_FIELD = "customfield_18600"
 BUSINESS_NEEDS_FIELD = "customfield_20900"
+PARENT_LINK_FIELD = "customfield_11401"
 
-_IDMT_FIELDS = [
+IDMT_FIELDS = [
     "summary",
     "description",
     "issuetype",
     "issuelinks",
     "attachment",
 ]
-_THEME_FIELDS = [
+THEME_FIELDS = [
     "summary",
     "description",
     "status",
@@ -32,12 +33,12 @@ _THEME_FIELDS = [
     "customfield_18602",
     "customfield_18603",
 ]
-_CHILD_FIELDS = [
+CHILD_EPIC_FIELDS = [
     "summary",
     "status",
     "issuetype",
     "parent",
-    "customfield_11401",
+    PARENT_LINK_FIELD,
 ]
 
 
@@ -92,15 +93,9 @@ async def build_ticket_stage_ground_truth(
     ticket_key: str,
     jira_client: Any,
     catalog: dict,
-    fetch_child_issues: bool = False,
-    include_unverified: bool = False,
-    llm: Any | None = None,
-    debug: bool = False,
 ) -> dict[str, Any]:
     idmt_key = normalize_ticket_key(ticket_key)
-    _debug_print(debug, f"Fetching IDMT ticket: {idmt_key}")
-    issue = await _fetch_issue(jira_client, idmt_key, fields=_IDMT_FIELDS, expand=True)
-    _debug_print(debug, f"Fetched IDMT ticket: {idmt_key}")
+    issue = await _fetch_issue(jira_client, idmt_key, fields=IDMT_FIELDS, expand=True)
     fields = issue.get("fields") or {}
     warnings: list[str] = []
 
@@ -111,11 +106,6 @@ async def build_ticket_stage_ground_truth(
         warnings.append(f"unexpected IDMT issue type: {issue_type}")
 
     theme_refs = find_linked_theme_issues(issue)
-    _debug_print(
-        debug,
-        f"Linked Theme keys found for {idmt_key}: "
-        f"{[ref.get('key') for ref in theme_refs]}",
-    )
     linked_themes: list[dict[str, Any]] = []
     gt_by_value_stream: dict[str, list[str]] = {}
 
@@ -123,22 +113,16 @@ async def build_ticket_stage_ground_truth(
         theme_key = str(theme_ref.get("key") or "").strip()
         if not theme_key:
             continue
-        _debug_print(debug, f"Fetching Theme {theme_key} for {idmt_key}")
-        theme_issue = await _fetch_issue(jira_client, theme_key, fields=_THEME_FIELDS, expand=True)
-        _debug_print(debug, f"Fetched Theme {theme_key} for {idmt_key}")
-        child_issues, child_issue_lookup = await _collect_child_issues(
+        theme_issue = await _fetch_issue(jira_client, theme_key, fields=THEME_FIELDS, expand=True)
+        child_epics, child_lookup_debug = await fetch_direct_child_epics(
             jira_client=jira_client,
-            theme_issue=theme_issue,
-            fetch_child_issues=fetch_child_issues,
-            debug=debug,
+            theme_key=theme_key,
         )
         theme_gt = build_theme_stage_ground_truth(
             theme_issue=theme_issue,
             catalog=catalog,
-            child_issues=child_issues,
-            child_issue_lookup=child_issue_lookup,
-            include_unverified=include_unverified,
-            llm=llm,
+            child_epics=child_epics,
+            child_lookup_debug=child_lookup_debug,
         )
         linked_themes.append(theme_gt)
 
@@ -150,12 +134,6 @@ async def build_ticket_stage_ground_truth(
             for stage in theme_gt.get("verified_stages") or []
             if str(stage.get("canonical") or "").strip()
         ]
-        if include_unverified:
-            gt_stages.extend(
-                str(item.get("raw_stage") or item.get("raw") or "").strip()
-                for item in theme_gt.get("unresolved_stage_mentions") or []
-                if str(item.get("raw_stage") or item.get("raw") or "").strip()
-            )
         gt_by_value_stream[value_stream_name] = _dedupe_preserve(
             list(gt_by_value_stream.get(value_stream_name) or []) + gt_stages
         )
@@ -173,11 +151,9 @@ async def build_ticket_stage_ground_truth(
 def build_theme_stage_ground_truth(
     *,
     theme_issue: dict[str, Any],
+    child_epics: list[dict[str, Any]] | None = None,
+    child_lookup_debug: dict[str, Any] | None = None,
     catalog: dict,
-    child_issues: list[dict[str, Any]] | None = None,
-    child_issue_lookup: dict[str, Any] | None = None,
-    include_unverified: bool = False,
-    llm: Any | None = None,
 ) -> dict[str, Any]:
     fields = theme_issue.get("fields") or {}
     theme_key = _clean_text(theme_issue.get("key"))
@@ -203,14 +179,15 @@ def build_theme_stage_ground_truth(
     child_issue_mentions_debug: list[dict[str, Any]] = []
     raw_mentions: list[dict[str, Any]] = []
     child_issue_rows: list[dict[str, Any]] = []
-    for child in child_issues or []:
+    for child in child_epics or []:
         child_row = _child_issue_row(child)
         child_issue_rows.append(child_row)
-        mentions = extract_raw_stage_mentions_from_child_issue(
+        mention = extract_stage_from_child_epic_summary(
             child,
             theme_summary=theme_summary,
             value_stream_name=value_stream_name,
         )
+        mentions = [mention] if mention else []
         child_issue_mentions_debug.extend(mentions)
         raw_mentions.extend(mentions)
 
@@ -222,7 +199,6 @@ def build_theme_stage_ground_truth(
         result = canonicalize_stage(
             raw_stage,
             allowed_stage_defs or allowed_stages,
-            llm=llm,
             value_stream_name=value_stream_name,
         )
         canonicalization_debug.append(
@@ -265,8 +241,7 @@ def build_theme_stage_ground_truth(
         unresolved.append(unresolved_item)
 
     verified_stages = sorted(by_canonical.values(), key=lambda item: item["canonical"])
-    if include_unverified:
-        warnings.append("include_unverified is set; unresolved raw stages may be included in gt_by_value_stream")
+    warnings.extend(str(item) for item in (child_lookup_debug or {}).get("warnings") or [])
 
     return {
         "theme_key": theme_key,
@@ -275,7 +250,7 @@ def build_theme_stage_ground_truth(
         "allowed_stages": allowed_stages,
         "business_needs_raw": business_needs_raw,
         "business_needs_mentions_debug_only": business_needs_mentions_debug_only,
-        "child_issue_lookup": child_issue_lookup or {},
+        "child_issue_lookup": child_lookup_debug or {},
         "child_issue_mentions_debug": child_issue_mentions_debug,
         "canonicalization_debug": canonicalization_debug,
         "verified_stages": verified_stages,
@@ -318,15 +293,56 @@ def find_linked_theme_issues(issue: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def extract_raw_stage_mentions_from_child_issue(
+async def fetch_direct_child_epics(
+    *,
+    jira_client: Any,
+    theme_key: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    normalized_theme_key = _clean_text(theme_key).upper()
+    jql = f'"Parent Link" = {normalized_theme_key} AND issuetype = Epic'
+    lookup: dict[str, Any] = {
+        "theme_key": normalized_theme_key,
+        "lookup_strategy": "parent_link_only",
+        "jql_attempts": [
+            {
+                "name": "parent_link",
+                "jql": jql,
+                "count": 0,
+                "keys": [],
+                "error": None,
+            }
+        ],
+        "child_issue_keys": [],
+        "warnings": [],
+    }
+
+    try:
+        result = await _search_issues(jira_client, jql, fields=CHILD_EPIC_FIELDS)
+    except Exception as exc:
+        lookup["jql_attempts"][0]["error"] = _compact_error(exc)
+        lookup["warnings"].append("direct Parent Link child Epic lookup failed; stage GT left empty")
+        return [], lookup
+
+    child_epics = _dedupe_child_epics(result.get("issues") or [], lookup["warnings"])
+    child_epics = sorted(child_epics, key=lambda item: _clean_text(item.get("key")))
+    child_keys = [_clean_text(child.get("key")) for child in child_epics if _clean_text(child.get("key"))]
+    lookup["jql_attempts"][0]["keys"] = child_keys
+    lookup["jql_attempts"][0]["count"] = len(child_keys)
+    lookup["child_issue_keys"] = child_keys
+    if not child_keys:
+        lookup["warnings"].append("no direct Parent Link child Epics found; stage GT left empty")
+    return child_epics, lookup
+
+
+def extract_stage_from_child_epic_summary(
     child_issue: dict[str, Any],
     *,
     theme_summary: str = "",
     value_stream_name: str = "",
-) -> list[dict[str, Any]]:
+) -> dict[str, Any] | None:
     summary = _clean_text((child_issue.get("fields") or {}).get("summary") or child_issue.get("summary"))
     if not summary:
-        return []
+        return None
 
     candidate = summary
     if " - " in candidate:
@@ -342,98 +358,49 @@ def extract_raw_stage_mentions_from_child_issue(
     candidate = re.sub(r"\s*\([^)]*\)\s*$", "", candidate)
     candidate = _clean_stage_candidate(candidate)
     if not candidate or candidate == _clean_stage_candidate(theme_summary):
-        return []
+        return None
 
-    return [
-        {
-            "raw_stage": candidate,
-            "source": "child_issue_summary",
-            "source_text": summary,
-            "child_key": _clean_text(child_issue.get("key")),
-        }
-    ]
-
-
-async def _collect_child_issues(
-    *,
-    jira_client: Any,
-    theme_issue: dict[str, Any],
-    fetch_child_issues: bool,
-    debug: bool = False,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    fields = theme_issue.get("fields") or {}
-    by_key: dict[str, dict[str, Any]] = {}
-    theme_key = _clean_text(theme_issue.get("key"))
-    lookup: dict[str, Any] = {
-        "theme_key": theme_key,
-        "subtasks_count": len(fields.get("subtasks") or []),
-        "jql_attempts": [],
-        "child_issue_keys": [],
-        "warnings": [],
+    return {
+        "raw_stage": candidate,
+        "source": "child_epic_summary",
+        "source_text": summary,
+        "child_key": _clean_text(child_issue.get("key")),
     }
 
-    for child in fields.get("subtasks") or []:
-        hydrated = await _maybe_hydrate_child_issue(jira_client, child)
-        key = _clean_text(hydrated.get("key") or child.get("key"))
-        if key:
-            by_key[key] = hydrated
 
-    if fetch_child_issues:
-        if not theme_key:
-            lookup["warnings"].append("theme issue has no key; child JQL lookup skipped")
-        for jql in _child_issue_jqls(theme_key) if theme_key else []:
-            attempt = {"jql": jql, "count": 0, "keys": [], "error": None}
-            _debug_print(debug, f"Running child lookup JQL for {theme_key}: {jql}")
-            try:
-                result = await _search_issues(jira_client, jql, fields=_CHILD_FIELDS)
-            except Exception as exc:
-                attempt["error"] = _compact_error(exc)
-                lookup["jql_attempts"].append(attempt)
-                _debug_print(
-                    debug,
-                    f"Child lookup JQL failed for {theme_key}: {jql} -> {attempt['error']}",
-                )
-                continue
-            keys: list[str] = []
-            for child in result.get("issues") or []:
-                key = _clean_text(child.get("key"))
-                if not key:
-                    continue
-                keys.append(key)
-                if key not in by_key:
-                    by_key[key] = child
-            attempt["keys"] = sorted(set(keys))
-            attempt["count"] = len(attempt["keys"])
-            lookup["jql_attempts"].append(attempt)
-            _debug_print(
-                debug,
-                f"Returned {attempt['count']} child issues: {attempt['keys']}",
-            )
-
-    children = sorted(by_key.values(), key=lambda item: _clean_text(item.get("key")))
-    lookup["child_issue_keys"] = [_clean_text(child.get("key")) for child in children if _clean_text(child.get("key"))]
-    return children, lookup
+def extract_raw_stage_mentions_from_child_issue(
+    child_issue: dict[str, Any],
+    *,
+    theme_summary: str = "",
+    value_stream_name: str = "",
+) -> list[dict[str, Any]]:
+    """Deprecated compatibility wrapper for the direct child Epic extractor."""
+    mention = extract_stage_from_child_epic_summary(
+        child_issue,
+        theme_summary=theme_summary,
+        value_stream_name=value_stream_name,
+    )
+    return [mention] if mention else []
 
 
-def _child_issue_jqls(theme_key: str) -> list[str]:
-    return [
-        f'"Parent Link" = {theme_key}',
-        f'issuekey in childIssuesOf("{theme_key}")',
-        f"parent = {theme_key}",
-    ]
-
-
-async def _maybe_hydrate_child_issue(jira_client: Any, child: dict[str, Any]) -> dict[str, Any]:
-    fields = child.get("fields") or {}
-    if fields.get("summary") and fields.get("issuetype"):
-        return child
-    key = _clean_text(child.get("key"))
-    if not key:
-        return child
-    try:
-        return await _fetch_issue(jira_client, key, fields=_CHILD_FIELDS, expand=False)
-    except Exception:
-        return child
+def _dedupe_child_epics(issues: list[dict[str, Any]], warnings: list[str]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        key = _clean_text(issue.get("key"))
+        if not key or key in seen:
+            continue
+        issue_type = _issue_type_name(issue)
+        if issue_type and issue_type.lower() != "epic":
+            warnings.append(f"skipped non-Epic child issue from Parent Link lookup: {key} ({issue_type})")
+            continue
+        if not issue_type:
+            warnings.append(f"child issue from Parent Link lookup has no issue type: {key}")
+        seen.add(key)
+        out.append(issue)
+    return out
 
 
 async def _fetch_issue(
@@ -480,11 +447,6 @@ def _compact_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _debug_print(debug: bool, message: str) -> None:
-    if debug:
-        print(message)
-
-
 def _split_stage_candidate_segment(segment: str) -> list[str]:
     segment = segment.strip()
     if "|" in segment:
@@ -517,8 +479,10 @@ def _line_containing(text: str, position: int) -> str:
 
 
 def _raw_mention_payload(mention: dict[str, Any]) -> dict[str, Any]:
+    raw_stage = str(mention.get("raw_stage") or "").strip()
     payload = {
-        "raw": str(mention.get("raw_stage") or "").strip(),
+        "raw_stage": raw_stage,
+        "raw": raw_stage,
         "source": str(mention.get("source") or "").strip(),
     }
     for key in ("source_text", "position", "child_key"):
@@ -641,10 +605,15 @@ def _clean_text(value: Any) -> str:
 __all__ = [
     "BUSINESS_NEEDS_FIELD",
     "BUSINESS_VALUE_STREAM_FIELD",
+    "CHILD_EPIC_FIELDS",
+    "IDMT_FIELDS",
+    "PARENT_LINK_FIELD",
+    "THEME_FIELDS",
     "build_theme_stage_ground_truth",
     "build_ticket_stage_ground_truth",
+    "extract_stage_from_child_epic_summary",
     "extract_raw_stage_mentions_from_business_needs",
-    "extract_raw_stage_mentions_from_child_issue",
+    "fetch_direct_child_epics",
     "find_linked_theme_issues",
     "normalize_ticket_key",
     "parse_business_value_stream",

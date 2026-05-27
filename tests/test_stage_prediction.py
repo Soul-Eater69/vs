@@ -7,6 +7,7 @@ import pytest
 
 from scripts.evaluate_stage_prediction_batch import evaluate_prediction_row
 from vs_app.modules.stages.stage_prediction import (
+    allowed_stage_payload,
     build_stage_prediction_task,
     parse_stage_prediction_response,
     predict_stages_for_predicted_value_streams,
@@ -77,6 +78,31 @@ def test_stage_prediction_prompt_rendering_contains_context_and_schema() -> None
     assert "Manage Leads and Opportunities" in prompt
     assert "Perform Outreach to Leads and Prospects" in prompt
     assert '"predicted_stages"' in prompt
+
+
+def test_allowed_stage_payload_supports_catalog_stage_name_variants() -> None:
+    payload = json.loads(
+        allowed_stage_payload(
+            [
+                {
+                    "stage_id": "VSS-1",
+                    "value_stream_stage_name": "Perform Outreach to Leads and Prospects",
+                    "value_stream_stage_description": "Contact leads.",
+                    "value_stream_stage_entrance_criteria": "Lead is ready.",
+                    "value_stream_stage_exit_criteria": "Outreach completed.",
+                    "value_stream_stage_value_items": "Lead contact record",
+                    "value_stream_stage_stakeholders": "Sales",
+                }
+            ]
+        )
+    )
+
+    assert payload[0]["stage_name"] == "Perform Outreach to Leads and Prospects"
+    assert payload[0]["stage_description"] == "Contact leads."
+    assert payload[0]["stage_entrance_criteria"] == "Lead is ready."
+    assert payload[0]["stage_exit_criteria"] == "Outreach completed."
+    assert payload[0]["stage_value_items"] == "Lead contact record"
+    assert payload[0]["stage_stakeholders"] == "Sales"
 
 
 def test_stage_prediction_parser_accepts_valid_json() -> None:

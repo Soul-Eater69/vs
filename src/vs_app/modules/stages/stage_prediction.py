@@ -305,24 +305,41 @@ def allowed_stage_row(stage: Any) -> dict[str, Any]:
     return {
         "stage_id": clean_text(stage.get("id") or stage.get("stage_id")),
         "stage_sequence": stage.get("sequence") or stage.get("stage_sequence"),
-        "stage_name": clean_text(stage.get("name") or stage.get("stage_name")),
+        "stage_name": clean_text(
+            stage.get("name")
+            or stage.get("stage_name")
+            or stage.get("value_stream_stage_name")
+            or stage.get("stage_display_name")
+        ),
         "stage_display_name": clean_text(
-            stage.get("display_name") or stage.get("stage_display_name")
+            stage.get("display_name")
+            or stage.get("stage_display_name")
+            or stage.get("value_stream_stage_display_name")
         ),
         "stage_description": clean_text(
-            stage.get("description") or stage.get("stage_description")
+            stage.get("description")
+            or stage.get("stage_description")
+            or stage.get("value_stream_stage_description")
         ),
         "stage_entrance_criteria": clean_text(
-            stage.get("entrance_criteria") or stage.get("stage_entrance_criteria")
+            stage.get("entrance_criteria")
+            or stage.get("stage_entrance_criteria")
+            or stage.get("value_stream_stage_entrance_criteria")
         ),
         "stage_exit_criteria": clean_text(
-            stage.get("exit_criteria") or stage.get("stage_exit_criteria")
+            stage.get("exit_criteria")
+            or stage.get("stage_exit_criteria")
+            or stage.get("value_stream_stage_exit_criteria")
         ),
         "stage_value_items": clean_text(
-            stage.get("value_items") or stage.get("stage_value_items")
+            stage.get("value_items")
+            or stage.get("stage_value_items")
+            or stage.get("value_stream_stage_value_items")
         ),
         "stage_stakeholders": clean_text(
-            stage.get("stakeholders") or stage.get("stage_stakeholders")
+            stage.get("stakeholders")
+            or stage.get("stage_stakeholders")
+            or stage.get("value_stream_stage_stakeholders")
         ),
     }
 

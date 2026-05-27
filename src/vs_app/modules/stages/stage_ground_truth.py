@@ -189,20 +189,22 @@ def build_theme_stage_ground_truth(
     business_needs_mentions_debug_only = extract_raw_stage_mentions_from_business_needs(
         business_needs_raw
     )
+    child_issue_mentions_debug: list[dict[str, Any]] = []
     raw_mentions: list[dict[str, Any]] = []
     child_issue_rows: list[dict[str, Any]] = []
     for child in child_issues or []:
         child_row = _child_issue_row(child)
         child_issue_rows.append(child_row)
-        raw_mentions.extend(
-            extract_raw_stage_mentions_from_child_issue(
-                child,
-                theme_summary=theme_summary,
-                value_stream_name=value_stream_name,
-            )
+        mentions = extract_raw_stage_mentions_from_child_issue(
+            child,
+            theme_summary=theme_summary,
+            value_stream_name=value_stream_name,
         )
+        child_issue_mentions_debug.extend(mentions)
+        raw_mentions.extend(mentions)
 
     by_canonical: dict[str, dict[str, Any]] = {}
+    canonicalization_debug: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     for mention in raw_mentions:
         raw_stage = str(mention.get("raw_stage") or "").strip()
@@ -211,6 +213,18 @@ def build_theme_stage_ground_truth(
             allowed_stage_defs or allowed_stages,
             llm=llm,
             value_stream_name=value_stream_name,
+        )
+        canonicalization_debug.append(
+            {
+                "raw_stage": raw_stage,
+                "source": mention.get("source"),
+                "child_key": mention.get("child_key"),
+                "source_text": mention.get("source_text"),
+                "canonical": result.get("canonical"),
+                "match_method": result.get("match_method"),
+                "confidence": result.get("confidence"),
+                "warnings": list(result.get("warnings") or []),
+            }
         )
         raw_payload = _raw_mention_payload(mention)
         canonical = result.get("canonical")
@@ -251,6 +265,8 @@ def build_theme_stage_ground_truth(
         "business_needs_raw": business_needs_raw,
         "business_needs_mentions_debug_only": business_needs_mentions_debug_only,
         "child_issue_lookup": child_issue_lookup or {},
+        "child_issue_mentions_debug": child_issue_mentions_debug,
+        "canonicalization_debug": canonicalization_debug,
         "verified_stages": verified_stages,
         "unresolved_stage_mentions": unresolved,
         "child_issues": child_issue_rows,

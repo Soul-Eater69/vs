@@ -129,6 +129,13 @@ def test_child_epic_summary_creates_stage_ground_truth() -> None:
 
     assert result["verified_stages"][0]["canonical"] == "Manage UM Operations"
     assert result["verified_stages"][0]["raw_mentions"][0]["raw"] == "Manage UM Operations"
+    assert result["child_issue_mentions_debug"][0]["raw_stage"] == "Manage UM Operations"
+    assert result["child_issue_mentions_debug"][0]["source_text"].endswith(
+        "Manage UM Operations (PA)"
+    )
+    assert result["canonicalization_debug"][0]["child_key"] == "GROUP-22805"
+    assert result["canonicalization_debug"][0]["canonical"] == "Manage UM Operations"
+    assert result["canonicalization_debug"][0]["match_method"] == "exact"
 
 
 def test_duplicate_child_epic_stages_collapse_to_one_canonical_stage() -> None:

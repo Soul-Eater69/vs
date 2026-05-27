@@ -32,7 +32,13 @@ _THEME_FIELDS = [
     "customfield_18602",
     "customfield_18603",
 ]
-_CHILD_FIELDS = ["summary", "status", "issuetype", "parent"]
+_CHILD_FIELDS = [
+    "summary",
+    "status",
+    "issuetype",
+    "parent",
+    "customfield_11401",
+]
 
 
 def parse_business_value_stream(raw: Any) -> dict[str, str]:
@@ -110,7 +116,7 @@ async def build_ticket_stage_ground_truth(
         if not theme_key:
             continue
         theme_issue = await _fetch_issue(jira_client, theme_key, fields=_THEME_FIELDS, expand=True)
-        child_issues = await _collect_child_issues(
+        child_issues, child_issue_lookup = await _collect_child_issues(
             jira_client=jira_client,
             theme_issue=theme_issue,
             fetch_child_issues=fetch_child_issues,
@@ -119,6 +125,7 @@ async def build_ticket_stage_ground_truth(
             theme_issue=theme_issue,
             catalog=catalog,
             child_issues=child_issues,
+            child_issue_lookup=child_issue_lookup,
             include_unverified=include_unverified,
             llm=llm,
         )
@@ -157,6 +164,7 @@ def build_theme_stage_ground_truth(
     theme_issue: dict[str, Any],
     catalog: dict,
     child_issues: list[dict[str, Any]] | None = None,
+    child_issue_lookup: dict[str, Any] | None = None,
     include_unverified: bool = False,
     llm: Any | None = None,
 ) -> dict[str, Any]:
@@ -178,7 +186,10 @@ def build_theme_stage_ground_truth(
     if value_stream_name and not allowed_stage_defs:
         warnings.append(f"no approved stage catalog entry for value stream: {value_stream_name}")
 
-    raw_mentions = extract_raw_stage_mentions_from_business_needs(business_needs_raw)
+    business_needs_mentions_debug_only = extract_raw_stage_mentions_from_business_needs(
+        business_needs_raw
+    )
+    raw_mentions: list[dict[str, Any]] = []
     child_issue_rows: list[dict[str, Any]] = []
     for child in child_issues or []:
         child_row = _child_issue_row(child)
@@ -238,6 +249,8 @@ def build_theme_stage_ground_truth(
         "business_value_stream": business_value_stream,
         "allowed_stages": allowed_stages,
         "business_needs_raw": business_needs_raw,
+        "business_needs_mentions_debug_only": business_needs_mentions_debug_only,
+        "child_issue_lookup": child_issue_lookup or {},
         "verified_stages": verified_stages,
         "unresolved_stage_mentions": unresolved,
         "child_issues": child_issue_rows,
@@ -299,6 +312,7 @@ def extract_raw_stage_mentions_from_child_issue(
     elif ":" in candidate:
         candidate = candidate.rsplit(":", 1)[-1]
 
+    candidate = re.sub(r"\s*\([^)]*\)\s*$", "", candidate)
     candidate = _clean_stage_candidate(candidate)
     if not candidate or candidate == _clean_stage_candidate(theme_summary):
         return []
@@ -318,9 +332,17 @@ async def _collect_child_issues(
     jira_client: Any,
     theme_issue: dict[str, Any],
     fetch_child_issues: bool,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     fields = theme_issue.get("fields") or {}
     by_key: dict[str, dict[str, Any]] = {}
+    theme_key = _clean_text(theme_issue.get("key"))
+    lookup: dict[str, Any] = {
+        "theme_key": theme_key,
+        "subtasks_count": len(fields.get("subtasks") or []),
+        "jql_attempts": [],
+        "child_issue_keys": [],
+        "warnings": [],
+    }
 
     for child in fields.get("subtasks") or []:
         hydrated = await _maybe_hydrate_child_issue(jira_client, child)
@@ -329,18 +351,39 @@ async def _collect_child_issues(
             by_key[key] = hydrated
 
     if fetch_child_issues:
-        theme_key = _clean_text(theme_issue.get("key"))
-        result = await _search_issues(
-            jira_client,
-            f"parent = {theme_key}",
-            fields=_CHILD_FIELDS,
-        )
-        for child in result.get("issues") or []:
-            key = _clean_text(child.get("key"))
-            if key and key not in by_key:
-                by_key[key] = child
+        if not theme_key:
+            lookup["warnings"].append("theme issue has no key; child JQL lookup skipped")
+        for jql in _child_issue_jqls(theme_key) if theme_key else []:
+            attempt = {"jql": jql, "count": 0, "keys": [], "error": None}
+            try:
+                result = await _search_issues(jira_client, jql, fields=_CHILD_FIELDS)
+            except Exception as exc:
+                attempt["error"] = _compact_error(exc)
+                lookup["jql_attempts"].append(attempt)
+                continue
+            keys: list[str] = []
+            for child in result.get("issues") or []:
+                key = _clean_text(child.get("key"))
+                if not key:
+                    continue
+                keys.append(key)
+                if key not in by_key:
+                    by_key[key] = child
+            attempt["keys"] = sorted(set(keys))
+            attempt["count"] = len(attempt["keys"])
+            lookup["jql_attempts"].append(attempt)
 
-    return sorted(by_key.values(), key=lambda item: _clean_text(item.get("key")))
+    children = sorted(by_key.values(), key=lambda item: _clean_text(item.get("key")))
+    lookup["child_issue_keys"] = [_clean_text(child.get("key")) for child in children if _clean_text(child.get("key"))]
+    return children, lookup
+
+
+def _child_issue_jqls(theme_key: str) -> list[str]:
+    return [
+        f'issuekey in childIssuesOf("{theme_key}")',
+        f'"Parent Link" = {theme_key}',
+        f"parent = {theme_key}",
+    ]
 
 
 async def _maybe_hydrate_child_issue(jira_client: Any, child: dict[str, Any]) -> dict[str, Any]:
@@ -394,6 +437,10 @@ async def _search_issues(jira_client: Any, jql: str, *, fields: list[str]) -> di
         return dict(await nested_get_issues(jql=jql, start_at=0, max_results=100, fields=fields))
 
     return {"issues": [], "total": 0}
+
+
+def _compact_error(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"
 
 
 def _split_stage_candidate_segment(segment: str) -> list[str]:

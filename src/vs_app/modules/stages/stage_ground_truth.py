@@ -176,69 +176,74 @@ def build_theme_stage_ground_truth(
     business_needs_mentions_debug_only = extract_raw_stage_mentions_from_business_needs(
         business_needs_raw
     )
+    allowed_stage_options = allowed_stage_defs or allowed_stages
+    child_issue_stage_resolution_debug: list[dict[str, Any]] = []
     child_issue_mentions_debug: list[dict[str, Any]] = []
-    raw_mentions: list[dict[str, Any]] = []
+    canonicalization_debug: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    by_canonical: dict[str, dict[str, Any]] = {}
     child_issue_rows: list[dict[str, Any]] = []
     for child in child_epics or []:
         child_row = _child_issue_row(child)
         child_issue_rows.append(child_row)
-        mention = extract_stage_from_child_epic_summary(
-            child,
+        resolution = resolve_child_epic_stage(
+            child_issue=child,
+            allowed_stages=allowed_stage_options,
             theme_summary=theme_summary,
             value_stream_name=value_stream_name,
         )
-        mentions = [mention] if mention else []
-        child_issue_mentions_debug.extend(mentions)
-        raw_mentions.extend(mentions)
+        child_issue_stage_resolution_debug.append(resolution)
+        if not resolution.get("included"):
+            unresolved.append(
+                {
+                    "raw_stage": resolution.get("cleaned_stage_name") or "",
+                    "source": "child_epic_summary",
+                    "source_text": resolution.get("raw_summary") or "",
+                    "child_key": resolution.get("child_key") or "",
+                    "included": False,
+                    "candidates": list(resolution.get("candidates") or []),
+                    "warnings": list(resolution.get("warnings") or []),
+                }
+            )
+            continue
 
-    by_canonical: dict[str, dict[str, Any]] = {}
-    canonicalization_debug: list[dict[str, Any]] = []
-    unresolved: list[dict[str, Any]] = []
-    for mention in raw_mentions:
-        raw_stage = str(mention.get("raw_stage") or "").strip()
-        result = canonicalize_stage(
-            raw_stage,
-            allowed_stage_defs or allowed_stages,
-            value_stream_name=value_stream_name,
-        )
+        mention = {
+            "raw_stage": resolution.get("cleaned_stage_name") or "",
+            "source": "child_epic_summary",
+            "source_text": resolution.get("raw_summary") or "",
+            "child_key": resolution.get("child_key") or "",
+        }
+        child_issue_mentions_debug.append(mention)
         canonicalization_debug.append(
             {
-                "raw_stage": raw_stage,
-                "source": mention.get("source"),
-                "child_key": mention.get("child_key"),
-                "source_text": mention.get("source_text"),
-                "canonical": result.get("canonical"),
-                "match_method": result.get("match_method"),
-                "confidence": result.get("confidence"),
-                "warnings": list(result.get("warnings") or []),
+                "raw_stage": resolution.get("cleaned_stage_name") or "",
+                "source": "child_epic_summary",
+                "child_key": resolution.get("child_key") or "",
+                "source_text": resolution.get("raw_summary") or "",
+                "canonical": resolution.get("canonical_stage"),
+                "match_method": resolution.get("match_method"),
+                "confidence": resolution.get("confidence"),
+                "warnings": list(resolution.get("warnings") or []),
             }
         )
         raw_payload = _raw_mention_payload(mention)
-        canonical = result.get("canonical")
+        canonical = resolution.get("canonical_stage")
         if canonical:
             stage = by_canonical.setdefault(
                 str(canonical),
                 {
                     "canonical": str(canonical),
-                    "confidence": result.get("confidence", 0.0),
-                    "match_method": result.get("match_method", ""),
+                    "confidence": resolution.get("confidence", 0.0),
+                    "match_method": resolution.get("match_method", ""),
                     "raw_mentions": [],
                 },
             )
             stage["raw_mentions"].append(raw_payload)
-            if float(result.get("confidence") or 0.0) > float(stage.get("confidence") or 0.0):
-                stage["confidence"] = result.get("confidence", 0.0)
-                stage["match_method"] = result.get("match_method", "")
-            elif result.get("match_method") == "exact":
+            if float(resolution.get("confidence") or 0.0) > float(stage.get("confidence") or 0.0):
+                stage["confidence"] = resolution.get("confidence", 0.0)
+                stage["match_method"] = resolution.get("match_method", "")
+            elif resolution.get("match_method") == "exact":
                 stage["match_method"] = "exact"
-            continue
-
-        unresolved_item = dict(raw_payload)
-        unresolved_item["raw_stage"] = raw_stage
-        unresolved_item["match_method"] = result.get("match_method", "unresolved")
-        unresolved_item["confidence"] = result.get("confidence", 0.0)
-        unresolved_item["warnings"] = list(result.get("warnings") or [])
-        unresolved.append(unresolved_item)
 
     verified_stages = sorted(by_canonical.values(), key=lambda item: item["canonical"])
     warnings.extend(str(item) for item in (child_lookup_debug or {}).get("warnings") or [])
@@ -252,6 +257,7 @@ def build_theme_stage_ground_truth(
         "business_needs_mentions_debug_only": business_needs_mentions_debug_only,
         "child_issue_lookup": child_lookup_debug or {},
         "child_issue_mentions_debug": child_issue_mentions_debug,
+        "child_issue_stage_resolution_debug": child_issue_stage_resolution_debug,
         "canonicalization_debug": canonicalization_debug,
         "verified_stages": verified_stages,
         "unresolved_stage_mentions": unresolved,
@@ -340,31 +346,111 @@ def extract_stage_from_child_epic_summary(
     theme_summary: str = "",
     value_stream_name: str = "",
 ) -> dict[str, Any] | None:
-    summary = _clean_text((child_issue.get("fields") or {}).get("summary") or child_issue.get("summary"))
-    if not summary:
+    raw_summary, candidates = generate_stage_candidates_from_child_epic_summary(
+        child_issue=child_issue,
+        theme_summary=theme_summary,
+        value_stream_name=value_stream_name,
+    )
+    if not raw_summary or not candidates:
         return None
-
-    candidate = summary
-    if " - " in candidate:
-        candidate = candidate.rsplit(" - ", 1)[-1]
-    elif value_stream_name and value_stream_name.lower() in candidate.lower():
-        idx = candidate.lower().find(value_stream_name.lower())
-        candidate = candidate[idx + len(value_stream_name) :]
-    elif " : " in candidate:
-        candidate = candidate.rsplit(" : ", 1)[-1]
-    elif ":" in candidate:
-        candidate = candidate.rsplit(":", 1)[-1]
-
-    candidate = re.sub(r"\s*\([^)]*\)\s*$", "", candidate)
-    candidate = _clean_stage_candidate(candidate)
-    if not candidate or candidate == _clean_stage_candidate(theme_summary):
-        return None
+    candidate = str(candidates[0].get("candidate") or "").strip()
 
     return {
         "raw_stage": candidate,
         "source": "child_epic_summary",
-        "source_text": summary,
+        "source_text": raw_summary,
         "child_key": _clean_text(child_issue.get("key")),
+    }
+
+
+def generate_stage_candidates_from_child_epic_summary(
+    *,
+    child_issue: dict[str, Any],
+    theme_summary: str = "",
+    value_stream_name: str = "",
+) -> tuple[str, list[dict[str, str]]]:
+    raw_summary = _clean_text((child_issue.get("fields") or {}).get("summary") or child_issue.get("summary"))
+    if not raw_summary:
+        return "", []
+
+    suffix = _child_summary_suffix(
+        raw_summary,
+        theme_summary=theme_summary,
+        value_stream_name=value_stream_name,
+    )
+    suffix_segments = [
+        _clean_child_stage_candidate(segment)
+        for segment in re.split(r"\s*[-–—]\s*", suffix)
+        if _clean_child_stage_candidate(segment)
+    ]
+
+    candidates: list[dict[str, str]] = []
+    if suffix_segments:
+        candidates.append({"candidate": suffix_segments[0], "rule": "first_suffix_segment"})
+        for segment in suffix_segments[1:]:
+            candidates.append({"candidate": segment, "rule": "later_suffix_segment"})
+        joined = _clean_child_stage_candidate(" ".join(suffix_segments))
+        if joined:
+            candidates.append({"candidate": joined, "rule": "joined_suffix"})
+
+    full_raw = _clean_stage_candidate(raw_summary)
+    if full_raw:
+        candidates.append({"candidate": full_raw, "rule": "full_raw_summary"})
+
+    return raw_summary, _dedupe_candidate_rows(candidates)
+
+
+def resolve_child_epic_stage(
+    *,
+    child_issue: dict[str, Any],
+    allowed_stages: list[Any],
+    theme_summary: str = "",
+    value_stream_name: str = "",
+    confidence_threshold: float = 0.86,
+) -> dict[str, Any]:
+    raw_summary, candidates = generate_stage_candidates_from_child_epic_summary(
+        child_issue=child_issue,
+        theme_summary=theme_summary,
+        value_stream_name=value_stream_name,
+    )
+    child_key = _clean_text(child_issue.get("key"))
+    scored_candidates: list[dict[str, Any]] = []
+    selected: dict[str, Any] | None = None
+
+    for candidate in candidates:
+        candidate_text = str(candidate.get("candidate") or "").strip()
+        result = canonicalize_stage(
+            candidate_text,
+            allowed_stages,
+            value_stream_name=value_stream_name,
+        )
+        scored = {
+            "candidate": candidate_text,
+            "rule": candidate.get("rule") or "",
+            "canonical": result.get("canonical"),
+            "match_method": result.get("match_method"),
+            "confidence": result.get("confidence"),
+            "warnings": list(result.get("warnings") or []),
+        }
+        scored_candidates.append(scored)
+        if (
+            selected is None
+            and result.get("canonical")
+            and float(result.get("confidence") or 0.0) >= confidence_threshold
+        ):
+            selected = scored
+
+    return {
+        "child_key": child_key,
+        "raw_summary": raw_summary,
+        "candidates": scored_candidates,
+        "included": selected is not None,
+        "cleaned_stage_name": selected.get("candidate") if selected else "",
+        "canonical_stage": selected.get("canonical") if selected else None,
+        "match_method": selected.get("match_method") if selected else "unresolved",
+        "confidence": selected.get("confidence") if selected else 0.0,
+        "selected_candidate_rule": selected.get("rule") if selected else "",
+        "warnings": [] if selected else ["no confident approved stage match from child Epic summary candidates"],
     }
 
 
@@ -400,6 +486,49 @@ def _dedupe_child_epics(issues: list[dict[str, Any]], warnings: list[str]) -> li
             warnings.append(f"child issue from Parent Link lookup has no issue type: {key}")
         seen.add(key)
         out.append(issue)
+    return out
+
+
+def _child_summary_suffix(
+    raw_summary: str,
+    *,
+    theme_summary: str = "",
+    value_stream_name: str = "",
+) -> str:
+    summary = _clean_text(raw_summary)
+    for prefix in (value_stream_name, theme_summary):
+        prefix_text = _clean_text(prefix)
+        if not prefix_text:
+            continue
+        idx = summary.lower().find(prefix_text.lower())
+        if idx != -1:
+            return _strip_candidate_prefix_separators(summary[idx + len(prefix_text) :])
+    if " : " in summary:
+        return _strip_candidate_prefix_separators(summary.rsplit(" : ", 1)[-1])
+    if ":" in summary:
+        return _strip_candidate_prefix_separators(summary.rsplit(":", 1)[-1])
+    return summary
+
+
+def _strip_candidate_prefix_separators(value: str) -> str:
+    return re.sub(r"^\s*[:\-–—]+\s*", "", str(value or "").strip())
+
+
+def _clean_child_stage_candidate(value: Any) -> str:
+    text = re.sub(r"\s*\([^)]*\)\s*$", "", str(value or ""))
+    return _clean_stage_candidate(text)
+
+
+def _dedupe_candidate_rows(candidates: list[dict[str, str]]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = str(candidate.get("candidate") or "").strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        out.append({"candidate": text, "rule": str(candidate.get("rule") or "")})
     return out
 
 
@@ -615,6 +744,8 @@ __all__ = [
     "extract_raw_stage_mentions_from_business_needs",
     "fetch_direct_child_epics",
     "find_linked_theme_issues",
+    "generate_stage_candidates_from_child_epic_summary",
     "normalize_ticket_key",
     "parse_business_value_stream",
+    "resolve_child_epic_stage",
 ]

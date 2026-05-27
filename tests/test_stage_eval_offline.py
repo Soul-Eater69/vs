@@ -23,8 +23,10 @@ from vs_app.modules.stages.stage_ground_truth import (
     extract_stage_from_child_epic_summary,
     extract_raw_stage_mentions_from_business_needs,
     fetch_direct_child_epics,
+    generate_stage_candidates_from_child_epic_summary,
     parse_business_value_stream,
     find_linked_theme_issues,
+    resolve_child_epic_stage,
 )
 from vs_app.modules.stages.stage_metrics import compute_stage_metrics, evaluate_stage_predictions
 from vs_app.modules.stages.stage_selector import predict_value_stream_stages
@@ -55,6 +57,18 @@ def _operations_catalog() -> dict:
                 {"name": "Manage Clinical Guidelines", "id": "", "description": "", "aliases": []},
                 {"name": "Manage UM Operations", "id": "", "description": "", "aliases": []},
                 {"name": "Evaluate UM Performance", "id": "", "description": "", "aliases": []},
+            ],
+        }
+    }
+
+
+def _leads_catalog() -> dict:
+    return {
+        "Manage Leads and opportunities": {
+            "value_stream_id": "VSR-LEADS",
+            "stages": [
+                {"name": "Perform Outreach to Leads and Prospects", "id": "", "description": "", "aliases": []},
+                {"name": "Product Sales Training", "id": "", "description": "", "aliases": []},
             ],
         }
     }
@@ -182,6 +196,43 @@ def test_child_epic_summary_creates_stage_ground_truth() -> None:
     assert result["canonicalization_debug"][0]["match_method"] == "exact"
 
 
+def test_child_epic_candidate_resolver_handles_compact_hyphens() -> None:
+    child = {
+        "key": "GROUP-22722",
+        "fields": {
+            "summary": (
+                "CP 2026 Women's and Family Health : Manage Leads and opportunities- "
+                "Perform Outreach- Product Sales Training"
+            ),
+            "status": {"name": "In Progress"},
+            "issuetype": {"name": "Epic"},
+        },
+    }
+
+    raw_summary, candidates = generate_stage_candidates_from_child_epic_summary(
+        child_issue=child,
+        value_stream_name="Manage Leads and opportunities",
+    )
+    resolution = resolve_child_epic_stage(
+        child_issue=child,
+        allowed_stages=_leads_catalog()["Manage Leads and opportunities"]["stages"],
+        value_stream_name="Manage Leads and opportunities",
+    )
+
+    assert raw_summary == child["fields"]["summary"]
+    assert [row["candidate"] for row in candidates] == [
+        "Perform Outreach",
+        "Product Sales Training",
+        "Perform Outreach Product Sales Training",
+        child["fields"]["summary"],
+    ]
+    assert resolution["included"] is True
+    assert resolution["cleaned_stage_name"] == "Perform Outreach"
+    assert resolution["canonical_stage"] == "Perform Outreach to Leads and Prospects"
+    assert resolution["match_method"] == "rapidfuzz"
+    assert resolution["selected_candidate_rule"] == "first_suffix_segment"
+
+
 def test_duplicate_child_epic_stages_collapse_to_one_canonical_stage() -> None:
     theme = {
         "key": "GROUP-22223",
@@ -229,6 +280,53 @@ def test_duplicate_child_epic_stages_collapse_to_one_canonical_stage() -> None:
     assert [row["child_key"] for row in result["verified_stages"][0]["raw_mentions"]] == [
         "GROUP-22805",
         "GROUP-22838",
+    ]
+
+
+def test_child_epic_candidate_resolution_populates_theme_debug() -> None:
+    theme = {
+        "key": "GROUP-22219",
+        "fields": {
+            "summary": "CP 2026 Women's and Family Health : Manage Leads and opportunities",
+            BUSINESS_VALUE_STREAM_FIELD: "Manage Leads and opportunities {VSR-LEADS}",
+            BUSINESS_NEEDS_FIELD: "",
+        },
+    }
+    child = {
+        "key": "GROUP-22722",
+        "fields": {
+            "summary": (
+                "CP 2026 Women's and Family Health : Manage Leads and opportunities- "
+                "Perform Outreach- Product Sales Training"
+            ),
+            "status": {"name": "In Progress"},
+            "issuetype": {"name": "Epic"},
+        },
+    }
+
+    result = build_theme_stage_ground_truth(
+        theme_issue=theme,
+        catalog=_leads_catalog(),
+        child_epics=[child],
+        child_lookup_debug={},
+    )
+
+    resolution = result["child_issue_stage_resolution_debug"][0]
+    assert resolution["child_key"] == "GROUP-22722"
+    assert resolution["cleaned_stage_name"] == "Perform Outreach"
+    assert resolution["canonical_stage"] == "Perform Outreach to Leads and Prospects"
+    assert resolution["included"] is True
+    assert result["child_issue_mentions_debug"] == [
+        {
+            "raw_stage": "Perform Outreach",
+            "source": "child_epic_summary",
+            "source_text": child["fields"]["summary"],
+            "child_key": "GROUP-22722",
+        }
+    ]
+    assert result["canonicalization_debug"][0]["canonical"] == "Perform Outreach to Leads and Prospects"
+    assert [stage["canonical"] for stage in result["verified_stages"]] == [
+        "Perform Outreach to Leads and Prospects"
     ]
 
 

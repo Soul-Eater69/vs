@@ -180,6 +180,48 @@ def build_value_stream_classification_prompt(
     )
 
 
+def build_value_stage_prediction_system_prompt() -> str:
+    payload = _load_required_prompt_yaml("value_stage_prediction", ["system"])
+    return str(payload["system"]).strip()
+
+
+def build_value_stage_prediction_prompt(
+    *,
+    ticket_id: str,
+    summary: str,
+    description: str,
+    idea_card_text: str,
+    value_stream_name: str,
+    value_stream_id: str,
+    value_stream_confidence: str,
+    value_stream_reason: str,
+    value_stream_description: str,
+    approved_stages_json: str,
+) -> str:
+    payload = _load_required_prompt_yaml(
+        "value_stage_prediction",
+        ["user", "schema"],
+    )
+    return render_prompt(
+        str(payload["user"]),
+        ticket_id=_escape_format_braces(ticket_id),
+        summary=_escape_format_braces(summary),
+        description=_escape_format_braces(description),
+        idea_card_text=_escape_format_braces(idea_card_text),
+        value_stream_name=_escape_format_braces(value_stream_name),
+        value_stream_id=_escape_format_braces(value_stream_id),
+        value_stream_confidence=_escape_format_braces(value_stream_confidence),
+        value_stream_reason=_escape_format_braces(value_stream_reason),
+        value_stream_description=_escape_format_braces(value_stream_description),
+        approved_stages_json=_escape_format_braces(approved_stages_json),
+        output_schema=_escape_format_braces(str(payload["schema"]).strip()),
+    )
+
+
+def _escape_format_braces(value: Any) -> str:
+    return str(value or "").replace("{", "{{").replace("}", "}}")
+
+
 def build_historical_enrichment_system_prompt() -> str:
     payload = _load_required_prompt_yaml("historical_enrichment", ["system"])
     return str(payload["system"]).strip()
@@ -227,6 +269,8 @@ __all__ = [
     "build_review_pool_selection_prompt",
     "build_review_pool_selection_system_prompt",
     "build_selection_system_prompt",
+    "build_value_stage_prediction_prompt",
+    "build_value_stage_prediction_system_prompt",
     "build_value_stream_classification_prompt",
     "load_prompt_yaml",
     "render_prompt",

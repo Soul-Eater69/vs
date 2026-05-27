@@ -380,7 +380,7 @@ def generate_stage_candidates_from_child_epic_summary(
     )
     suffix_segments = [
         _clean_child_stage_candidate(segment)
-        for segment in re.split(r"\s*[-–—]\s*", suffix)
+        for segment in re.split(r"\s*[-\u2013\u2014]\s*", suffix)
         if _clean_child_stage_candidate(segment)
     ]
 
@@ -511,7 +511,7 @@ def _child_summary_suffix(
 
 
 def _strip_candidate_prefix_separators(value: str) -> str:
-    return re.sub(r"^\s*[:\-–—]+\s*", "", str(value or "").strip())
+    return re.sub(r"^\s*[:\-\u2013\u2014]+\s*", "", str(value or "").strip())
 
 
 def _clean_child_stage_candidate(value: Any) -> str:

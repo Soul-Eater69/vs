@@ -396,8 +396,8 @@ async def _collect_child_issues(
 
 def _child_issue_jqls(theme_key: str) -> list[str]:
     return [
-        f'issuekey in childIssuesOf("{theme_key}")',
         f'"Parent Link" = {theme_key}',
+        f'issuekey in childIssuesOf("{theme_key}")',
         f"parent = {theme_key}",
     ]
 

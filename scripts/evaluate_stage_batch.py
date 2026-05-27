@@ -70,6 +70,7 @@ async def async_main() -> int:
         unresolved_gt_stage_count=unresolved_gt_stage_count(ground_truth),
         duplicate_raw_mentions_collapsed_count=duplicate_raw_mentions_collapsed_count(ground_truth),
     )
+    _print_missed_rows(result.get("rows") or [])
     result["metadata"] = {
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "stage_catalog_source": args.stage_catalog_source,
@@ -158,6 +159,15 @@ async def _evaluate_ticket(
             for row in prediction.get("predicted_stages") or []
             if str(row.get("stage") or "").strip()
         ]
+        prediction_reasons = [
+            {
+                "stage": str(row.get("stage") or "").strip(),
+                "confidence": row.get("confidence"),
+                "reason": str(row.get("reason") or "").strip(),
+            }
+            for row in prediction.get("predicted_stages") or []
+            if str(row.get("stage") or "").strip() or str(row.get("reason") or "").strip()
+        ]
         gt = list(gt_stages or [])
         if args.include_unverified_gt:
             gt.extend(_unresolved_for_value_stream(ticket, value_stream_name))
@@ -165,12 +175,40 @@ async def _evaluate_ticket(
             {
                 "ticket_id": ticket_id,
                 "value_stream_name": value_stream_name,
+                "allowed_stages": allowed,
                 "gt_stages": gt,
                 "predicted_stages": predicted_stages,
+                "idea_card_text_preview": _preview_text(idea_card_text),
+                "prediction_warnings": list(prediction.get("warnings") or []),
+                "prediction_reasons": prediction_reasons,
+                "model_raw_response": str(prediction.get("raw_response") or ""),
                 "prediction": prediction,
             }
         )
     return rows
+
+
+def _print_missed_rows(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        if not row.get("false_negatives"):
+            continue
+        print("\nMISS:")
+        print(f"ticket_id: {row.get('ticket_id')}")
+        print(f"value_stream: {row.get('value_stream_name')}")
+        print(f"gt_stages: {json.dumps(row.get('gt_stages') or [], ensure_ascii=False)}")
+        print(f"predicted_stages: {json.dumps(row.get('predicted_stages') or [], ensure_ascii=False)}")
+        print(f"false_negatives: {json.dumps(row.get('false_negatives') or [], ensure_ascii=False)}")
+        print(f"allowed_stages: {json.dumps(row.get('allowed_stages') or [], ensure_ascii=False)}")
+        print(f"idea_card_text_preview: {row.get('idea_card_text_preview') or ''}")
+        print(f"prediction_warnings: {json.dumps(row.get('prediction_warnings') or [], ensure_ascii=False)}")
+        print(f"prediction_reasons: {json.dumps(row.get('prediction_reasons') or [], ensure_ascii=False)}")
+
+
+def _preview_text(value: str, limit: int = 1500) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
 
 
 async def _idea_card_text(

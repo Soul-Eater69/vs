@@ -35,6 +35,7 @@ def predict_value_stream_stages(
             "allowed_stages": [],
             "predicted_stages": [],
             "warnings": ["no allowed stages for value stream"],
+            "raw_response": "",
         }
     if llm is None:
         return {
@@ -42,10 +43,11 @@ def predict_value_stream_stages(
             "allowed_stages": allowed,
             "predicted_stages": [],
             "warnings": ["no llm provided for stage prediction"],
+            "raw_response": "",
         }
 
     try:
-        parsed = _call_stage_selector_llm(
+        parsed, raw_response = _call_stage_selector_llm(
             idea_card_text=idea_card_text,
             value_stream_name=value_stream_name,
             allowed_stages=allowed,
@@ -58,6 +60,7 @@ def predict_value_stream_stages(
             "allowed_stages": allowed,
             "predicted_stages": [],
             "warnings": [f"stage prediction llm failed: {type(exc).__name__}: {exc}"],
+            "raw_response": "",
         }
     picks = parsed.get("picks") or []
 
@@ -90,6 +93,7 @@ def predict_value_stream_stages(
         "allowed_stages": allowed,
         "predicted_stages": selected,
         "warnings": warnings,
+        "raw_response": raw_response,
     }
 
 
@@ -100,7 +104,7 @@ def _call_stage_selector_llm(
     allowed_stages: list[str],
     value_stream_description: str,
     llm: Any,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str]:
     payload = load_prompt_yaml("value_stage_selection")
     prompt = render_prompt(
         str(payload.get("user") or payload.get("template") or ""),
@@ -119,8 +123,15 @@ def _call_stage_selector_llm(
             reasoning_effort="low",
         )
         if hasattr(result, "model_dump"):
-            return result.model_dump()
-        return dict(result or {})
+            parsed = result.model_dump()
+            raw_response = (
+                result.model_dump_json()
+                if hasattr(result, "model_dump_json")
+                else json.dumps(parsed, ensure_ascii=False)
+            )
+            return parsed, raw_response
+        parsed = dict(result or {})
+        return parsed, json.dumps(parsed, ensure_ascii=False)
 
     messages = (
         [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]
@@ -138,8 +149,9 @@ def _call_stage_selector_llm(
 
     content = getattr(response, "content", response)
     if isinstance(content, dict):
-        return content
-    return safe_json_extract(str(content or ""))
+        return content, json.dumps(content, ensure_ascii=False)
+    raw_response = str(content or "")
+    return safe_json_extract(raw_response), raw_response
 
 
 def _dedupe_exact(values: list[str]) -> list[str]:

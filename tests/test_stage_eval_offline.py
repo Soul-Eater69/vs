@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,7 +11,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from evaluate_stage_batch import _idea_card_text
+from evaluate_stage_batch import _evaluate_ticket, _idea_card_text
 
 from vs_app.modules.stages.stage_canonicalizer import canonicalize_stage
 from vs_app.modules.stages.stage_catalog import get_allowed_stages, load_stage_catalog
@@ -361,8 +362,8 @@ async def test_child_lookup_uses_reverse_parent_link_jql() -> None:
     jira = _SearchFakeJira(
         {"GROUP-22223": theme},
         search_results={
-            'issuekey in childIssuesOf("GROUP-22223")': [child_a, child_b],
             '"Parent Link" = GROUP-22223': [child_a, child_b],
+            'issuekey in childIssuesOf("GROUP-22223")': [child_a, child_b],
             "parent = GROUP-22223": [],
         },
     )
@@ -376,8 +377,8 @@ async def test_child_lookup_uses_reverse_parent_link_jql() -> None:
     assert [issue["key"] for issue in child_issues] == ["GROUP-22805", "GROUP-22838"]
     assert lookup["child_issue_keys"] == ["GROUP-22805", "GROUP-22838"]
     assert [attempt["jql"] for attempt in lookup["jql_attempts"]] == [
-        'issuekey in childIssuesOf("GROUP-22223")',
         '"Parent Link" = GROUP-22223',
+        'issuekey in childIssuesOf("GROUP-22223")',
         "parent = GROUP-22223",
     ]
     assert lookup["jql_attempts"][0]["count"] == 2
@@ -447,8 +448,9 @@ async def test_unsupported_child_lookup_jql_is_recorded_and_gt_continues() -> No
 
     theme_gt = result["linked_themes"][0]
     attempts = theme_gt["child_issue_lookup"]["jql_attempts"]
-    assert attempts[0]["jql"] == 'issuekey in childIssuesOf("GROUP-22223")'
-    assert "unsupported JQL" in attempts[0]["error"]
+    assert attempts[0]["jql"] == '"Parent Link" = GROUP-22223'
+    assert attempts[1]["jql"] == 'issuekey in childIssuesOf("GROUP-22223")'
+    assert "unsupported JQL" in attempts[1]["error"]
     assert theme_gt["child_issue_lookup"]["child_issue_keys"] == ["GROUP-22805"]
     assert result["gt_by_value_stream"] == {
         "Manage Utilization Management Program": ["Manage UM Operations"]
@@ -497,6 +499,49 @@ async def test_stage_eval_fallback_returns_summary_when_description_missing() ->
 
     assert text == "IDMT summary only"
     assert "LEAK" not in text
+
+
+@pytest.mark.anyio
+async def test_stage_eval_row_includes_debug_fields() -> None:
+    def fake_llm(messages):
+        return {"picks": []}
+
+    ground_truth = {
+        "tickets": {
+            "IDMT-19761": {
+                "idmt_summary": "Prior Authorization enhancement",
+                "idmt_description": "Improve PA review processing for providers.",
+                "gt_by_value_stream": {
+                    "Manage Utilization Management Program": ["Manage UM Operations"]
+                },
+            }
+        }
+    }
+
+    rows = await _evaluate_ticket(
+        "IDMT-19761",
+        ground_truth,
+        _operations_catalog(),
+        fake_llm,
+        None,
+        SimpleNamespace(include_unverified_gt=False),
+    )
+    evaluated = evaluate_stage_predictions(rows)
+    row = evaluated["rows"][0]
+
+    assert row["allowed_stages"] == [
+        "Manage UM Guidelines",
+        "Manage Clinical Guidelines",
+        "Manage UM Operations",
+        "Evaluate UM Performance",
+    ]
+    assert row["gt_stages"] == ["Manage UM Operations"]
+    assert row["predicted_stages"] == []
+    assert row["false_negatives"] == ["Manage UM Operations"]
+    assert "Prior Authorization enhancement" in row["idea_card_text_preview"]
+    assert "prediction_warnings" in row
+    assert "prediction_reasons" in row
+    assert row["model_raw_response"]
 
 
 def test_stage_selector_drops_invalid_model_picks() -> None:

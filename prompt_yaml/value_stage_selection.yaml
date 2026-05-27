@@ -35,4 +35,10 @@ user: |
   - If the idea affects setup, configuration, or readiness, select the setup/configuration stage if present.
   - If it affects execution or operation of the workflow, select the operational stage if present.
   - If it affects monitoring, reporting, or analytics, select the monitoring/reporting stage if present.
+  - For Manage Utilization Management Program:
+    - If the IDMT text mentions Prior Authorization, PA, appeals, authorization review, UM processing, provider/member authorization workflows, operational support, execution, delivery, reviews, approvals, or processing, choose "Manage UM Operations" when it is in the allowed stages.
+    - Choose "Manage UM Guidelines" only when the text is mainly about creating, modifying, or reviewing UM standards, UM policies, guidelines, PA grids, or program rules.
+    - Choose "Manage Clinical Guidelines" only when the text is mainly about clinical policy, pharmacy policy, or clinical guideline updates.
+    - Choose "Evaluate UM Performance" only when the text is mainly about reporting, monitoring, performance measures, analytics, or outcomes.
+    - Do not select all UM stages. Select only the stage directly supported by the IDMT text.
   - If no allowed stage is clearly impacted, return an empty picks array.

@@ -107,6 +107,7 @@ def write_stage_eval_outputs(result: dict[str, Any], output_dir: str | Path) -> 
     fieldnames = [
         "ticket_id",
         "value_stream_name",
+        "allowed_stages",
         "gt_stages",
         "predicted_stages",
         "correct_stages",
@@ -115,6 +116,10 @@ def write_stage_eval_outputs(result: dict[str, Any], output_dir: str | Path) -> 
         "precision",
         "recall",
         "f1",
+        "idea_card_text_preview",
+        "prediction_warnings",
+        "prediction_reasons",
+        "model_raw_response",
     ]
     with (out_dir / "stage_eval.csv").open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)

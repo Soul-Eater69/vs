@@ -95,9 +95,12 @@ async def build_ticket_stage_ground_truth(
     fetch_child_issues: bool = False,
     include_unverified: bool = False,
     llm: Any | None = None,
+    debug: bool = False,
 ) -> dict[str, Any]:
     idmt_key = normalize_ticket_key(ticket_key)
+    _debug_print(debug, f"Fetching IDMT ticket: {idmt_key}")
     issue = await _fetch_issue(jira_client, idmt_key, fields=_IDMT_FIELDS, expand=True)
+    _debug_print(debug, f"Fetched IDMT ticket: {idmt_key}")
     fields = issue.get("fields") or {}
     warnings: list[str] = []
 
@@ -108,6 +111,11 @@ async def build_ticket_stage_ground_truth(
         warnings.append(f"unexpected IDMT issue type: {issue_type}")
 
     theme_refs = find_linked_theme_issues(issue)
+    _debug_print(
+        debug,
+        f"Linked Theme keys found for {idmt_key}: "
+        f"{[ref.get('key') for ref in theme_refs]}",
+    )
     linked_themes: list[dict[str, Any]] = []
     gt_by_value_stream: dict[str, list[str]] = {}
 
@@ -115,11 +123,14 @@ async def build_ticket_stage_ground_truth(
         theme_key = str(theme_ref.get("key") or "").strip()
         if not theme_key:
             continue
+        _debug_print(debug, f"Fetching Theme {theme_key} for {idmt_key}")
         theme_issue = await _fetch_issue(jira_client, theme_key, fields=_THEME_FIELDS, expand=True)
+        _debug_print(debug, f"Fetched Theme {theme_key} for {idmt_key}")
         child_issues, child_issue_lookup = await _collect_child_issues(
             jira_client=jira_client,
             theme_issue=theme_issue,
             fetch_child_issues=fetch_child_issues,
+            debug=debug,
         )
         theme_gt = build_theme_stage_ground_truth(
             theme_issue=theme_issue,
@@ -348,6 +359,7 @@ async def _collect_child_issues(
     jira_client: Any,
     theme_issue: dict[str, Any],
     fetch_child_issues: bool,
+    debug: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     fields = theme_issue.get("fields") or {}
     by_key: dict[str, dict[str, Any]] = {}
@@ -371,11 +383,16 @@ async def _collect_child_issues(
             lookup["warnings"].append("theme issue has no key; child JQL lookup skipped")
         for jql in _child_issue_jqls(theme_key) if theme_key else []:
             attempt = {"jql": jql, "count": 0, "keys": [], "error": None}
+            _debug_print(debug, f"Running child lookup JQL for {theme_key}: {jql}")
             try:
                 result = await _search_issues(jira_client, jql, fields=_CHILD_FIELDS)
             except Exception as exc:
                 attempt["error"] = _compact_error(exc)
                 lookup["jql_attempts"].append(attempt)
+                _debug_print(
+                    debug,
+                    f"Child lookup JQL failed for {theme_key}: {jql} -> {attempt['error']}",
+                )
                 continue
             keys: list[str] = []
             for child in result.get("issues") or []:
@@ -388,6 +405,10 @@ async def _collect_child_issues(
             attempt["keys"] = sorted(set(keys))
             attempt["count"] = len(attempt["keys"])
             lookup["jql_attempts"].append(attempt)
+            _debug_print(
+                debug,
+                f"Returned {attempt['count']} child issues: {attempt['keys']}",
+            )
 
     children = sorted(by_key.values(), key=lambda item: _clean_text(item.get("key")))
     lookup["child_issue_keys"] = [_clean_text(child.get("key")) for child in children if _clean_text(child.get("key"))]
@@ -457,6 +478,11 @@ async def _search_issues(jira_client: Any, jql: str, *, fields: list[str]) -> di
 
 def _compact_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
+
+
+def _debug_print(debug: bool, message: str) -> None:
+    if debug:
+        print(message)
 
 
 def _split_stage_candidate_segment(segment: str) -> list[str]:

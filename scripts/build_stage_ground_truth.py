@@ -26,10 +26,18 @@ from vs_app.modules.stages.stage_ground_truth import build_ticket_stage_ground_t
 
 
 class JiraApiClient:
-    def __init__(self, *, base_url: str, token: str, verify_ssl: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        verify_ssl: bool = False,
+        debug: bool = False,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.headers = auth_headers(token)
         self.verify_ssl = verify_ssl
+        self.debug = debug
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "JiraApiClient":
@@ -59,11 +67,23 @@ class JiraApiClient:
             params["fields"] = ",".join(fields)
         if expand:
             params["expand"] = "names,schema"
-        response = await self._client.get(
-            f"{self.base_url}/rest/api/2/issue/{issue_key}",
-            params=params,
-        )
-        response.raise_for_status()
+        if self.debug:
+            print(
+                f"[jira] GET issue {issue_key} "
+                f"fields={fields or 'all'} expand={expand} timeout=60s"
+            )
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/rest/api/2/issue/{issue_key}",
+                params=params,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            if self.debug:
+                print(f"[jira] GET issue {issue_key} failed: {type(exc).__name__}: {exc}")
+            raise
+        if self.debug:
+            print(f"[jira] GET issue {issue_key} -> HTTP {response.status_code}")
         return response.json()
 
     async def search_issues(
@@ -83,11 +103,23 @@ class JiraApiClient:
         }
         if fields:
             params["fields"] = ",".join(fields)
-        response = await self._client.get(
-            f"{self.base_url}/rest/api/2/search",
-            params=params,
-        )
-        response.raise_for_status()
+        if self.debug:
+            print(
+                f"[jira] SEARCH jql={jql!r} start_at={start_at} "
+                f"max_results={max_results} fields={fields or 'default'} timeout=60s"
+            )
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/rest/api/2/search",
+                params=params,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            if self.debug:
+                print(f"[jira] SEARCH failed for jql={jql!r}: {type(exc).__name__}: {exc}")
+            raise
+        if self.debug:
+            print(f"[jira] SEARCH jql={jql!r} -> HTTP {response.status_code}")
         return response.json()
 
 
@@ -126,6 +158,7 @@ async def async_main() -> int:
         base_url=args.jira_base_url,
         token=args.jira_token,
         verify_ssl=bool(args.verify_ssl),
+        debug=bool(args.debug),
     ) as jira_client:
         for ticket_key in ticket_keys:
             print(f"Building stage GT for {ticket_key}...")
@@ -136,6 +169,7 @@ async def async_main() -> int:
                 fetch_child_issues=bool(args.fetch_child_issues),
                 include_unverified=bool(args.include_unverified),
                 llm=llm,
+                debug=bool(args.debug),
             )
 
     output = {
@@ -145,7 +179,8 @@ async def async_main() -> int:
         "include_unverified": bool(args.include_unverified),
         "tickets": tickets,
     }
-    write_outputs(output, Path(args.output))
+    print(f"Writing output file: {args.output}")
+    write_outputs(output, Path(args.output), debug=bool(args.debug))
     print(f"Wrote {len(tickets)} tickets to {args.output}")
     return 0
 
@@ -203,6 +238,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Verify Jira TLS certificates. Off by default.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print Jira calls, child lookup JQLs, and stage GT progress.",
+    )
     return parser.parse_args()
 
 
@@ -225,11 +265,15 @@ def load_ticket_keys(args: argparse.Namespace) -> list[str]:
     return sorted({normalize_ticket_key(key) for key in keys if normalize_ticket_key(key)})
 
 
-def write_outputs(payload: dict[str, Any], output_path: Path) -> None:
+def write_outputs(payload: dict[str, Any], output_path: Path, *, debug: bool = False) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if debug:
+        print(f"[stage-gt] writing JSON: {output_path}")
     output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     jsonl_path = output_path.with_suffix(".jsonl")
+    if debug:
+        print(f"[stage-gt] writing JSONL: {jsonl_path}")
     with jsonl_path.open("w", encoding="utf-8") as fh:
         for ticket_key, ticket in (payload.get("tickets") or {}).items():
             fh.write(

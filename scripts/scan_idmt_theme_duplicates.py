@@ -114,6 +114,10 @@ async def scan_ticket_ids(
         "input": str(input_path),
         "ticket_count": len(normalized_ticket_ids),
         "summary": build_duplicate_summary(ticket_rows),
+        "clean_tickets": tickets_for_bucket(ticket_rows, STATUS_CLEAN),
+        "duplicate_tickets": tickets_for_bucket(ticket_rows, STATUS_DUPLICATE),
+        "no_theme_tickets": tickets_for_bucket(ticket_rows, STATUS_NO_THEME),
+        "error_tickets": tickets_for_bucket(ticket_rows, STATUS_ERROR),
         "tickets": ticket_rows,
     }
 
@@ -310,12 +314,16 @@ def build_theme_row(
     theme_ref: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     fields = theme_issue.get("fields") or {}
-    business_value_stream = parse_business_value_stream(fields.get(BUSINESS_VALUE_STREAM_FIELD))
+    summary = fields.get("summary") or (theme_ref or {}).get("summary")
+    business_value_stream = parse_business_value_stream(
+        fields.get(BUSINESS_VALUE_STREAM_FIELD)
+        or value_stream_from_theme_summary(summary)
+    )
     theme_key = normalize_ticket_key(theme_issue.get("key"))
 
     return {
         "theme_key": theme_key,
-        "theme_summary": clean_text(fields.get("summary") or (theme_ref or {}).get("summary")),
+        "theme_summary": clean_text(summary),
         "theme_issue_type": issue_type_name(theme_issue)
         or clean_text((theme_ref or {}).get("issue_type")),
         "business_value_stream": business_value_stream,
@@ -374,6 +382,14 @@ def ticket_ids_for_bucket(ticket_rows: list[dict[str, Any]], bucket: str) -> lis
     ]
 
 
+def tickets_for_bucket(ticket_rows: list[dict[str, Any]], bucket: str) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in ticket_rows
+        if row.get("status_bucket") == bucket
+    ]
+
+
 def csv_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "idmt_key": row.get("idmt_key") or "",
@@ -401,6 +417,15 @@ def issue_type_name(issue: dict[str, Any]) -> str:
 
 def split_ticket_text(value: str) -> list[str]:
     return [part for part in re.split(r"[\s,]+", str(value or "").strip()) if part]
+
+
+def value_stream_from_theme_summary(summary: Any) -> str:
+    text = clean_text(summary)
+    if " : " in text:
+        return text.rsplit(" : ", 1)[-1].strip()
+    if " - " in text:
+        return text.rsplit(" - ", 1)[-1].strip()
+    return ""
 
 
 def dedupe_ticket_ids(ticket_ids: list[str]) -> list[str]:

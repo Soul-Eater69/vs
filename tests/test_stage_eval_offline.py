@@ -243,7 +243,18 @@ def test_canonicalize_stage_fuzzy_prefix_match() -> None:
     result = canonicalize_stage("Manage UM Operations (PA)", ["Manage UM"])
 
     assert result["canonical"] == "Manage UM"
-    assert result["match_method"] == "fuzzy"
+    assert result["match_method"] == "rapidfuzz"
+
+
+def test_canonicalize_stage_rapidfuzz_partial_match() -> None:
+    result = canonicalize_stage(
+        "Perform Outreach",
+        ["Perform Outreach to Leads and Prospects"],
+    )
+
+    assert result["canonical"] == "Perform Outreach to Leads and Prospects"
+    assert result["match_method"] == "rapidfuzz"
+    assert result["confidence"] >= 0.86
 
 
 def test_canonicalize_stage_unresolved() -> None:

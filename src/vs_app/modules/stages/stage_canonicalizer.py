@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import difflib
 import json
 import re
 from typing import Any
+
+from rapidfuzz import fuzz
 
 from vs_app.modules.prompts.loader import load_prompt_yaml, render_prompt, safe_json_extract
 
@@ -54,11 +55,11 @@ def canonicalize_stage(
     ambiguous = bool(second_score and top_score - second_score < 0.03 and top_score < 0.97)
 
     if top_option and top_score >= fuzzy_threshold and not ambiguous:
-        return _matched(raw, top_option["name"], "fuzzy", top_score)
+        return _matched(raw, top_option["name"], "rapidfuzz", top_score)
 
     if ambiguous:
         warnings.append(
-            f"ambiguous fuzzy match: {top_option['name']}={top_score:.2f}, "
+            f"ambiguous rapidfuzz match: {top_option['name']}={top_score:.2f}, "
             f"{scored[1][1]['name']}={second_score:.2f}"
         )
 
@@ -131,29 +132,12 @@ def _stage_similarity(raw_norm: str, allowed_norm: str) -> float:
     if raw_norm == allowed_norm:
         return 1.0
 
-    ratio = difflib.SequenceMatcher(None, raw_norm, allowed_norm).ratio()
-    raw_tokens = raw_norm.split()
-    allowed_tokens = allowed_norm.split()
-
-    if raw_norm.startswith(allowed_norm) or allowed_norm.startswith(raw_norm):
-        ratio = max(ratio, 0.92)
-    elif set(allowed_tokens).issubset(set(raw_tokens)):
-        extra_tokens = max(0, len(raw_tokens) - len(allowed_tokens))
-        ratio = max(ratio, max(0.86, 0.92 - extra_tokens * 0.01))
-    elif _is_ordered_subsequence(allowed_tokens, raw_tokens):
-        ratio = max(ratio, 0.88)
-
-    return min(1.0, ratio)
-
-
-def _is_ordered_subsequence(needles: list[str], haystack: list[str]) -> bool:
-    if not needles:
-        return False
-    pos = 0
-    for token in haystack:
-        if pos < len(needles) and token == needles[pos]:
-            pos += 1
-    return pos == len(needles)
+    score = max(
+        fuzz.WRatio(raw_norm, allowed_norm),
+        fuzz.token_set_ratio(raw_norm, allowed_norm),
+        fuzz.partial_ratio(raw_norm, allowed_norm),
+    )
+    return _clamp_float(score / 100.0)
 
 
 def _canonicalize_with_llm(

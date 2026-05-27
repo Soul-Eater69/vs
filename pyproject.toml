@@ -17,6 +17,7 @@ dependencies = [
     "httpx",
     "requests",
     "PyYAML",
+    "rapidfuzz",
 ]
 
 [project.optional-dependencies]

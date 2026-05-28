@@ -42,6 +42,7 @@ DEFAULT_VS_INPUT = Path("output/value_stream_predictions.json")
 DEFAULT_GT_INPUT = Path("output/stage_eval/stage_ground_truth.json")
 DEFAULT_OUTPUT = Path("output/stage_prediction_eval/stage_prediction_dataset.json")
 DEFAULT_STAGE_CATALOG = Path("data/value_stream_stage_map.json")
+DEFAULT_GT_CONCURRENCY = 5
 IDMT_CONTEXT_FIELDS = ["summary", "description", "attachment"]
 
 
@@ -82,13 +83,17 @@ async def async_main() -> int:
     return 0
 
 
-def load_runtime_config() -> dict[str, Path]:
+def load_runtime_config() -> dict[str, Any]:
     return {
         "tickets_input": Path(os.getenv("STAGE_DATASET_TICKETS_INPUT", str(DEFAULT_TICKETS_INPUT))),
         "vs_input": Path(os.getenv("STAGE_DATASET_VS_INPUT", str(DEFAULT_VS_INPUT))),
         "gt_input": Path(os.getenv("STAGE_DATASET_GT_INPUT", str(DEFAULT_GT_INPUT))),
         "output": Path(os.getenv("STAGE_DATASET_OUTPUT", str(DEFAULT_OUTPUT))),
         "stage_catalog": Path(os.getenv("STAGE_DATASET_STAGE_CATALOG", str(DEFAULT_STAGE_CATALOG))),
+        "concurrency": env_int(
+            "STAGE_DATASET_CONCURRENCY",
+            env_int("STAGE_GT_CONCURRENCY", DEFAULT_GT_CONCURRENCY),
+        ),
     }
 
 
@@ -99,28 +104,66 @@ async def build_stage_prediction_dataset(
     fallback_gt_payload: dict[str, Any],
     stage_catalog: dict[str, Any],
     jira_client: JiraApiClient | None,
-    config: dict[str, Path],
+    config: dict[str, Any],
 ) -> dict[str, Any]:
     tickets: dict[str, Any] = {}
     errors: list[dict[str, Any]] = []
+    total = len(ticket_ids)
+    concurrency = max(1, int(config.get("concurrency") or DEFAULT_GT_CONCURRENCY))
+    semaphore = asyncio.Semaphore(concurrency)
 
-    for ticket_id in ticket_ids:
+    async def build_one(index: int, ticket_id: str) -> dict[str, Any]:
         ticket_key = normalize_ticket_key(ticket_id)
-        try:
-            tickets[ticket_key] = await build_dataset_ticket(
-                ticket_id=ticket_key,
-                vs_predictions=vs_predictions,
-                fallback_gt_payload=fallback_gt_payload,
-                stage_catalog=stage_catalog,
-                jira_client=jira_client,
-            )
-        except Exception as exc:
-            errors.append(
-                {
+        async with semaphore:
+            print(f"[{index}/{total}] START {ticket_key}", flush=True)
+            try:
+                row = await build_dataset_ticket(
+                    ticket_id=ticket_key,
+                    vs_predictions=vs_predictions,
+                    fallback_gt_payload=fallback_gt_payload,
+                    stage_catalog=stage_catalog,
+                    jira_client=jira_client,
+                )
+                print_ticket_status_done(index, total, ticket_key, row)
+                return {"ticket_id": ticket_key, "row": row, "error": None}
+            except Exception as exc:
+                error = {
                     "ticket_id": ticket_key,
                     "error": compact_error(exc),
                 }
-            )
+                print(
+                    f"[{index}/{total}] ERROR {ticket_key} | {compact_error(exc)}",
+                    flush=True,
+                )
+                return {"ticket_id": ticket_key, "row": None, "error": error}
+
+    results = await asyncio.gather(
+        *(
+            build_one(index, ticket_id)
+            for index, ticket_id in enumerate(ticket_ids, start=1)
+        )
+    )
+    result_by_ticket = {
+        normalize_ticket_key(result["ticket_id"]): result
+        for result in results
+        if normalize_ticket_key(result.get("ticket_id"))
+    }
+
+    for ticket_id in ticket_ids:
+        ticket_key = normalize_ticket_key(ticket_id)
+        result = result_by_ticket.get(ticket_key)
+        if not result:
+            continue
+        if result.get("row") is not None:
+            tickets[ticket_key] = result["row"]
+        if result.get("error") is not None:
+            errors.append(result["error"])
+
+    print(
+        f"Stage prediction dataset ticket build finished "
+        f"(concurrency={concurrency}, tickets={total})",
+        flush=True,
+    )
 
     return {
         "source": "stage_prediction_dataset",
@@ -495,6 +538,24 @@ def print_dataset_summary(dataset: dict[str, Any], output_path: Path) -> None:
     print(f"Output path: {output_path}")
 
 
+def print_ticket_status_done(index: int, total: int, ticket_id: str, row: dict[str, Any]) -> None:
+    idea_card = row.get("idea_card") or {}
+    gt = row.get("ground_truth") or {}
+    predicted_vs = row.get("predicted_value_streams") or []
+    gt_by_vs = gt.get("gt_by_value_stream") or {}
+    gt_stage_count = sum(len(stages or []) for stages in gt_by_vs.values())
+    context_ok = has_prediction_context(idea_card)
+    print(
+        f"[{index}/{total}] DONE {ticket_id} | "
+        f"context={'yes' if context_ok else 'no'} | "
+        f"predicted_vs={len(predicted_vs)} | "
+        f"gt_vs={len(gt_by_vs)} | "
+        f"gt_stages={gt_stage_count} | "
+        f"warnings={len(row.get('warnings') or [])}",
+        flush=True,
+    )
+
+
 def generated_summary_from_prediction_record(record: dict[str, Any]) -> str:
     query_preparation = (
         record.get("query_preparation")
@@ -529,6 +590,13 @@ def joined_context_text(context: dict[str, Any]) -> str:
 
 def first_text(*values: Any) -> str:
     return next((clean_text(value) for value in values if clean_text(value)), "")
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
 
 
 def dedupe_text(values: Any) -> list[str]:

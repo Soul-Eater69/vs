@@ -25,6 +25,9 @@ from vs_app.modules.stages.stage_catalog import load_stage_catalog
 from vs_app.modules.stages.stage_ground_truth import build_ticket_stage_ground_truth
 
 
+DEFAULT_GT_CONCURRENCY = 5
+
+
 class JiraApiClient:
     def __init__(
         self,
@@ -174,7 +177,6 @@ async def async_main() -> int:
         path=args.stage_catalog,
         source=args.stage_catalog_source,
     )
-    tickets: dict[str, Any] = {}
 
     async with JiraApiClient(
         base_url=args.jira_base_url,
@@ -182,13 +184,12 @@ async def async_main() -> int:
         verify_ssl=bool(args.verify_ssl),
         debug=bool(args.debug),
     ) as jira_client:
-        for ticket_key in ticket_keys:
-            print(f"Building stage GT for {ticket_key}...")
-            tickets[ticket_key] = await build_ticket_stage_ground_truth(
-                ticket_key=ticket_key,
-                jira_client=jira_client,
-                catalog=catalog,
-            )
+        tickets, errors = await build_stage_ground_truth_batch(
+            ticket_keys=ticket_keys,
+            jira_client=jira_client,
+            catalog=catalog,
+            concurrency=max(1, int(args.concurrency or DEFAULT_GT_CONCURRENCY)),
+        )
 
     output = {
         "source": "jira",
@@ -196,11 +197,84 @@ async def async_main() -> int:
         "stage_catalog_source": args.stage_catalog_source,
         "stage_gt_lookup_strategy": "parent_link_only",
         "tickets": tickets,
+        "errors": errors,
     }
     print(f"Writing output file: {args.output}")
     write_outputs(output, Path(args.output), debug=bool(args.debug))
     print(f"Wrote {len(tickets)} tickets to {args.output}")
+    print(f"Errors: {len(errors)}")
     return 0
+
+
+async def build_stage_ground_truth_batch(
+    *,
+    ticket_keys: list[str],
+    jira_client: JiraApiClient,
+    catalog: dict[str, Any],
+    concurrency: int,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    total = len(ticket_keys)
+    semaphore = asyncio.Semaphore(max(1, int(concurrency or DEFAULT_GT_CONCURRENCY)))
+
+    async def build_one(index: int, ticket_key: str) -> dict[str, Any]:
+        normalized_key = normalize_ticket_key(ticket_key)
+        async with semaphore:
+            print(f"[{index}/{total}] START {normalized_key}", flush=True)
+            try:
+                row = await build_ticket_stage_ground_truth(
+                    ticket_key=normalized_key,
+                    jira_client=jira_client,
+                    catalog=catalog,
+                )
+                print_gt_ticket_status_done(index, total, normalized_key, row)
+                return {"ticket_id": normalized_key, "row": row, "error": None}
+            except Exception as exc:
+                error = {
+                    "ticket_id": normalized_key,
+                    "error": compact_error(exc),
+                }
+                print(
+                    f"[{index}/{total}] ERROR {normalized_key} | {compact_error(exc)}",
+                    flush=True,
+                )
+                return {"ticket_id": normalized_key, "row": None, "error": error}
+
+    results = await asyncio.gather(
+        *(
+            build_one(index, ticket_key)
+            for index, ticket_key in enumerate(ticket_keys, start=1)
+        )
+    )
+    result_by_ticket = {
+        normalize_ticket_key(result["ticket_id"]): result
+        for result in results
+        if normalize_ticket_key(result.get("ticket_id"))
+    }
+
+    tickets: dict[str, Any] = {}
+    errors: list[dict[str, Any]] = []
+    for ticket_key in ticket_keys:
+        normalized_key = normalize_ticket_key(ticket_key)
+        result = result_by_ticket.get(normalized_key)
+        if not result:
+            continue
+        if result.get("row") is not None:
+            tickets[normalized_key] = result["row"]
+        if result.get("error") is not None:
+            errors.append(result["error"])
+    return tickets, errors
+
+
+def print_gt_ticket_status_done(index: int, total: int, ticket_key: str, row: dict[str, Any]) -> None:
+    gt_by_vs = row.get("gt_by_value_stream") or {}
+    gt_stage_count = sum(len(stages or []) for stages in gt_by_vs.values())
+    print(
+        f"[{index}/{total}] DONE {ticket_key} | "
+        f"gt_vs={len(gt_by_vs)} | "
+        f"gt_stages={gt_stage_count} | "
+        f"warnings={len(row.get('warnings') or [])}",
+        flush=True,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -245,6 +319,12 @@ def parse_args() -> argparse.Namespace:
         "--debug",
         action="store_true",
         help="Print Jira calls, child lookup JQLs, and stage GT progress.",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=env_int("STAGE_GT_CONCURRENCY", DEFAULT_GT_CONCURRENCY),
+        help="Maximum concurrent IDMT tickets to process.",
     )
     return parser.parse_args()
 
@@ -333,6 +413,17 @@ def _split_ticket_text(value: str) -> list[str]:
 
 def normalize_ticket_key(value: Any) -> str:
     return str(value or "").strip().upper()
+
+
+def compact_error(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
 
 
 if __name__ == "__main__":

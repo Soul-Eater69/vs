@@ -122,6 +122,18 @@ class JiraApiClient:
             print(f"[jira] SEARCH jql={jql!r} -> HTTP {response.status_code}")
         return response.json()
 
+    async def download_attachment(self, url_or_att: Any, dest_path: str = "") -> bytes:
+        if self._client is None:
+            raise RuntimeError("JiraApiClient must be used as an async context manager")
+        url = attachment_url(url_or_att)
+        if not url:
+            raise ValueError("Attachment payload does not include a content URL")
+        if self.debug:
+            print(f"[jira] GET attachment {url}")
+        response = await self._client.get(url)
+        response.raise_for_status()
+        return response.content
+
 
 def auth_headers(token: str) -> dict[str, str]:
     token = str(token or "").strip()
@@ -133,6 +145,17 @@ def auth_headers(token: str) -> dict[str, str]:
         "Accept": "application/json",
         "Authorization": authorization,
     }
+
+
+def attachment_url(url_or_att: Any) -> str:
+    if isinstance(url_or_att, str):
+        return url_or_att
+    if isinstance(url_or_att, dict):
+        for key in ("content", "url", "self"):
+            value = str(url_or_att.get(key) or "").strip()
+            if value:
+                return value
+    return ""
 
 
 def main() -> int:

@@ -28,6 +28,8 @@ DEFAULT_GT_INPUT = Path("output/stage_eval/stage_ground_truth.json")
 DEFAULT_VS_INPUT = Path("output/value_stream_predictions.json")
 DEFAULT_STAGE_CATALOG = Path("data/value_stream_stage_map.json")
 DEFAULT_OUTPUT_DIR = Path("output/stage_prediction_eval")
+DEFAULT_DATASET_INPUT = Path("output/stage_prediction_eval/stage_prediction_dataset.json")
+VALID_VS_MODES = {"pipeline", "oracle"}
 
 PREDICTIONS_JSON = "stage_predictions.json"
 PREDICTIONS_JSONL = "stage_predictions.jsonl"
@@ -61,9 +63,14 @@ def main() -> int:
 
 async def async_main() -> int:
     config = load_runtime_config()
-    ticket_ids = read_ticket_ids(config["tickets_input"])
-    gt_payload = load_json(config["gt_input"])
-    vs_predictions = load_value_stream_predictions(config["vs_input"])
+    dataset_payload = load_stage_prediction_dataset_if_available(config)
+    ticket_ids = ticket_ids_for_run(config, dataset_payload)
+    if dataset_payload is not None:
+        gt_payload = gt_payload_from_dataset(dataset_payload)
+        vs_predictions = {}
+    else:
+        gt_payload = load_json(config["gt_input"])
+        vs_predictions = load_value_stream_predictions(config["vs_input"])
     stage_catalog = load_stage_catalog(path=config["stage_catalog"], source="json")
     llm = make_generation_service()
 
@@ -74,6 +81,7 @@ async def async_main() -> int:
                 ticket_ids=ticket_ids,
                 gt_payload=gt_payload,
                 vs_predictions=vs_predictions,
+                dataset_payload=dataset_payload,
                 stage_catalog=stage_catalog,
                 llm=llm,
                 jira_client=jira_client,
@@ -84,6 +92,7 @@ async def async_main() -> int:
             ticket_ids=ticket_ids,
             gt_payload=gt_payload,
             vs_predictions=vs_predictions,
+            dataset_payload=dataset_payload,
             stage_catalog=stage_catalog,
             llm=llm,
             jira_client=None,
@@ -95,13 +104,23 @@ async def async_main() -> int:
     return 0
 
 
-def load_runtime_config() -> dict[str, Path]:
+def load_runtime_config() -> dict[str, Any]:
+    dataset_env = os.getenv("STAGE_PREDICT_DATASET_INPUT")
+    vs_mode = clean_text(os.getenv("STAGE_PREDICT_VS_MODE", "pipeline")).lower()
+    if vs_mode not in VALID_VS_MODES:
+        raise SystemExit(
+            f"Unsupported STAGE_PREDICT_VS_MODE={vs_mode!r}; expected pipeline or oracle."
+        )
     return {
         "tickets_input": Path(os.getenv("STAGE_PREDICT_TICKETS_INPUT", str(DEFAULT_TICKETS_INPUT))),
+        "tickets_input_explicit": bool(os.getenv("STAGE_PREDICT_TICKETS_INPUT")),
         "gt_input": Path(os.getenv("STAGE_PREDICT_GT_INPUT", str(DEFAULT_GT_INPUT))),
         "vs_input": Path(os.getenv("STAGE_PREDICT_VS_INPUT", str(DEFAULT_VS_INPUT))),
         "stage_catalog": Path(os.getenv("STAGE_PREDICT_STAGE_CATALOG", str(DEFAULT_STAGE_CATALOG))),
         "output_dir": Path(os.getenv("STAGE_PREDICT_OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR))),
+        "dataset_input": Path(dataset_env) if dataset_env else DEFAULT_DATASET_INPUT,
+        "dataset_input_explicit": bool(dataset_env),
+        "vs_mode": vs_mode,
     }
 
 
@@ -110,10 +129,11 @@ async def run_batch_prediction_eval(
     ticket_ids: list[str],
     gt_payload: dict[str, Any],
     vs_predictions: dict[str, Any],
+    dataset_payload: dict[str, Any] | None,
     stage_catalog: dict[str, Any],
     llm: Any,
     jira_client: JiraApiClient | None,
-    config: dict[str, Path],
+    config: dict[str, Any],
 ) -> dict[str, Any]:
     stage_predictions: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -123,6 +143,8 @@ async def run_batch_prediction_eval(
             prediction = await predict_for_ticket(
                 ticket_id=ticket_id,
                 vs_predictions=vs_predictions,
+                dataset_payload=dataset_payload,
+                vs_mode=str(config["vs_mode"]),
                 stage_catalog=stage_catalog,
                 llm=llm,
                 jira_client=jira_client,
@@ -154,6 +176,8 @@ async def run_batch_prediction_eval(
             "generated_at": utc_now(),
             "tickets_input": str(config["tickets_input"]),
             "vs_input": str(config["vs_input"]),
+            "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
+            "vs_mode": str(config["vs_mode"]),
             "stage_catalog": str(config["stage_catalog"]),
             "tickets": stage_predictions,
             "errors": errors,
@@ -164,6 +188,8 @@ async def run_batch_prediction_eval(
             "tickets_input": str(config["tickets_input"]),
             "gt_input": str(config["gt_input"]),
             "vs_input": str(config["vs_input"]),
+            "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
+            "vs_mode": str(config["vs_mode"]),
             "stage_catalog": str(config["stage_catalog"]),
             "summary": summary,
             "rows": eval_rows,
@@ -176,21 +202,35 @@ async def predict_for_ticket(
     *,
     ticket_id: str,
     vs_predictions: dict[str, Any],
+    dataset_payload: dict[str, Any] | None = None,
+    vs_mode: str = "pipeline",
     stage_catalog: dict[str, Any],
     llm: Any,
     jira_client: JiraApiClient | None,
 ) -> dict[str, Any]:
     ticket_key = normalize_ticket_key(ticket_id)
-    prediction_record = value_stream_prediction_record(vs_predictions, ticket_key)
-    predicted_value_streams = predicted_value_streams_for_ticket(
-        vs_predictions=vs_predictions,
-        ticket_id=ticket_key,
-    )
-    ticket_context = await ticket_context_for_prediction(
-        ticket_id=ticket_key,
-        prediction_record=prediction_record,
-        jira_client=jira_client,
-    )
+    if dataset_payload is not None:
+        dataset_record = dataset_ticket_record(dataset_payload, ticket_key)
+        predicted_value_streams = predicted_value_streams_from_dataset_ticket(
+            dataset_record,
+            vs_mode=vs_mode,
+        )
+        ticket_context = await ticket_context_from_dataset_ticket(
+            ticket_id=ticket_key,
+            dataset_record=dataset_record,
+            jira_client=jira_client,
+        )
+    else:
+        prediction_record = value_stream_prediction_record(vs_predictions, ticket_key)
+        predicted_value_streams = predicted_value_streams_for_ticket(
+            vs_predictions=vs_predictions,
+            ticket_id=ticket_key,
+        )
+        ticket_context = await ticket_context_for_prediction(
+            ticket_id=ticket_key,
+            prediction_record=prediction_record,
+            jira_client=jira_client,
+        )
     return await predict_stages_for_predicted_value_streams(
         llm=llm,
         ticket_context=ticket_context,
@@ -426,17 +466,146 @@ def value_stream_prediction_record(vs_predictions: dict[str, Any], ticket_id: st
 
 
 def context_from_prediction_record(ticket_id: str, record: dict[str, Any]) -> dict[str, Any]:
+    idea_card = record.get("idea_card") if isinstance(record.get("idea_card"), dict) else {}
+    ticket_context = (
+        record.get("ticket_context")
+        if isinstance(record.get("ticket_context"), dict)
+        else {}
+    )
     return {
         "ticket_id": ticket_id,
-        "summary": clean_text(record.get("summary") or record.get("idmt_summary")),
-        "description": clean_text(record.get("description") or record.get("idmt_description")),
+        "summary": clean_text(
+            record.get("summary")
+            or record.get("idmt_summary")
+            or idea_card.get("summary")
+            or ticket_context.get("summary")
+        ),
+        "description": clean_text(
+            record.get("description")
+            or record.get("idmt_description")
+            or idea_card.get("description")
+            or ticket_context.get("description")
+        ),
         "idea_card_text": clean_text(
             record.get("idea_card_text")
             or record.get("ticket_text")
             or record.get("text")
             or record.get("extracted_text")
+            or idea_card.get("idea_card_text")
+            or idea_card.get("text")
+            or ticket_context.get("idea_card_text")
+        ),
+        "generated_summary": clean_text(
+            record.get("generated_summary")
+            or record.get("llm_summary")
+            or record.get("summary_generated")
+            or record.get("consolidated_summary")
+            or idea_card.get("generated_summary")
+            or ticket_context.get("generated_summary")
         ),
     }
+
+
+def load_stage_prediction_dataset_if_available(config: dict[str, Any]) -> dict[str, Any] | None:
+    path = Path(config["dataset_input"])
+    if path.exists():
+        return load_json(path)
+    if config.get("dataset_input_explicit"):
+        raise SystemExit(f"Stage prediction dataset input not found: {path}")
+    return None
+
+
+def ticket_ids_for_run(config: dict[str, Any], dataset_payload: dict[str, Any] | None) -> list[str]:
+    if dataset_payload is None:
+        return read_ticket_ids(Path(config["tickets_input"]))
+    tickets_input = Path(config["tickets_input"])
+    if config.get("tickets_input_explicit") or tickets_input.exists():
+        return read_ticket_ids(tickets_input)
+    return ticket_ids_from_dataset(dataset_payload)
+
+
+def ticket_ids_from_dataset(dataset_payload: dict[str, Any]) -> list[str]:
+    return [
+        normalize_ticket_key(ticket_id)
+        for ticket_id in (dataset_payload.get("tickets") or {}).keys()
+        if normalize_ticket_key(ticket_id)
+    ]
+
+
+def gt_payload_from_dataset(dataset_payload: dict[str, Any]) -> dict[str, Any]:
+    tickets: dict[str, Any] = {}
+    for ticket_id, row in (dataset_payload.get("tickets") or {}).items():
+        ticket_key = normalize_ticket_key(ticket_id)
+        if not ticket_key or not isinstance(row, dict):
+            continue
+        tickets[ticket_key] = dict(row.get("ground_truth") or {})
+    return {
+        "source": "stage_prediction_dataset",
+        "generated_at": dataset_payload.get("generated_at") or "",
+        "tickets": tickets,
+    }
+
+
+def dataset_ticket_record(dataset_payload: dict[str, Any], ticket_id: str) -> dict[str, Any]:
+    ticket_key = normalize_ticket_key(ticket_id)
+    direct = (dataset_payload.get("tickets") or {}).get(ticket_key)
+    if isinstance(direct, dict):
+        return direct
+    for key, row in (dataset_payload.get("tickets") or {}).items():
+        if normalize_ticket_key(key) == ticket_key and isinstance(row, dict):
+            return row
+    return {}
+
+
+async def ticket_context_from_dataset_ticket(
+    *,
+    ticket_id: str,
+    dataset_record: dict[str, Any],
+    jira_client: JiraApiClient | None,
+) -> dict[str, Any]:
+    idea_card = dataset_record.get("idea_card") or {}
+    context = {
+        "ticket_id": ticket_id,
+        "summary": clean_text(idea_card.get("summary")),
+        "description": clean_text(idea_card.get("description")),
+        "idea_card_text": clean_text(idea_card.get("idea_card_text")),
+        "generated_summary": clean_text(idea_card.get("generated_summary")),
+    }
+    if context.get("summary") or context.get("description") or context.get("idea_card_text"):
+        return context
+    return await ticket_context_for_prediction(
+        ticket_id=ticket_id,
+        prediction_record={},
+        jira_client=jira_client,
+    )
+
+
+def predicted_value_streams_from_dataset_ticket(
+    dataset_record: dict[str, Any],
+    *,
+    vs_mode: str,
+) -> list[dict[str, Any]]:
+    mode = clean_text(vs_mode).lower() or "pipeline"
+    if mode == "oracle":
+        return oracle_value_streams_from_ground_truth(dataset_record.get("ground_truth") or {})
+    return [
+        normalized_value_stream(row)
+        for row in ensure_list(dataset_record.get("predicted_value_streams") or [])
+        if normalized_value_stream(row).get("name")
+    ]
+
+
+def oracle_value_streams_from_ground_truth(ground_truth: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": clean_text(value_stream_name),
+            "id": "",
+            "confidence": 1.0,
+            "reason": "oracle value stream from stage ground truth",
+        }
+        for value_stream_name in (ground_truth.get("gt_by_value_stream") or {}).keys()
+        if clean_text(value_stream_name)
+    ]
 
 
 def normalized_value_stream(row: Any) -> dict[str, Any]:

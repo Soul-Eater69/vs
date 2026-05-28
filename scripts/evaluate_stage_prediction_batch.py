@@ -1,4 +1,10 @@
-"""Run stage prediction using GT value streams from stage_prediction_dataset.json and evaluate against GT stages."""
+"""Run stage prediction using GT value streams from stage_prediction_dataset.json and evaluate against GT stages.
+
+The evaluator is intentionally stage-only in dataset mode:
+- context comes from the dataset row's idea_card fields
+- value streams come from ground_truth.gt_by_value_stream keys
+- predictions are flushed to disk after every ticket by default
+"""
 
 from __future__ import annotations
 
@@ -9,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 
@@ -82,11 +89,21 @@ async def async_main() -> int:
         gt_payload = gt_payload_from_dataset(dataset_payload)
         legacy_vs_predictions = {}
     else:
-        print("Stage prediction dataset not found; using legacy separate-file VS prediction fallback.", flush=True)
+        print(
+            "Stage prediction dataset not found; using legacy separate-file VS prediction fallback.",
+            flush=True,
+        )
         gt_payload = load_json(config["gt_input"])
         legacy_vs_predictions = load_value_stream_predictions(config["legacy_vs_input"])
     stage_catalog = load_stage_catalog(path=config["stage_catalog"], source="json")
     llm = make_generation_service()
+
+    print_run_header(
+        config=config,
+        dataset_payload=dataset_payload,
+        ticket_ids=ticket_ids,
+        gt_payload=gt_payload,
+    )
 
     jira_client = make_jira_client_if_configured()
     if jira_client is not None:
@@ -136,6 +153,8 @@ def load_runtime_config() -> dict[str, Any]:
         "dataset_input": Path(dataset_env) if dataset_env else DEFAULT_DATASET_INPUT,
         "dataset_input_explicit": bool(dataset_env),
         "vs_mode": vs_mode,
+        "progress": env_flag("STAGE_PREDICT_PROGRESS", default=True),
+        "flush_outputs": env_flag("STAGE_PREDICT_FLUSH_OUTPUTS", default=True),
     }
 
 
@@ -152,11 +171,27 @@ async def run_batch_prediction_eval(
 ) -> dict[str, Any]:
     stage_predictions: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    processed_ticket_ids: list[str] = []
+    total = len(ticket_ids)
 
-    for ticket_id in ticket_ids:
+    if config.get("flush_outputs"):
+        write_incremental_outputs(
+            config=config,
+            processed_ticket_ids=processed_ticket_ids,
+            all_ticket_ids=ticket_ids,
+            gt_payload=gt_payload,
+            stage_predictions=stage_predictions,
+            errors=errors,
+            dataset_payload=dataset_payload,
+        )
+
+    for index, ticket_id in enumerate(ticket_ids, start=1):
+        ticket_key = normalize_ticket_key(ticket_id)
+        start_time = time.perf_counter()
+        print_ticket_start(index, total, ticket_key, gt_payload, enabled=bool(config.get("progress")))
         try:
             prediction = await predict_for_ticket(
-                ticket_id=ticket_id,
+                ticket_id=ticket_key,
                 legacy_vs_predictions=legacy_vs_predictions,
                 dataset_payload=dataset_payload,
                 vs_mode=str(config["vs_mode"]),
@@ -165,12 +200,37 @@ async def run_batch_prediction_eval(
                 jira_client=jira_client,
             )
             stage_predictions.append(prediction)
+            processed_ticket_ids.append(ticket_key)
+            print_ticket_done(
+                index,
+                total,
+                ticket_key,
+                prediction,
+                elapsed_seconds=time.perf_counter() - start_time,
+                enabled=bool(config.get("progress")),
+            )
         except Exception as exc:
-            errors.append(
-                {
-                    "ticket_id": ticket_id,
-                    "error": compact_error(exc),
-                }
+            error = {"ticket_id": ticket_key, "error": compact_error(exc)}
+            errors.append(error)
+            processed_ticket_ids.append(ticket_key)
+            print_ticket_error(
+                index,
+                total,
+                ticket_key,
+                error,
+                elapsed_seconds=time.perf_counter() - start_time,
+                enabled=bool(config.get("progress")),
+            )
+
+        if config.get("flush_outputs"):
+            write_incremental_outputs(
+                config=config,
+                processed_ticket_ids=processed_ticket_ids,
+                all_ticket_ids=ticket_ids,
+                gt_payload=gt_payload,
+                stage_predictions=stage_predictions,
+                errors=errors,
+                dataset_payload=dataset_payload,
             )
 
     eval_rows = evaluate_stage_predictions(
@@ -185,32 +245,14 @@ async def run_batch_prediction_eval(
         errors=errors,
     )
 
-    return {
-        "predictions_payload": {
-            "source": "stage_prediction",
-            "generated_at": utc_now(),
-            "tickets_input": str(config["tickets_input"]),
-            "legacy_vs_input": "" if dataset_payload is not None else str(config["legacy_vs_input"]),
-            "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
-            "vs_mode": str(config["vs_mode"]),
-            "stage_catalog": str(config["stage_catalog"]),
-            "tickets": stage_predictions,
-            "errors": errors,
-        },
-        "eval_payload": {
-            "source": "stage_prediction_eval",
-            "generated_at": utc_now(),
-            "tickets_input": str(config["tickets_input"]),
-            "gt_input": str(config["gt_input"]),
-            "legacy_vs_input": "" if dataset_payload is not None else str(config["legacy_vs_input"]),
-            "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
-            "vs_mode": str(config["vs_mode"]),
-            "stage_catalog": str(config["stage_catalog"]),
-            "summary": summary,
-            "rows": eval_rows,
-            "errors": errors,
-        },
-    }
+    return build_result_payload(
+        config=config,
+        dataset_payload=dataset_payload,
+        stage_predictions=stage_predictions,
+        eval_rows=eval_rows,
+        errors=errors,
+        summary=summary,
+    )
 
 
 async def predict_for_ticket(
@@ -387,6 +429,77 @@ def build_eval_summary(
     }
 
 
+def build_result_payload(
+    *,
+    config: dict[str, Any],
+    dataset_payload: dict[str, Any] | None,
+    stage_predictions: list[dict[str, Any]],
+    eval_rows: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "predictions_payload": {
+            "source": "stage_prediction",
+            "generated_at": utc_now(),
+            "tickets_input": str(config["tickets_input"]),
+            "legacy_vs_input": "" if dataset_payload is not None else str(config["legacy_vs_input"]),
+            "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
+            "vs_mode": str(config["vs_mode"]),
+            "stage_catalog": str(config["stage_catalog"]),
+            "tickets": stage_predictions,
+            "errors": errors,
+        },
+        "eval_payload": {
+            "source": "stage_prediction_eval",
+            "generated_at": utc_now(),
+            "tickets_input": str(config["tickets_input"]),
+            "gt_input": str(config["gt_input"]),
+            "legacy_vs_input": "" if dataset_payload is not None else str(config["legacy_vs_input"]),
+            "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
+            "vs_mode": str(config["vs_mode"]),
+            "stage_catalog": str(config["stage_catalog"]),
+            "summary": summary,
+            "rows": eval_rows,
+            "errors": errors,
+        },
+    }
+
+
+def write_incremental_outputs(
+    *,
+    config: dict[str, Any],
+    processed_ticket_ids: list[str],
+    all_ticket_ids: list[str],
+    gt_payload: dict[str, Any],
+    stage_predictions: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+    dataset_payload: dict[str, Any] | None,
+) -> None:
+    output_dir = Path(config["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    eval_rows = evaluate_stage_predictions(
+        ticket_ids=processed_ticket_ids,
+        gt_payload=gt_payload,
+        stage_predictions=stage_predictions,
+    )
+    summary = build_eval_summary(
+        ticket_ids=all_ticket_ids,
+        stage_predictions=stage_predictions,
+        eval_rows=eval_rows,
+        errors=errors,
+    )
+    result = build_result_payload(
+        config=config,
+        dataset_payload=dataset_payload,
+        stage_predictions=stage_predictions,
+        eval_rows=eval_rows,
+        errors=errors,
+        summary=summary,
+    )
+    write_outputs(result, output_dir)
+
+
 def write_outputs(result: dict[str, Any], output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions_payload = result["predictions_payload"]
@@ -401,20 +514,108 @@ def write_outputs(result: dict[str, Any], output_dir: Path) -> None:
     write_json(output_dir / ERRORS_JSON, {"errors": errors})
 
 
+def print_run_header(
+    *,
+    config: dict[str, Any],
+    dataset_payload: dict[str, Any] | None,
+    ticket_ids: list[str],
+    gt_payload: dict[str, Any],
+) -> None:
+    if not config.get("progress"):
+        return
+    gt_ticket_count = sum(
+        1
+        for row in (gt_payload.get("tickets") or {}).values()
+        if (row.get("gt_by_value_stream") or {})
+    )
+    print("Stage prediction eval starting", flush=True)
+    print(f"Tickets selected: {len(ticket_ids)}", flush=True)
+    print(f"Tickets with GT in payload: {gt_ticket_count}", flush=True)
+    print(f"Dataset input: {config['dataset_input'] if dataset_payload is not None else ''}", flush=True)
+    print(f"Tickets input: {config['tickets_input'] if config.get('tickets_input_explicit') else 'dataset_gt_keys'}", flush=True)
+    print(f"Stage catalog: {config['stage_catalog']}", flush=True)
+    print(f"Output directory: {config['output_dir']}", flush=True)
+    print(f"Flush outputs per ticket: {config.get('flush_outputs')}", flush=True)
+
+
+def print_ticket_start(
+    index: int,
+    total: int,
+    ticket_id: str,
+    gt_payload: dict[str, Any],
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+    gt_ticket = (gt_payload.get("tickets") or {}).get(ticket_id) or {}
+    gt_by_vs = gt_ticket.get("gt_by_value_stream") or {}
+    gt_stage_count = sum(len(stages or []) for stages in gt_by_vs.values())
+    print(
+        f"[{index}/{total}] START {ticket_id} | gt_vs={len(gt_by_vs)} | gt_stages={gt_stage_count}",
+        flush=True,
+    )
+
+
+def print_ticket_done(
+    index: int,
+    total: int,
+    ticket_id: str,
+    prediction: dict[str, Any],
+    *,
+    elapsed_seconds: float,
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+    predictions_by_vs = prediction.get("predictions_by_value_stream") or {}
+    predicted_stage_count = sum(len(stages or []) for stages in predictions_by_vs.values())
+    warnings_count = sum(
+        len((row.get("warnings") or []))
+        for row in (prediction.get("value_stream_predictions") or [])
+        if isinstance(row, dict)
+    )
+    print(
+        f"[{index}/{total}] DONE {ticket_id} | "
+        f"pred_vs={len(predictions_by_vs)} | "
+        f"pred_stages={predicted_stage_count} | "
+        f"warnings={warnings_count} | "
+        f"seconds={elapsed_seconds:.1f}",
+        flush=True,
+    )
+
+
+def print_ticket_error(
+    index: int,
+    total: int,
+    ticket_id: str,
+    error: dict[str, Any],
+    *,
+    elapsed_seconds: float,
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+    print(
+        f"[{index}/{total}] ERROR {ticket_id} | {error.get('error')} | seconds={elapsed_seconds:.1f}",
+        flush=True,
+    )
+
+
 def print_summary(result: dict[str, Any], output_dir: Path) -> None:
     summary = result["eval_payload"]["summary"]
-    print("Stage prediction eval complete")
-    print(f"Tickets requested: {summary['tickets_requested']}")
-    print(f"Tickets evaluated: {summary['tickets_evaluated']}")
-    print(f"Rows evaluated: {summary['rows_evaluated']}")
-    print(f"Errors: {summary['errors']}")
-    print(f"Micro precision: {summary['micro_precision']:.3f}")
-    print(f"Micro recall: {summary['micro_recall']:.3f}")
-    print(f"Micro F1: {summary['micro_f1']:.3f}")
-    print(f"Macro precision: {summary['macro_precision']:.3f}")
-    print(f"Macro recall: {summary['macro_recall']:.3f}")
-    print(f"Macro F1: {summary['macro_f1']:.3f}")
-    print(f"Output directory: {output_dir}")
+    print("Stage prediction eval complete", flush=True)
+    print(f"Tickets requested: {summary['tickets_requested']}", flush=True)
+    print(f"Tickets evaluated: {summary['tickets_evaluated']}", flush=True)
+    print(f"Rows evaluated: {summary['rows_evaluated']}", flush=True)
+    print(f"Errors: {summary['errors']}", flush=True)
+    print(f"Micro precision: {summary['micro_precision']:.3f}", flush=True)
+    print(f"Micro recall: {summary['micro_recall']:.3f}", flush=True)
+    print(f"Micro F1: {summary['micro_f1']:.3f}", flush=True)
+    print(f"Macro precision: {summary['macro_precision']:.3f}", flush=True)
+    print(f"Macro recall: {summary['macro_recall']:.3f}", flush=True)
+    print(f"Macro F1: {summary['macro_f1']:.3f}", flush=True)
+    print(f"Output directory: {output_dir}", flush=True)
 
 
 def load_stage_prediction_dataset_if_available(config: dict[str, Any]) -> dict[str, Any] | None:
@@ -429,10 +630,10 @@ def load_stage_prediction_dataset_if_available(config: dict[str, Any]) -> dict[s
 def ticket_ids_for_run(config: dict[str, Any], dataset_payload: dict[str, Any] | None) -> list[str]:
     if dataset_payload is None:
         return read_ticket_ids(Path(config["tickets_input"]))
-    tickets_input = Path(config["tickets_input"])
-    if config.get("tickets_input_explicit") or tickets_input.exists():
-        return read_ticket_ids(tickets_input)
-    return ticket_ids_from_dataset(dataset_payload)
+    if config.get("tickets_input_explicit"):
+        return read_ticket_ids(Path(config["tickets_input"]))
+    with_gt = ticket_ids_from_dataset_with_gt(dataset_payload)
+    return with_gt or ticket_ids_from_dataset(dataset_payload)
 
 
 def ticket_ids_from_dataset(dataset_payload: dict[str, Any]) -> list[str]:
@@ -441,6 +642,18 @@ def ticket_ids_from_dataset(dataset_payload: dict[str, Any]) -> list[str]:
         for ticket_id in (dataset_payload.get("tickets") or {}).keys()
         if normalize_ticket_key(ticket_id)
     ]
+
+
+def ticket_ids_from_dataset_with_gt(dataset_payload: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for ticket_id, row in (dataset_payload.get("tickets") or {}).items():
+        ticket_key = normalize_ticket_key(ticket_id)
+        if not ticket_key or not isinstance(row, dict):
+            continue
+        gt_by_vs = ((row.get("ground_truth") or {}).get("gt_by_value_stream") or {})
+        if gt_by_vs:
+            out.append(ticket_key)
+    return out
 
 
 def gt_payload_from_dataset(dataset_payload: dict[str, Any]) -> dict[str, Any]:
@@ -631,13 +844,17 @@ def load_json(path: Path) -> Any:
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8") as fh:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    tmp_path.replace(path)
 
 
 def clean_list(values: list[Any]) -> list[str]:
@@ -666,6 +883,13 @@ def f1_score(precision: float, recall: float) -> float:
 def avg(values: Any) -> float:
     vals = [float(value or 0.0) for value in values]
     return round(sum(vals) / len(vals), 6) if vals else 0.0
+
+
+def env_flag(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def compact_error(exc: Exception) -> str:

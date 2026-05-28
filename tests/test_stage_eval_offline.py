@@ -24,9 +24,11 @@ from vs_app.modules.stages.stage_ground_truth import (
     extract_raw_stage_mentions_from_business_needs,
     fetch_direct_child_epics,
     generate_stage_candidates_from_child_epic_summary,
+    generate_stage_candidates_from_linked_group_summary,
     parse_business_value_stream,
     find_linked_theme_issues,
     resolve_child_epic_stage,
+    resolve_linked_group_summary_stage,
 )
 from vs_app.modules.stages.stage_metrics import compute_stage_metrics, evaluate_stage_predictions
 from vs_app.modules.stages.stage_selector import predict_value_stream_stages
@@ -194,6 +196,67 @@ def test_child_epic_summary_creates_stage_ground_truth() -> None:
     assert result["canonicalization_debug"][0]["child_key"] == "GROUP-22805"
     assert result["canonicalization_debug"][0]["canonical"] == "Manage UM Operations"
     assert result["canonicalization_debug"][0]["match_method"] == "exact"
+
+
+def test_linked_group_summary_candidates_include_stage_tail_and_variants() -> None:
+    theme = {
+        "key": "GROUP-18565",
+        "fields": {
+            "summary": "FEP 2023 I00015424 FEP PSHBP - Resolve/Request Inquiry",
+        },
+    }
+
+    raw_summary, candidates = generate_stage_candidates_from_linked_group_summary(
+        theme_issue=theme,
+        value_stream_name="Inquiry Management",
+    )
+    resolution = resolve_linked_group_summary_stage(
+        theme_issue=theme,
+        allowed_stages=[{"name": "Resolve/Request Inquiry", "aliases": []}],
+        value_stream_name="Inquiry Management",
+    )
+
+    assert raw_summary == theme["fields"]["summary"]
+    candidate_names = [row["candidate"] for row in candidates]
+    assert "Resolve/Request Inquiry" in candidate_names
+    assert "Resolve Request Inquiry" in candidate_names
+    assert "Resolve Request-Inquiry" in candidate_names
+    assert resolution["included"] is True
+    assert resolution["canonical_stage"] == "Resolve/Request Inquiry"
+    assert resolution["match_method"] == "exact"
+
+
+def test_linked_group_summary_creates_stage_ground_truth_without_child_epics() -> None:
+    theme = {
+        "key": "GROUP-18562",
+        "fields": {
+            "summary": "FEP 2023 I00015424 FEP PSHBP - Establish Product Offering",
+            BUSINESS_VALUE_STREAM_FIELD: "Manage Product Offering {VSR-PRODUCT}",
+            BUSINESS_NEEDS_FIELD: "",
+        },
+    }
+    catalog = {
+        "Manage Product Offering": {
+            "stages": [
+                {"name": "Establish Product Offering", "id": "", "description": "", "aliases": []},
+                {"name": "Order To Cash", "id": "", "description": "", "aliases": []},
+            ]
+        }
+    }
+
+    result = build_theme_stage_ground_truth(
+        theme_issue=theme,
+        catalog=catalog,
+        child_epics=[],
+        child_lookup_debug={},
+    )
+
+    assert [stage["canonical"] for stage in result["verified_stages"]] == [
+        "Establish Product Offering"
+    ]
+    assert result["linked_group_summary_mentions_debug"][0]["source"] == "linked_group_summary"
+    assert result["linked_group_summary_mentions_debug"][0]["theme_key"] == "GROUP-18562"
+    assert result["verified_stages"][0]["raw_mentions"][0]["source"] == "linked_group_summary"
 
 
 def test_child_epic_candidate_resolver_handles_compact_hyphens() -> None:
@@ -481,6 +544,62 @@ async def test_ground_truth_builder_groups_verified_stages_by_value_stream() -> 
         "Manage Utilization Management Program": ["Manage UM Operations"]
     }
     assert result["idmt_description"] == "IDMT-only description text."
+
+
+@pytest.mark.anyio
+async def test_ground_truth_builder_uses_linked_group_summary_when_no_children() -> None:
+    idmt = {
+        "key": "IDMT-19872",
+        "fields": {
+            "summary": "FEP PSHBP",
+            "description": "IDMT-only description text.",
+            "issuetype": {"name": "Engagement Request"},
+            "issuelinks": [
+                {
+                    "type": {"name": "implements"},
+                    "outwardIssue": {
+                        "key": "GROUP-18562",
+                        "fields": {
+                            "summary": "FEP 2023 I00015424 FEP PSHBP - Establish Product Offering",
+                            "issuetype": {"name": "Theme"},
+                        },
+                    },
+                }
+            ],
+        },
+    }
+    theme = {
+        "key": "GROUP-18562",
+        "fields": {
+            "summary": "FEP 2023 I00015424 FEP PSHBP - Establish Product Offering",
+            "issuetype": {"name": "Theme"},
+            BUSINESS_VALUE_STREAM_FIELD: "Manage Product Offering {VSR-PRODUCT}",
+            BUSINESS_NEEDS_FIELD: "",
+            "subtasks": [],
+        },
+    }
+    catalog = {
+        "Manage Product Offering": {
+            "stages": [
+                {"name": "Establish Product Offering", "id": "", "description": "", "aliases": []}
+            ]
+        }
+    }
+
+    result = await build_ticket_stage_ground_truth(
+        ticket_key="IDMT-19872",
+        jira_client=_SearchFakeJira(
+            {"IDMT-19872": idmt, "GROUP-18562": theme},
+            search_results={'"Parent Link" = GROUP-18562 AND issuetype = Epic': []},
+        ),
+        catalog=catalog,
+    )
+
+    assert result["gt_by_value_stream"] == {
+        "Manage Product Offering": ["Establish Product Offering"]
+    }
+    theme_gt = result["linked_themes"][0]
+    assert theme_gt["verified_stages"][0]["raw_mentions"][0]["source"] == "linked_group_summary"
 
 
 @pytest.mark.anyio

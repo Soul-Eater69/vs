@@ -380,14 +380,11 @@ def normalize_ground_truth_ticket(row: Any) -> dict[str, Any]:
         for value_stream_name, stages in (row.get("gt_by_value_stream") or {}).items()
         if clean_text(value_stream_name)
     }
-    return {
-        "gt_by_value_stream": gt_by_value_stream,
-        "linked_themes": list(row.get("linked_themes") or []),
-    }
+    return {"gt_by_value_stream": gt_by_value_stream}
 
 
 def empty_ground_truth() -> dict[str, Any]:
-    return {"gt_by_value_stream": {}, "linked_themes": []}
+    return {"gt_by_value_stream": {}}
 
 
 def clean_stage_names(values: Any) -> list[str]:
@@ -410,10 +407,7 @@ def has_prediction_context(idea_card: dict[str, Any]) -> bool:
 
 
 def has_ground_truth(ground_truth: dict[str, Any]) -> bool:
-    return bool(
-        ground_truth.get("gt_by_value_stream")
-        or ground_truth.get("linked_themes")
-    )
+    return bool(ground_truth.get("gt_by_value_stream"))
 
 
 def make_jira_client_if_configured() -> JiraApiClient | None:

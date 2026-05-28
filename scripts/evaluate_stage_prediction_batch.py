@@ -348,7 +348,6 @@ def evaluate_prediction_row(
         "recall": recall,
         "f1": f1,
         "exact_set_match": gt_set == pred_set,
-        "theme_keys_from_gt": theme_keys_from_gt(gt_ticket, value_stream_name),
         "prediction_debug": debug,
     }
 
@@ -524,16 +523,6 @@ def prediction_debug_for_value_stream(
         if row.get("value_stream_name") == value_stream_name:
             return row
     return {}
-
-
-def theme_keys_from_gt(gt_ticket: dict[str, Any], value_stream_name: str) -> list[str]:
-    keys: list[str] = []
-    for theme in gt_ticket.get("linked_themes") or []:
-        if (theme.get("business_value_stream") or {}).get("name") == value_stream_name:
-            key = clean_text(theme.get("theme_key"))
-            if key:
-                keys.append(key)
-    return keys
 
 
 def write_eval_csv(path: Path, rows: list[dict[str, Any]]) -> None:

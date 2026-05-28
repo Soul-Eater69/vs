@@ -177,11 +177,60 @@ def build_theme_stage_ground_truth(
         business_needs_raw
     )
     allowed_stage_options = allowed_stage_defs or allowed_stages
+    linked_group_summary_stage_resolution_debug = resolve_linked_group_summary_stage(
+        theme_issue=theme_issue,
+        allowed_stages=allowed_stage_options,
+        value_stream_name=value_stream_name,
+    )
+    linked_group_summary_mentions_debug: list[dict[str, Any]] = []
     child_issue_stage_resolution_debug: list[dict[str, Any]] = []
     child_issue_mentions_debug: list[dict[str, Any]] = []
     canonicalization_debug: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     by_canonical: dict[str, dict[str, Any]] = {}
+
+    if linked_group_summary_stage_resolution_debug.get("included"):
+        mention = {
+            "raw_stage": linked_group_summary_stage_resolution_debug.get("cleaned_stage_name") or "",
+            "source": "linked_group_summary",
+            "source_text": linked_group_summary_stage_resolution_debug.get("raw_summary") or "",
+            "theme_key": theme_key,
+        }
+        linked_group_summary_mentions_debug.append(mention)
+        canonicalization_debug.append(
+            {
+                "raw_stage": linked_group_summary_stage_resolution_debug.get("cleaned_stage_name") or "",
+                "source": "linked_group_summary",
+                "theme_key": theme_key,
+                "source_text": linked_group_summary_stage_resolution_debug.get("raw_summary") or "",
+                "canonical": linked_group_summary_stage_resolution_debug.get("canonical_stage"),
+                "match_method": linked_group_summary_stage_resolution_debug.get("match_method"),
+                "confidence": linked_group_summary_stage_resolution_debug.get("confidence"),
+                "warnings": list(linked_group_summary_stage_resolution_debug.get("warnings") or []),
+            }
+        )
+        canonical = linked_group_summary_stage_resolution_debug.get("canonical_stage")
+        if canonical:
+            add_verified_stage(
+                by_canonical,
+                canonical=str(canonical),
+                confidence=float(linked_group_summary_stage_resolution_debug.get("confidence") or 0.0),
+                match_method=str(linked_group_summary_stage_resolution_debug.get("match_method") or ""),
+                raw_payload=_raw_mention_payload(mention),
+            )
+    else:
+        unresolved.append(
+            {
+                "raw_stage": linked_group_summary_stage_resolution_debug.get("cleaned_stage_name") or "",
+                "source": "linked_group_summary",
+                "source_text": linked_group_summary_stage_resolution_debug.get("raw_summary") or "",
+                "theme_key": theme_key,
+                "included": False,
+                "candidates": list(linked_group_summary_stage_resolution_debug.get("candidates") or []),
+                "warnings": list(linked_group_summary_stage_resolution_debug.get("warnings") or []),
+            }
+        )
+
     child_issue_rows: list[dict[str, Any]] = []
     for child in child_epics or []:
         child_row = _child_issue_row(child)
@@ -226,24 +275,15 @@ def build_theme_stage_ground_truth(
                 "warnings": list(resolution.get("warnings") or []),
             }
         )
-        raw_payload = _raw_mention_payload(mention)
         canonical = resolution.get("canonical_stage")
         if canonical:
-            stage = by_canonical.setdefault(
-                str(canonical),
-                {
-                    "canonical": str(canonical),
-                    "confidence": resolution.get("confidence", 0.0),
-                    "match_method": resolution.get("match_method", ""),
-                    "raw_mentions": [],
-                },
+            add_verified_stage(
+                by_canonical,
+                canonical=str(canonical),
+                confidence=float(resolution.get("confidence") or 0.0),
+                match_method=str(resolution.get("match_method") or ""),
+                raw_payload=_raw_mention_payload(mention),
             )
-            stage["raw_mentions"].append(raw_payload)
-            if float(resolution.get("confidence") or 0.0) > float(stage.get("confidence") or 0.0):
-                stage["confidence"] = resolution.get("confidence", 0.0)
-                stage["match_method"] = resolution.get("match_method", "")
-            elif resolution.get("match_method") == "exact":
-                stage["match_method"] = "exact"
 
     verified_stages = sorted(by_canonical.values(), key=lambda item: item["canonical"])
     warnings.extend(str(item) for item in (child_lookup_debug or {}).get("warnings") or [])
@@ -256,6 +296,8 @@ def build_theme_stage_ground_truth(
         "business_needs_raw": business_needs_raw,
         "business_needs_mentions_debug_only": business_needs_mentions_debug_only,
         "child_issue_lookup": child_lookup_debug or {},
+        "linked_group_summary_stage_resolution_debug": linked_group_summary_stage_resolution_debug,
+        "linked_group_summary_mentions_debug": linked_group_summary_mentions_debug,
         "child_issue_mentions_debug": child_issue_mentions_debug,
         "child_issue_stage_resolution_debug": child_issue_stage_resolution_debug,
         "canonicalization_debug": canonicalization_debug,
@@ -326,7 +368,7 @@ async def fetch_direct_child_epics(
         result = await _search_issues(jira_client, jql, fields=CHILD_EPIC_FIELDS)
     except Exception as exc:
         lookup["jql_attempts"][0]["error"] = _compact_error(exc)
-        lookup["warnings"].append("direct Parent Link child Epic lookup failed; stage GT left empty")
+        lookup["warnings"].append("direct Parent Link child Epic lookup failed")
         return [], lookup
 
     child_epics = _dedupe_child_epics(result.get("issues") or [], lookup["warnings"])
@@ -336,7 +378,7 @@ async def fetch_direct_child_epics(
     lookup["jql_attempts"][0]["count"] = len(child_keys)
     lookup["child_issue_keys"] = child_keys
     if not child_keys:
-        lookup["warnings"].append("no direct Parent Link child Epics found; stage GT left empty")
+        lookup["warnings"].append("no direct Parent Link child Epics found")
     return child_epics, lookup
 
 
@@ -454,6 +496,136 @@ def resolve_child_epic_stage(
     }
 
 
+def resolve_linked_group_summary_stage(
+    *,
+    theme_issue: dict[str, Any],
+    allowed_stages: list[Any],
+    value_stream_name: str,
+    confidence_threshold: float = 0.86,
+) -> dict[str, Any]:
+    raw_summary, candidates = generate_stage_candidates_from_linked_group_summary(
+        theme_issue=theme_issue,
+        value_stream_name=value_stream_name,
+    )
+    scored_candidates: list[dict[str, Any]] = []
+    selected: dict[str, Any] | None = None
+
+    for candidate in candidates:
+        candidate_text = str(candidate.get("candidate") or "").strip()
+        result = canonicalize_stage(
+            candidate_text,
+            allowed_stages,
+            value_stream_name=value_stream_name,
+        )
+        scored = {
+            "candidate": candidate_text,
+            "rule": candidate.get("rule") or "",
+            "canonical": result.get("canonical"),
+            "match_method": result.get("match_method"),
+            "confidence": result.get("confidence"),
+            "warnings": list(result.get("warnings") or []),
+        }
+        scored_candidates.append(scored)
+        if (
+            selected is None
+            and result.get("canonical")
+            and float(result.get("confidence") or 0.0) >= confidence_threshold
+        ):
+            selected = scored
+
+    warnings: list[str] = []
+    if not raw_summary:
+        warnings.append("linked GROUP summary missing")
+    elif not selected:
+        warnings.append("no confident approved stage match from linked GROUP summary candidates")
+
+    return {
+        "raw_summary": raw_summary,
+        "candidates": scored_candidates,
+        "included": selected is not None,
+        "cleaned_stage_name": selected.get("candidate") if selected else "",
+        "canonical_stage": selected.get("canonical") if selected else None,
+        "match_method": selected.get("match_method") if selected else "unresolved",
+        "confidence": selected.get("confidence") if selected else 0.0,
+        "selected_candidate_rule": selected.get("rule") if selected else "",
+        "warnings": warnings,
+    }
+
+
+def generate_stage_candidates_from_linked_group_summary(
+    *,
+    theme_issue: dict[str, Any],
+    value_stream_name: str = "",
+) -> tuple[str, list[dict[str, str]]]:
+    fields = theme_issue.get("fields") or {}
+    raw_summary = _clean_text(fields.get("summary") or theme_issue.get("summary"))
+    if not raw_summary:
+        return "", []
+
+    candidates: list[dict[str, str]] = []
+    _add_linked_group_candidate_variants(
+        candidates,
+        _tail_after_value_stream(raw_summary, value_stream_name),
+        "after_value_stream_name",
+    )
+
+    dash_parts = re.split(r"\s+[-\u2013\u2014]\s+", raw_summary)
+    if len(dash_parts) > 1:
+        _add_linked_group_candidate_variants(candidates, dash_parts[-1], "after_final_dash")
+
+    if " : " in raw_summary:
+        _add_linked_group_candidate_variants(
+            candidates,
+            raw_summary.rsplit(" : ", 1)[-1],
+            "after_final_colon",
+        )
+    elif ":" in raw_summary:
+        _add_linked_group_candidate_variants(
+            candidates,
+            raw_summary.rsplit(":", 1)[-1],
+            "after_final_colon",
+        )
+
+    if "," in raw_summary:
+        _add_linked_group_candidate_variants(
+            candidates,
+            raw_summary.rsplit(",", 1)[-1],
+            "after_final_comma",
+        )
+
+    _add_linked_group_candidate_variants(candidates, raw_summary, "full_raw_summary")
+    return raw_summary, _dedupe_candidate_rows(candidates)
+
+
+def add_verified_stage(
+    by_canonical: dict[str, dict[str, Any]],
+    *,
+    canonical: str,
+    confidence: float,
+    match_method: str,
+    raw_payload: dict[str, Any],
+) -> None:
+    canonical_name = _clean_text(canonical)
+    if not canonical_name:
+        return
+    stage = by_canonical.setdefault(
+        canonical_name,
+        {
+            "canonical": canonical_name,
+            "confidence": 0.0,
+            "match_method": "",
+            "raw_mentions": [],
+        },
+    )
+    stage["raw_mentions"].append(raw_payload)
+    current_confidence = float(stage.get("confidence") or 0.0)
+    if confidence > current_confidence:
+        stage["confidence"] = round(max(0.0, min(1.0, confidence)), 4)
+        stage["match_method"] = match_method
+    elif match_method == "exact" and stage.get("match_method") != "exact":
+        stage["match_method"] = "exact"
+
+
 def extract_raw_stage_mentions_from_child_issue(
     child_issue: dict[str, Any],
     *,
@@ -508,6 +680,58 @@ def _child_summary_suffix(
     if ":" in summary:
         return _strip_candidate_prefix_separators(summary.rsplit(":", 1)[-1])
     return summary
+
+
+def _tail_after_value_stream(raw_summary: str, value_stream_name: str) -> str:
+    summary = _clean_text(raw_summary)
+    value_stream = _clean_text(value_stream_name)
+    if not summary or not value_stream:
+        return ""
+    idx = summary.lower().find(value_stream.lower())
+    if idx == -1:
+        return ""
+    return _strip_candidate_prefix_separators(summary[idx + len(value_stream) :])
+
+
+def _add_linked_group_candidate_variants(
+    candidates: list[dict[str, str]],
+    value: Any,
+    rule: str,
+) -> None:
+    cleaned = _clean_stage_candidate(value)
+    if not cleaned:
+        return
+    candidates.append({"candidate": cleaned, "rule": rule})
+
+    parenthetical_stripped = _clean_child_stage_candidate(cleaned)
+    if parenthetical_stripped and parenthetical_stripped != cleaned:
+        candidates.append(
+            {
+                "candidate": parenthetical_stripped,
+                "rule": f"{rule}_without_parenthetical",
+            }
+        )
+
+    if "/" in cleaned:
+        slash_space = _clean_stage_candidate(cleaned.replace("/", " "))
+        if slash_space:
+            candidates.append({"candidate": slash_space, "rule": f"{rule}_slash_space"})
+
+        slash_hyphen = _slash_right_phrase_hyphen_variant(cleaned)
+        if slash_hyphen:
+            candidates.append({"candidate": slash_hyphen, "rule": f"{rule}_slash_hyphen"})
+
+
+def _slash_right_phrase_hyphen_variant(value: str) -> str:
+    parts = [part.strip() for part in str(value or "").split("/", 1)]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return ""
+    right_words = parts[1].split()
+    if len(right_words) > 1:
+        right = "-".join(right_words)
+    else:
+        right = parts[1]
+    return _clean_stage_candidate(f"{parts[0]} {right}")
 
 
 def _strip_candidate_prefix_separators(value: str) -> str:
@@ -614,7 +838,7 @@ def _raw_mention_payload(mention: dict[str, Any]) -> dict[str, Any]:
         "raw": raw_stage,
         "source": str(mention.get("source") or "").strip(),
     }
-    for key in ("source_text", "position", "child_key"):
+    for key in ("source_text", "position", "child_key", "theme_key"):
         if mention.get(key) is not None:
             payload[key] = mention[key]
     return payload
@@ -738,14 +962,17 @@ __all__ = [
     "IDMT_FIELDS",
     "PARENT_LINK_FIELD",
     "THEME_FIELDS",
+    "add_verified_stage",
     "build_theme_stage_ground_truth",
     "build_ticket_stage_ground_truth",
     "extract_stage_from_child_epic_summary",
     "extract_raw_stage_mentions_from_business_needs",
     "fetch_direct_child_epics",
     "find_linked_theme_issues",
+    "generate_stage_candidates_from_linked_group_summary",
     "generate_stage_candidates_from_child_epic_summary",
     "normalize_ticket_key",
     "parse_business_value_stream",
     "resolve_child_epic_stage",
+    "resolve_linked_group_summary_stage",
 ]

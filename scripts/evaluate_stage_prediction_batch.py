@@ -24,9 +24,7 @@ from vs_app.modules.stages.stage_prediction_io import (
     clean_text,
     coerce_text,
     context_from_prediction_record,
-    ensure_list,
     load_value_stream_predictions,
-    normalized_value_stream,
     predicted_value_streams_for_ticket,
     read_ticket_ids,
     value_stream_prediction_record,
@@ -117,7 +115,7 @@ async def async_main() -> int:
 
 def load_runtime_config() -> dict[str, Any]:
     dataset_env = os.getenv("STAGE_PREDICT_DATASET_INPUT")
-    vs_mode = clean_text(os.getenv("STAGE_PREDICT_VS_MODE", "pipeline")).lower()
+    vs_mode = clean_text(os.getenv("STAGE_PREDICT_VS_MODE", "oracle")).lower()
     if vs_mode not in VALID_VS_MODES:
         raise SystemExit(
             f"Unsupported STAGE_PREDICT_VS_MODE={vs_mode!r}; expected pipeline or oracle."
@@ -186,7 +184,7 @@ async def run_batch_prediction_eval(
             "source": "stage_prediction",
             "generated_at": utc_now(),
             "tickets_input": str(config["tickets_input"]),
-            "vs_input": str(config["vs_input"]),
+            "vs_input": "" if dataset_payload is not None else str(config["vs_input"]),
             "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
             "vs_mode": str(config["vs_mode"]),
             "stage_catalog": str(config["stage_catalog"]),
@@ -198,7 +196,7 @@ async def run_batch_prediction_eval(
             "generated_at": utc_now(),
             "tickets_input": str(config["tickets_input"]),
             "gt_input": str(config["gt_input"]),
-            "vs_input": str(config["vs_input"]),
+            "vs_input": "" if dataset_payload is not None else str(config["vs_input"]),
             "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
             "vs_mode": str(config["vs_mode"]),
             "stage_catalog": str(config["stage_catalog"]),
@@ -214,7 +212,7 @@ async def predict_for_ticket(
     ticket_id: str,
     vs_predictions: dict[str, Any],
     dataset_payload: dict[str, Any] | None = None,
-    vs_mode: str = "pipeline",
+    vs_mode: str = "oracle",
     stage_catalog: dict[str, Any],
     llm: Any,
     jira_client: JiraApiClient | None,
@@ -222,9 +220,8 @@ async def predict_for_ticket(
     ticket_key = normalize_ticket_key(ticket_id)
     if dataset_payload is not None:
         dataset_record = dataset_ticket_record(dataset_payload, ticket_key)
-        predicted_value_streams = predicted_value_streams_from_dataset_ticket(
-            dataset_record,
-            vs_mode=vs_mode,
+        predicted_value_streams = oracle_value_streams_from_ground_truth(
+            dataset_record.get("ground_truth") or {}
         )
         ticket_context = await ticket_context_from_dataset_ticket(
             ticket_id=ticket_key,
@@ -470,17 +467,11 @@ async def ticket_context_from_dataset_ticket(
     jira_client: JiraApiClient | None,
 ) -> dict[str, Any]:
     idea_card = dataset_record.get("idea_card") or {}
-    idea_card_text = first_text(
-        idea_card.get("idea_card_text"),
-        idea_card.get("generated_summary"),
-        idea_card.get("extracted_text"),
-        idea_card.get("attachment_text"),
-    )
     context = {
         "ticket_id": ticket_id,
         "summary": clean_text(idea_card.get("summary")),
         "description": clean_text(idea_card.get("description")),
-        "idea_card_text": clean_text(idea_card_text),
+        "idea_card_text": dataset_idea_card_text(idea_card),
         "generated_summary": clean_text(idea_card.get("generated_summary")),
     }
     if context.get("summary") or context.get("description") or context.get("idea_card_text"):
@@ -490,21 +481,6 @@ async def ticket_context_from_dataset_ticket(
         prediction_record={},
         jira_client=jira_client,
     )
-
-
-def predicted_value_streams_from_dataset_ticket(
-    dataset_record: dict[str, Any],
-    *,
-    vs_mode: str,
-) -> list[dict[str, Any]]:
-    mode = clean_text(vs_mode).lower() or "pipeline"
-    if mode == "oracle":
-        return oracle_value_streams_from_ground_truth(dataset_record.get("ground_truth") or {})
-    return [
-        normalized_value_stream(row)
-        for row in ensure_list(dataset_record.get("predicted_value_streams") or [])
-        if normalized_value_stream(row).get("name")
-    ]
 
 
 def oracle_value_streams_from_ground_truth(ground_truth: dict[str, Any]) -> list[dict[str, Any]]:
@@ -518,6 +494,17 @@ def oracle_value_streams_from_ground_truth(ground_truth: dict[str, Any]) -> list
         for value_stream_name in (ground_truth.get("gt_by_value_stream") or {}).keys()
         if clean_text(value_stream_name)
     ]
+
+
+def dataset_idea_card_text(idea_card: dict[str, Any]) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for key in ("idea_card_text", "attachment_text", "extracted_text", "generated_summary"):
+        text = clean_text(idea_card.get(key))
+        if text and text not in seen:
+            seen.add(text)
+            parts.append(text)
+    return "\n\n".join(parts)
 
 
 def prediction_debug_for_value_stream(
@@ -681,10 +668,6 @@ def f1_score(precision: float, recall: float) -> float:
 def avg(values: Any) -> float:
     vals = [float(value or 0.0) for value in values]
     return round(sum(vals) / len(vals), 6) if vals else 0.0
-
-
-def first_text(*values: Any) -> str:
-    return next((clean_text(value) for value in values if clean_text(value)), "")
 
 
 def compact_error(exc: Exception) -> str:

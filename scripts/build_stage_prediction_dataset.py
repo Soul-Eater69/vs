@@ -28,17 +28,11 @@ from vs_app.modules.stages.stage_ground_truth import (
 from vs_app.modules.stages.stage_prediction_io import (
     clean_text,
     coerce_text,
-    context_from_prediction_record,
-    load_value_stream_predictions,
-    normalized_value_stream,
-    predicted_value_streams_for_ticket,
     read_ticket_ids,
-    value_stream_prediction_record,
 )
 
 
 DEFAULT_TICKETS_INPUT = Path("output/theme_duplicate_scan/clean_ticket_ids.txt")
-DEFAULT_VS_INPUT = Path("output/value_stream_predictions.json")
 DEFAULT_GT_INPUT = Path("output/stage_eval/stage_ground_truth.json")
 DEFAULT_OUTPUT = Path("output/stage_prediction_eval/stage_prediction_dataset.json")
 DEFAULT_STAGE_CATALOG = Path("data/value_stream_stage_map.json")
@@ -53,7 +47,6 @@ def main() -> int:
 async def async_main() -> int:
     config = load_runtime_config()
     ticket_ids = read_ticket_ids(config["tickets_input"])
-    vs_predictions = load_optional_value_stream_predictions(config["vs_input"])
     fallback_gt_payload = load_gt_payload_if_available(config["gt_input"])
     stage_catalog = load_stage_catalog(path=config["stage_catalog"], source="json")
     jira_client = make_jira_client_if_configured()
@@ -62,7 +55,6 @@ async def async_main() -> int:
         async with jira_client:
             dataset = await build_stage_prediction_dataset(
                 ticket_ids=ticket_ids,
-                vs_predictions=vs_predictions,
                 fallback_gt_payload=fallback_gt_payload,
                 stage_catalog=stage_catalog,
                 jira_client=jira_client,
@@ -71,7 +63,6 @@ async def async_main() -> int:
     else:
         dataset = await build_stage_prediction_dataset(
             ticket_ids=ticket_ids,
-            vs_predictions=vs_predictions,
             fallback_gt_payload=fallback_gt_payload,
             stage_catalog=stage_catalog,
             jira_client=None,
@@ -86,7 +77,6 @@ async def async_main() -> int:
 def load_runtime_config() -> dict[str, Any]:
     return {
         "tickets_input": Path(os.getenv("STAGE_DATASET_TICKETS_INPUT", str(DEFAULT_TICKETS_INPUT))),
-        "vs_input": Path(os.getenv("STAGE_DATASET_VS_INPUT", str(DEFAULT_VS_INPUT))),
         "gt_input": Path(os.getenv("STAGE_DATASET_GT_INPUT", str(DEFAULT_GT_INPUT))),
         "output": Path(os.getenv("STAGE_DATASET_OUTPUT", str(DEFAULT_OUTPUT))),
         "stage_catalog": Path(os.getenv("STAGE_DATASET_STAGE_CATALOG", str(DEFAULT_STAGE_CATALOG))),
@@ -100,7 +90,6 @@ def load_runtime_config() -> dict[str, Any]:
 async def build_stage_prediction_dataset(
     *,
     ticket_ids: list[str],
-    vs_predictions: dict[str, Any],
     fallback_gt_payload: dict[str, Any],
     stage_catalog: dict[str, Any],
     jira_client: JiraApiClient | None,
@@ -119,7 +108,6 @@ async def build_stage_prediction_dataset(
             try:
                 row = await build_dataset_ticket(
                     ticket_id=ticket_key,
-                    vs_predictions=vs_predictions,
                     fallback_gt_payload=fallback_gt_payload,
                     stage_catalog=stage_catalog,
                     jira_client=jira_client,
@@ -169,7 +157,6 @@ async def build_stage_prediction_dataset(
         "source": "stage_prediction_dataset",
         "generated_at": utc_now(),
         "tickets_input": str(config["tickets_input"]),
-        "vs_input": str(config["vs_input"]),
         "gt_input": str(config["gt_input"]),
         "tickets": tickets,
         "errors": errors,
@@ -179,25 +166,16 @@ async def build_stage_prediction_dataset(
 async def build_dataset_ticket(
     *,
     ticket_id: str,
-    vs_predictions: dict[str, Any],
     fallback_gt_payload: dict[str, Any],
     stage_catalog: dict[str, Any],
     jira_client: JiraApiClient | None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
-    prediction_record = value_stream_prediction_record(vs_predictions, ticket_id)
     idmt_issue = await fetch_idmt_context_issue(ticket_id, jira_client, warnings)
     idea_card = await idea_card_for_ticket(
         ticket_id=ticket_id,
-        prediction_record=prediction_record,
         idmt_issue=idmt_issue,
         jira_client=jira_client,
-        warnings=warnings,
-    )
-    predicted_value_streams = await predicted_value_streams_for_dataset_ticket(
-        ticket_id=ticket_id,
-        vs_predictions=vs_predictions,
-        idea_card=idea_card,
         warnings=warnings,
     )
     ground_truth = await stage_ground_truth_for_dataset_ticket(
@@ -210,15 +188,12 @@ async def build_dataset_ticket(
 
     if not has_prediction_context(idea_card):
         warnings.append("IDMT idea-card context missing")
-    if not predicted_value_streams:
-        warnings.append("predicted Value Streams missing")
     if not has_ground_truth(ground_truth):
         warnings.append("stage ground truth unavailable")
 
     return {
         "ticket_id": ticket_id,
         "idea_card": idea_card,
-        "predicted_value_streams": predicted_value_streams,
         "ground_truth": ground_truth,
         "warnings": dedupe_text(warnings),
     }
@@ -230,7 +205,7 @@ async def fetch_idmt_context_issue(
     warnings: list[str],
 ) -> dict[str, Any]:
     if jira_client is None:
-        warnings.append("Jira credentials unavailable; IDMT context fetched only from VS cache")
+        warnings.append("Jira credentials unavailable; IDMT context not fetched")
         return {}
     try:
         return await jira_client.get_issue(
@@ -246,12 +221,10 @@ async def fetch_idmt_context_issue(
 async def idea_card_for_ticket(
     *,
     ticket_id: str,
-    prediction_record: dict[str, Any],
     idmt_issue: dict[str, Any],
     jira_client: JiraApiClient | None,
     warnings: list[str],
 ) -> dict[str, str]:
-    record_context = context_from_prediction_record(ticket_id, prediction_record)
     issue_context = context_from_idmt_issue(ticket_id, idmt_issue)
     consolidated_text = await consolidated_ticket_text(
         ticket_id=ticket_id,
@@ -261,20 +234,16 @@ async def idea_card_for_ticket(
     )
     attachment_text = document_sections_from_consolidated_text(consolidated_text)
     idea_card_text = first_text(
-        record_context.get("idea_card_text"),
         consolidated_text,
         joined_context_text(issue_context),
-        joined_context_text(record_context),
     )
     generated_summary = first_text(
-        record_context.get("generated_summary"),
-        generated_summary_from_prediction_record(prediction_record),
         condense_idea_card(idea_card_text, max_chars=3500) if idea_card_text else "",
     )
 
     return {
-        "summary": first_text(record_context.get("summary"), issue_context.get("summary")),
-        "description": first_text(record_context.get("description"), issue_context.get("description")),
+        "summary": clean_text(issue_context.get("summary")),
+        "description": clean_text(issue_context.get("description")),
         "idea_card_text": clean_text(idea_card_text),
         "attachment_text": clean_text(attachment_text),
         "extracted_text": clean_text(consolidated_text),
@@ -325,59 +294,6 @@ async def consolidated_ticket_text(
         )
 
 
-async def predicted_value_streams_for_dataset_ticket(
-    *,
-    ticket_id: str,
-    vs_predictions: dict[str, Any],
-    idea_card: dict[str, Any],
-    warnings: list[str],
-) -> list[dict[str, Any]]:
-    cached = predicted_value_streams_for_ticket(
-        vs_predictions=vs_predictions,
-        ticket_id=ticket_id,
-    )
-    if cached:
-        return cached
-
-    query = first_text(
-        idea_card.get("generated_summary"),
-        idea_card.get("idea_card_text"),
-        idea_card.get("extracted_text"),
-        joined_context_text(idea_card),
-    )
-    if not query:
-        warnings.append("cannot run VS prediction; idea-card context is empty")
-        return []
-
-    try:
-        return await run_value_stream_prediction(ticket_id=ticket_id, idea_card_text=query)
-    except Exception as exc:
-        warnings.append(f"VS prediction pipeline failed: {compact_error(exc)}")
-        return []
-
-
-async def run_value_stream_prediction(
-    *,
-    ticket_id: str,
-    idea_card_text: str,
-) -> list[dict[str, Any]]:
-    from vs_app.modules.rag.service import ValueStreamRagCommand, ValueStreamRagService
-
-    service = ValueStreamRagService()
-    result = await service.predict(
-        ValueStreamRagCommand(
-            ticket_id=ticket_id,
-            idea_card_text=idea_card_text,
-            exclude_source_ticket_from_historical=True,
-        )
-    )
-    return [
-        normalized_value_stream(row)
-        for row in result.predicted_value_streams
-        if normalized_value_stream(row).get("name")
-    ]
-
-
 async def stage_ground_truth_for_dataset_ticket(
     *,
     ticket_id: str,
@@ -409,12 +325,6 @@ async def stage_ground_truth_for_dataset_ticket(
     if jira_client is None:
         warnings.append("stage GT not built because Jira credentials are unavailable")
     return empty_ground_truth()
-
-
-def load_optional_value_stream_predictions(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {"tickets": {}}
-    return load_value_stream_predictions(path)
 
 
 def load_gt_payload_if_available(path: Path) -> dict[str, Any]:
@@ -532,7 +442,6 @@ def print_dataset_summary(dataset: dict[str, Any], output_path: Path) -> None:
         "Tickets with prediction context: "
         f"{sum(1 for row in tickets if has_prediction_context(row.get('idea_card') or {}))}"
     )
-    print(f"Tickets with predicted VS: {sum(1 for row in tickets if row.get('predicted_value_streams'))}")
     print(f"Tickets with GT: {sum(1 for row in tickets if has_ground_truth(row.get('ground_truth') or {}))}")
     print(f"Errors: {len(dataset.get('errors') or [])}")
     print(f"Output path: {output_path}")
@@ -541,33 +450,16 @@ def print_dataset_summary(dataset: dict[str, Any], output_path: Path) -> None:
 def print_ticket_status_done(index: int, total: int, ticket_id: str, row: dict[str, Any]) -> None:
     idea_card = row.get("idea_card") or {}
     gt = row.get("ground_truth") or {}
-    predicted_vs = row.get("predicted_value_streams") or []
     gt_by_vs = gt.get("gt_by_value_stream") or {}
     gt_stage_count = sum(len(stages or []) for stages in gt_by_vs.values())
     context_ok = has_prediction_context(idea_card)
     print(
         f"[{index}/{total}] DONE {ticket_id} | "
         f"context={'yes' if context_ok else 'no'} | "
-        f"predicted_vs={len(predicted_vs)} | "
         f"gt_vs={len(gt_by_vs)} | "
         f"gt_stages={gt_stage_count} | "
         f"warnings={len(row.get('warnings') or [])}",
         flush=True,
-    )
-
-
-def generated_summary_from_prediction_record(record: dict[str, Any]) -> str:
-    query_preparation = (
-        record.get("query_preparation")
-        if isinstance(record.get("query_preparation"), dict)
-        else {}
-    )
-    debug = record.get("debug") if isinstance(record.get("debug"), dict) else {}
-    return first_text(
-        query_preparation.get("query_for_prompt"),
-        query_preparation.get("cleaned_query"),
-        debug.get("query_for_prompt"),
-        debug.get("condensed_idea_card"),
     )
 
 

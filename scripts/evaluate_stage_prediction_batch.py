@@ -1,4 +1,4 @@
-"""Run stage prediction from existing value-stream predictions and evaluate it."""
+"""Run stage prediction using GT value streams from stage_prediction_dataset.json and evaluate against GT stages."""
 
 from __future__ import annotations
 
@@ -34,11 +34,13 @@ from vs_app.modules.stages.stage_prediction import predict_stages_for_predicted_
 
 DEFAULT_TICKETS_INPUT = Path("output/theme_duplicate_scan/clean_ticket_ids.txt")
 DEFAULT_GT_INPUT = Path("output/stage_eval/stage_ground_truth.json")
-DEFAULT_VS_INPUT = Path("output/value_stream_predictions.json")
 DEFAULT_STAGE_CATALOG = Path("data/value_stream_stage_map.json")
 DEFAULT_OUTPUT_DIR = Path("output/stage_prediction_eval")
 DEFAULT_DATASET_INPUT = Path("output/stage_prediction_eval/stage_prediction_dataset.json")
 VALID_VS_MODES = {"pipeline", "oracle"}
+
+# Legacy fallback for running without stage_prediction_dataset.json.
+LEGACY_DEFAULT_VS_INPUT = Path("output/value_stream_predictions.json")
 
 PREDICTIONS_JSON = "stage_predictions.json"
 PREDICTIONS_JSONL = "stage_predictions.jsonl"
@@ -73,13 +75,16 @@ def main() -> int:
 async def async_main() -> int:
     config = load_runtime_config()
     dataset_payload = load_stage_prediction_dataset_if_available(config)
+    if dataset_payload is not None:
+        config["vs_mode"] = "oracle"
     ticket_ids = ticket_ids_for_run(config, dataset_payload)
     if dataset_payload is not None:
         gt_payload = gt_payload_from_dataset(dataset_payload)
-        vs_predictions = {}
+        legacy_vs_predictions = {}
     else:
+        print("Stage prediction dataset not found; using legacy separate-file VS prediction fallback.", flush=True)
         gt_payload = load_json(config["gt_input"])
-        vs_predictions = load_value_stream_predictions(config["vs_input"])
+        legacy_vs_predictions = load_value_stream_predictions(config["legacy_vs_input"])
     stage_catalog = load_stage_catalog(path=config["stage_catalog"], source="json")
     llm = make_generation_service()
 
@@ -89,7 +94,7 @@ async def async_main() -> int:
             result = await run_batch_prediction_eval(
                 ticket_ids=ticket_ids,
                 gt_payload=gt_payload,
-                vs_predictions=vs_predictions,
+                legacy_vs_predictions=legacy_vs_predictions,
                 dataset_payload=dataset_payload,
                 stage_catalog=stage_catalog,
                 llm=llm,
@@ -100,7 +105,7 @@ async def async_main() -> int:
         result = await run_batch_prediction_eval(
             ticket_ids=ticket_ids,
             gt_payload=gt_payload,
-            vs_predictions=vs_predictions,
+            legacy_vs_predictions=legacy_vs_predictions,
             dataset_payload=dataset_payload,
             stage_catalog=stage_catalog,
             llm=llm,
@@ -124,7 +129,8 @@ def load_runtime_config() -> dict[str, Any]:
         "tickets_input": Path(os.getenv("STAGE_PREDICT_TICKETS_INPUT", str(DEFAULT_TICKETS_INPUT))),
         "tickets_input_explicit": bool(os.getenv("STAGE_PREDICT_TICKETS_INPUT")),
         "gt_input": Path(os.getenv("STAGE_PREDICT_GT_INPUT", str(DEFAULT_GT_INPUT))),
-        "vs_input": Path(os.getenv("STAGE_PREDICT_VS_INPUT", str(DEFAULT_VS_INPUT))),
+        # Legacy fallback only. Dataset mode never reads this file.
+        "legacy_vs_input": Path(os.getenv("STAGE_PREDICT_VS_INPUT", str(LEGACY_DEFAULT_VS_INPUT))),
         "stage_catalog": Path(os.getenv("STAGE_PREDICT_STAGE_CATALOG", str(DEFAULT_STAGE_CATALOG))),
         "output_dir": Path(os.getenv("STAGE_PREDICT_OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR))),
         "dataset_input": Path(dataset_env) if dataset_env else DEFAULT_DATASET_INPUT,
@@ -137,7 +143,7 @@ async def run_batch_prediction_eval(
     *,
     ticket_ids: list[str],
     gt_payload: dict[str, Any],
-    vs_predictions: dict[str, Any],
+    legacy_vs_predictions: dict[str, Any],
     dataset_payload: dict[str, Any] | None,
     stage_catalog: dict[str, Any],
     llm: Any,
@@ -151,7 +157,7 @@ async def run_batch_prediction_eval(
         try:
             prediction = await predict_for_ticket(
                 ticket_id=ticket_id,
-                vs_predictions=vs_predictions,
+                legacy_vs_predictions=legacy_vs_predictions,
                 dataset_payload=dataset_payload,
                 vs_mode=str(config["vs_mode"]),
                 stage_catalog=stage_catalog,
@@ -184,7 +190,7 @@ async def run_batch_prediction_eval(
             "source": "stage_prediction",
             "generated_at": utc_now(),
             "tickets_input": str(config["tickets_input"]),
-            "vs_input": "" if dataset_payload is not None else str(config["vs_input"]),
+            "legacy_vs_input": "" if dataset_payload is not None else str(config["legacy_vs_input"]),
             "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
             "vs_mode": str(config["vs_mode"]),
             "stage_catalog": str(config["stage_catalog"]),
@@ -196,7 +202,7 @@ async def run_batch_prediction_eval(
             "generated_at": utc_now(),
             "tickets_input": str(config["tickets_input"]),
             "gt_input": str(config["gt_input"]),
-            "vs_input": "" if dataset_payload is not None else str(config["vs_input"]),
+            "legacy_vs_input": "" if dataset_payload is not None else str(config["legacy_vs_input"]),
             "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
             "vs_mode": str(config["vs_mode"]),
             "stage_catalog": str(config["stage_catalog"]),
@@ -210,7 +216,7 @@ async def run_batch_prediction_eval(
 async def predict_for_ticket(
     *,
     ticket_id: str,
-    vs_predictions: dict[str, Any],
+    legacy_vs_predictions: dict[str, Any],
     dataset_payload: dict[str, Any] | None = None,
     vs_mode: str = "oracle",
     stage_catalog: dict[str, Any],
@@ -220,7 +226,7 @@ async def predict_for_ticket(
     ticket_key = normalize_ticket_key(ticket_id)
     if dataset_payload is not None:
         dataset_record = dataset_ticket_record(dataset_payload, ticket_key)
-        predicted_value_streams = oracle_value_streams_from_ground_truth(
+        oracle_value_stream_targets = oracle_value_streams_from_ground_truth(
             dataset_record.get("ground_truth") or {}
         )
         ticket_context = await ticket_context_from_dataset_ticket(
@@ -228,10 +234,12 @@ async def predict_for_ticket(
             dataset_record=dataset_record,
             jira_client=jira_client,
         )
+        value_stream_targets = oracle_value_stream_targets
     else:
-        prediction_record = value_stream_prediction_record(vs_predictions, ticket_key)
-        predicted_value_streams = predicted_value_streams_for_ticket(
-            vs_predictions=vs_predictions,
+        # Legacy fallback: use a separate value-stream prediction file when the dataset is absent.
+        prediction_record = value_stream_prediction_record(legacy_vs_predictions, ticket_key)
+        legacy_pipeline_value_streams = predicted_value_streams_for_ticket(
+            vs_predictions=legacy_vs_predictions,
             ticket_id=ticket_key,
         )
         ticket_context = await ticket_context_for_prediction(
@@ -239,10 +247,11 @@ async def predict_for_ticket(
             prediction_record=prediction_record,
             jira_client=jira_client,
         )
+        value_stream_targets = legacy_pipeline_value_streams
     return await predict_stages_for_predicted_value_streams(
         llm=llm,
         ticket_context=ticket_context,
-        predicted_value_streams=predicted_value_streams,
+        predicted_value_streams=value_stream_targets,
         stage_catalog=stage_catalog,
     )
 

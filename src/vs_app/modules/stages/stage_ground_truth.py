@@ -184,6 +184,8 @@ async def build_ticket_stage_ground_truth(
             for stage in theme_gt.get("verified_stages") or []
             if str(stage.get("canonical") or "").strip()
         ]
+        if not gt_stages:
+            continue
         gt_by_value_stream[value_stream_name] = _dedupe_preserve(
             list(gt_by_value_stream.get(value_stream_name) or []) + gt_stages
         )
@@ -228,59 +230,68 @@ def build_theme_stage_ground_truth(
         business_needs_raw
     )
     allowed_stage_options = allowed_stage_defs or allowed_stages
-    linked_group_summary_stage_resolution_debug = resolve_linked_group_summary_stage(
-        theme_issue=theme_issue,
-        allowed_stages=allowed_stage_options,
-        value_stream_name=value_stream_name,
-    )
-    linked_group_summary_mentions_debug: list[dict[str, Any]] = []
+    linked_epics = extract_epic_links_from_theme_issue(theme_issue)
+    linked_epic_stage_resolution_debug: list[dict[str, Any]] = []
+    linked_epic_mentions_debug: list[dict[str, Any]] = []
     child_issue_stage_resolution_debug: list[dict[str, Any]] = []
     child_issue_mentions_debug: list[dict[str, Any]] = []
     canonicalization_debug: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     by_canonical: dict[str, dict[str, Any]] = {}
 
-    if linked_group_summary_stage_resolution_debug.get("included"):
+    for linked_epic in linked_epics:
+        resolution = resolve_linked_epic_stage(
+            linked_issue=linked_epic,
+            allowed_stages=allowed_stage_options,
+            theme_summary=theme_summary,
+            value_stream_name=value_stream_name,
+        )
+        linked_epic_stage_resolution_debug.append(resolution)
+        if not resolution.get("included"):
+            unresolved.append(
+                {
+                    "raw_stage": resolution.get("cleaned_stage_name") or "",
+                    "source": "theme_issue_link_epic_summary",
+                    "source_text": resolution.get("raw_summary") or "",
+                    "linked_issue_key": resolution.get("linked_issue_key") or "",
+                    "theme_key": theme_key,
+                    "included": False,
+                    "candidates": list(resolution.get("candidates") or []),
+                    "warnings": list(resolution.get("warnings") or []),
+                }
+            )
+            continue
+
         mention = {
-            "raw_stage": linked_group_summary_stage_resolution_debug.get("cleaned_stage_name") or "",
-            "source": "linked_group_summary",
-            "source_text": linked_group_summary_stage_resolution_debug.get("raw_summary") or "",
+            "raw_stage": resolution.get("cleaned_stage_name") or "",
+            "source": "theme_issue_link_epic_summary",
+            "source_text": resolution.get("raw_summary") or "",
+            "linked_issue_key": resolution.get("linked_issue_key") or "",
             "theme_key": theme_key,
         }
-        linked_group_summary_mentions_debug.append(mention)
+        linked_epic_mentions_debug.append(mention)
         canonicalization_debug.append(
             {
-                "raw_stage": linked_group_summary_stage_resolution_debug.get("cleaned_stage_name") or "",
-                "source": "linked_group_summary",
+                "raw_stage": resolution.get("cleaned_stage_name") or "",
+                "source": "theme_issue_link_epic_summary",
+                "linked_issue_key": resolution.get("linked_issue_key") or "",
                 "theme_key": theme_key,
-                "source_text": linked_group_summary_stage_resolution_debug.get("raw_summary") or "",
-                "canonical": linked_group_summary_stage_resolution_debug.get("canonical_stage"),
-                "match_method": linked_group_summary_stage_resolution_debug.get("match_method"),
-                "confidence": linked_group_summary_stage_resolution_debug.get("confidence"),
-                "warnings": list(linked_group_summary_stage_resolution_debug.get("warnings") or []),
+                "source_text": resolution.get("raw_summary") or "",
+                "canonical": resolution.get("canonical_stage"),
+                "match_method": resolution.get("match_method"),
+                "confidence": resolution.get("confidence"),
+                "warnings": list(resolution.get("warnings") or []),
             }
         )
-        canonical = linked_group_summary_stage_resolution_debug.get("canonical_stage")
+        canonical = resolution.get("canonical_stage")
         if canonical:
             add_verified_stage(
                 by_canonical,
                 canonical=str(canonical),
-                confidence=float(linked_group_summary_stage_resolution_debug.get("confidence") or 0.0),
-                match_method=str(linked_group_summary_stage_resolution_debug.get("match_method") or ""),
+                confidence=float(resolution.get("confidence") or 0.0),
+                match_method=str(resolution.get("match_method") or ""),
                 raw_payload=_raw_mention_payload(mention),
             )
-    else:
-        unresolved.append(
-            {
-                "raw_stage": linked_group_summary_stage_resolution_debug.get("cleaned_stage_name") or "",
-                "source": "linked_group_summary",
-                "source_text": linked_group_summary_stage_resolution_debug.get("raw_summary") or "",
-                "theme_key": theme_key,
-                "included": False,
-                "candidates": list(linked_group_summary_stage_resolution_debug.get("candidates") or []),
-                "warnings": list(linked_group_summary_stage_resolution_debug.get("warnings") or []),
-            }
-        )
 
     child_issue_rows: list[dict[str, Any]] = []
     for child in child_epics or []:
@@ -297,9 +308,10 @@ def build_theme_stage_ground_truth(
             unresolved.append(
                 {
                     "raw_stage": resolution.get("cleaned_stage_name") or "",
-                    "source": "child_epic_summary",
+                    "source": "parent_link_child_epic_summary",
                     "source_text": resolution.get("raw_summary") or "",
                     "child_key": resolution.get("child_key") or "",
+                    "theme_key": theme_key,
                     "included": False,
                     "candidates": list(resolution.get("candidates") or []),
                     "warnings": list(resolution.get("warnings") or []),
@@ -309,16 +321,18 @@ def build_theme_stage_ground_truth(
 
         mention = {
             "raw_stage": resolution.get("cleaned_stage_name") or "",
-            "source": "child_epic_summary",
+            "source": "parent_link_child_epic_summary",
             "source_text": resolution.get("raw_summary") or "",
             "child_key": resolution.get("child_key") or "",
+            "theme_key": theme_key,
         }
         child_issue_mentions_debug.append(mention)
         canonicalization_debug.append(
             {
                 "raw_stage": resolution.get("cleaned_stage_name") or "",
-                "source": "child_epic_summary",
+                "source": "parent_link_child_epic_summary",
                 "child_key": resolution.get("child_key") or "",
+                "theme_key": theme_key,
                 "source_text": resolution.get("raw_summary") or "",
                 "canonical": resolution.get("canonical_stage"),
                 "match_method": resolution.get("match_method"),
@@ -347,8 +361,9 @@ def build_theme_stage_ground_truth(
         "business_needs_raw": business_needs_raw,
         "business_needs_mentions_debug_only": business_needs_mentions_debug_only,
         "child_issue_lookup": child_lookup_debug or {},
-        "linked_group_summary_stage_resolution_debug": linked_group_summary_stage_resolution_debug,
-        "linked_group_summary_mentions_debug": linked_group_summary_mentions_debug,
+        "linked_epic_rows": linked_epics,
+        "linked_epic_stage_resolution_debug": linked_epic_stage_resolution_debug,
+        "linked_epic_mentions_debug": linked_epic_mentions_debug,
         "child_issue_mentions_debug": child_issue_mentions_debug,
         "child_issue_stage_resolution_debug": child_issue_stage_resolution_debug,
         "canonicalization_debug": canonicalization_debug,
@@ -366,6 +381,38 @@ def find_linked_theme_issues(issue: dict[str, Any]) -> list[dict[str, Any]]:
         list(fields.get("issuelinks") or []),
         source_title=_clean_text(fields.get("summary")),
     )
+
+
+def extract_epic_links_from_theme_issue(theme_issue: dict[str, Any]) -> list[dict[str, Any]]:
+    fields = theme_issue.get("fields") or {}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for link in fields.get("issuelinks") or []:
+        if not isinstance(link, dict):
+            continue
+        link_type = link.get("type") or {}
+        link_type_text = _link_type_text(link_type)
+        if "implement" not in link_type_text.lower():
+            continue
+        for side in ("outwardIssue", "inwardIssue"):
+            linked = link.get(side)
+            if not isinstance(linked, dict) or not _is_stage_epic_link_candidate(linked):
+                continue
+            key = normalize_ticket_key(linked.get("key"))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "key": key,
+                    "summary": _clean_text((linked.get("fields") or {}).get("summary") or linked.get("summary")),
+                    "status": _status_name(linked),
+                    "issue_type": _issue_type_name(linked),
+                    "link_direction": side,
+                    "link_type": link_type_text,
+                }
+            )
+    return out
 
 
 async def fetch_direct_child_epics(
@@ -523,17 +570,20 @@ def resolve_child_epic_stage(
     }
 
 
-def resolve_linked_group_summary_stage(
+def resolve_linked_epic_stage(
     *,
-    theme_issue: dict[str, Any],
+    linked_issue: dict[str, Any],
     allowed_stages: list[Any],
-    value_stream_name: str,
+    theme_summary: str = "",
+    value_stream_name: str = "",
     confidence_threshold: float = 0.86,
 ) -> dict[str, Any]:
-    raw_summary, candidates = generate_stage_candidates_from_linked_group_summary(
-        theme_issue=theme_issue,
+    raw_summary, candidates = generate_stage_candidates_from_child_epic_summary(
+        child_issue=linked_issue,
+        theme_summary=theme_summary,
         value_stream_name=value_stream_name,
     )
+    linked_issue_key = normalize_ticket_key(linked_issue.get("key"))
     scored_candidates: list[dict[str, Any]] = []
     selected: dict[str, Any] | None = None
 
@@ -560,13 +610,8 @@ def resolve_linked_group_summary_stage(
         ):
             selected = scored
 
-    warnings: list[str] = []
-    if not raw_summary:
-        warnings.append("linked GROUP summary missing")
-    elif not selected:
-        warnings.append("no confident approved stage match from linked GROUP summary candidates")
-
     return {
+        "linked_issue_key": linked_issue_key,
         "raw_summary": raw_summary,
         "candidates": scored_candidates,
         "included": selected is not None,
@@ -575,53 +620,8 @@ def resolve_linked_group_summary_stage(
         "match_method": selected.get("match_method") if selected else "unresolved",
         "confidence": selected.get("confidence") if selected else 0.0,
         "selected_candidate_rule": selected.get("rule") if selected else "",
-        "warnings": warnings,
+        "warnings": [] if selected else ["no confident approved stage match from Theme issue-link Epic summary candidates"],
     }
-
-
-def generate_stage_candidates_from_linked_group_summary(
-    *,
-    theme_issue: dict[str, Any],
-    value_stream_name: str = "",
-) -> tuple[str, list[dict[str, str]]]:
-    fields = theme_issue.get("fields") or {}
-    raw_summary = _clean_text(fields.get("summary") or theme_issue.get("summary"))
-    if not raw_summary:
-        return "", []
-
-    candidates: list[dict[str, str]] = []
-    _add_linked_group_candidate_variants(
-        candidates,
-        _tail_after_value_stream(raw_summary, value_stream_name),
-        "after_value_stream_name",
-    )
-
-    dash_parts = re.split(r"\s+[-\u2013\u2014]\s+", raw_summary)
-    if len(dash_parts) > 1:
-        _add_linked_group_candidate_variants(candidates, dash_parts[-1], "after_final_dash")
-
-    if " : " in raw_summary:
-        _add_linked_group_candidate_variants(
-            candidates,
-            raw_summary.rsplit(" : ", 1)[-1],
-            "after_final_colon",
-        )
-    elif ":" in raw_summary:
-        _add_linked_group_candidate_variants(
-            candidates,
-            raw_summary.rsplit(":", 1)[-1],
-            "after_final_colon",
-        )
-
-    if "," in raw_summary:
-        _add_linked_group_candidate_variants(
-            candidates,
-            raw_summary.rsplit(",", 1)[-1],
-            "after_final_comma",
-        )
-
-    _add_linked_group_candidate_variants(candidates, raw_summary, "full_raw_summary")
-    return raw_summary, _dedupe_candidate_rows(candidates)
 
 
 def add_verified_stage(
@@ -707,58 +707,6 @@ def _child_summary_suffix(
     if ":" in summary:
         return _strip_candidate_prefix_separators(summary.rsplit(":", 1)[-1])
     return summary
-
-
-def _tail_after_value_stream(raw_summary: str, value_stream_name: str) -> str:
-    summary = _clean_text(raw_summary)
-    value_stream = _clean_text(value_stream_name)
-    if not summary or not value_stream:
-        return ""
-    idx = summary.lower().find(value_stream.lower())
-    if idx == -1:
-        return ""
-    return _strip_candidate_prefix_separators(summary[idx + len(value_stream) :])
-
-
-def _add_linked_group_candidate_variants(
-    candidates: list[dict[str, str]],
-    value: Any,
-    rule: str,
-) -> None:
-    cleaned = _clean_stage_candidate(value)
-    if not cleaned:
-        return
-    candidates.append({"candidate": cleaned, "rule": rule})
-
-    parenthetical_stripped = _clean_child_stage_candidate(cleaned)
-    if parenthetical_stripped and parenthetical_stripped != cleaned:
-        candidates.append(
-            {
-                "candidate": parenthetical_stripped,
-                "rule": f"{rule}_without_parenthetical",
-            }
-        )
-
-    if "/" in cleaned:
-        slash_space = _clean_stage_candidate(cleaned.replace("/", " "))
-        if slash_space:
-            candidates.append({"candidate": slash_space, "rule": f"{rule}_slash_space"})
-
-        slash_hyphen = _slash_right_phrase_hyphen_variant(cleaned)
-        if slash_hyphen:
-            candidates.append({"candidate": slash_hyphen, "rule": f"{rule}_slash_hyphen"})
-
-
-def _slash_right_phrase_hyphen_variant(value: str) -> str:
-    parts = [part.strip() for part in str(value or "").split("/", 1)]
-    if len(parts) != 2 or not parts[0] or not parts[1]:
-        return ""
-    right_words = parts[1].split()
-    if len(right_words) > 1:
-        right = "-".join(right_words)
-    else:
-        right = parts[1]
-    return _clean_stage_candidate(f"{parts[0]} {right}")
 
 
 def _strip_candidate_prefix_separators(value: str) -> str:
@@ -865,7 +813,7 @@ def _raw_mention_payload(mention: dict[str, Any]) -> dict[str, Any]:
         "raw": raw_stage,
         "source": str(mention.get("source") or "").strip(),
     }
-    for key in ("source_text", "position", "child_key", "theme_key"):
+    for key in ("source_text", "position", "child_key", "linked_issue_key", "theme_key"):
         if mention.get(key) is not None:
             payload[key] = mention[key]
     return payload
@@ -879,6 +827,32 @@ def _child_issue_row(issue: dict[str, Any]) -> dict[str, str]:
         "status": _status_name(issue),
         "issue_type": _issue_type_name(issue),
     }
+
+
+def _is_stage_epic_link_candidate(issue: dict[str, Any]) -> bool:
+    issue_type = _issue_type_name(issue).lower()
+    if issue_type == "epic":
+        return True
+    key = normalize_ticket_key(issue.get("key"))
+    summary = _clean_text((issue.get("fields") or {}).get("summary") or issue.get("summary"))
+    return key.startswith("GROUP-") and _looks_like_stage_child_record_summary(summary)
+
+
+def _looks_like_stage_child_record_summary(summary: str) -> bool:
+    text = _clean_text(summary)
+    if not text:
+        return False
+    if re.search(r"\s[-\u2013\u2014]\s", text):
+        return True
+    return bool(re.search(r"\b(stage|value stage)\b", text, re.I))
+
+
+def _link_type_text(link_type: dict[str, Any]) -> str:
+    return " | ".join(
+        _clean_text(link_type.get(key))
+        for key in ("name", "outward", "inward")
+        if _clean_text(link_type.get(key))
+    )
 
 
 def _issue_type_name(issue: dict[str, Any]) -> str:
@@ -992,14 +966,14 @@ __all__ = [
     "business_value_stream_from_resolved_link",
     "build_theme_stage_ground_truth",
     "build_ticket_stage_ground_truth",
+    "extract_epic_links_from_theme_issue",
     "extract_stage_from_child_epic_summary",
     "extract_raw_stage_mentions_from_business_needs",
     "fetch_direct_child_epics",
     "find_linked_theme_issues",
-    "generate_stage_candidates_from_linked_group_summary",
     "generate_stage_candidates_from_child_epic_summary",
     "normalize_ticket_key",
     "parse_business_value_stream",
     "resolve_child_epic_stage",
-    "resolve_linked_group_summary_stage",
+    "resolve_linked_epic_stage",
 ]

@@ -193,11 +193,12 @@ def compact_existing_ticket_row(original_row: dict[str, Any]) -> dict[str, Any]:
 
 
 def compact_ground_truth(raw_gt: dict[str, Any]) -> dict[str, Any]:
-    gt_by_value_stream = {
-        clean_text(value_stream_name): clean_stage_names(stages)
-        for value_stream_name, stages in (raw_gt.get("gt_by_value_stream") or {}).items()
-        if clean_text(value_stream_name)
-    }
+    gt_by_value_stream: dict[str, list[str]] = {}
+    for value_stream_name, stages in (raw_gt.get("gt_by_value_stream") or {}).items():
+        clean_name = clean_text(value_stream_name)
+        clean_stages = clean_stage_names(stages)
+        if clean_name and clean_stages:
+            gt_by_value_stream[clean_name] = clean_stages
     return {"gt_by_value_stream": gt_by_value_stream}
 
 

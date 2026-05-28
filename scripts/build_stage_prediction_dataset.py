@@ -375,11 +375,12 @@ def ground_truth_for_ticket(gt_payload: dict[str, Any], ticket_id: str) -> tuple
 def normalize_ground_truth_ticket(row: Any) -> dict[str, Any]:
     if not isinstance(row, dict):
         return empty_ground_truth()
-    gt_by_value_stream = {
-        clean_text(value_stream_name): clean_stage_names(stages)
-        for value_stream_name, stages in (row.get("gt_by_value_stream") or {}).items()
-        if clean_text(value_stream_name)
-    }
+    gt_by_value_stream: dict[str, list[str]] = {}
+    for value_stream_name, stages in (row.get("gt_by_value_stream") or {}).items():
+        clean_name = clean_text(value_stream_name)
+        clean_stages = clean_stage_names(stages)
+        if clean_name and clean_stages:
+            gt_by_value_stream[clean_name] = clean_stages
     return {"gt_by_value_stream": gt_by_value_stream}
 
 

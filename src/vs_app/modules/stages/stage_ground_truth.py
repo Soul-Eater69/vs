@@ -3,13 +3,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from vs_app.ingestion.jira.value_stream_labels import (
+    extract_themes,
+    resolve_value_streams,
+)
 from vs_app.modules.stages.stage_canonicalizer import canonicalize_stage
 from vs_app.modules.stages.stage_catalog import (
     get_allowed_stages,
     get_value_stream_catalog_entry,
 )
 
-BUSINESS_VALUE_STREAM_FIELD = "customfield_18600"
 BUSINESS_NEEDS_FIELD = "customfield_20900"
 PARENT_LINK_FIELD = "customfield_11401"
 
@@ -27,7 +30,6 @@ THEME_FIELDS = [
     "issuetype",
     "issuelinks",
     "subtasks",
-    BUSINESS_VALUE_STREAM_FIELD,
     BUSINESS_NEEDS_FIELD,
     "customfield_12600",
     "customfield_18602",
@@ -57,6 +59,37 @@ def parse_business_value_stream(raw: Any) -> dict[str, str]:
         "name": name,
         "id": value_stream_id,
     }
+
+
+def business_value_stream_from_resolved_link(
+    resolved_value_stream: dict[str, Any] | None,
+    *,
+    theme_summary: str = "",
+) -> dict[str, str]:
+    if resolved_value_stream and resolved_value_stream.get("name"):
+        return {
+            "raw": str(
+                resolved_value_stream.get("summary_raw")
+                or resolved_value_stream.get("name")
+                or ""
+            ),
+            "name": str(resolved_value_stream.get("name") or ""),
+            "id": str(resolved_value_stream.get("id") or ""),
+            "source": str(
+                resolved_value_stream.get("source") or "jira_value_stream_labels"
+            ),
+        }
+
+    fallback_name = _value_stream_from_theme_summary(theme_summary)
+    if fallback_name:
+        return {
+            "raw": theme_summary,
+            "name": fallback_name,
+            "id": "",
+            "source": "theme_summary_fallback",
+        }
+
+    return {"raw": "", "name": "", "id": "", "source": "unresolved"}
 
 
 def extract_raw_stage_mentions_from_business_needs(text: str) -> list[dict[str, Any]]:
@@ -105,14 +138,30 @@ async def build_ticket_stage_ground_truth(
     if issue_type and issue_type != "Engagement Request":
         warnings.append(f"unexpected IDMT issue type: {issue_type}")
 
-    theme_refs = find_linked_theme_issues(issue)
+    idmt_summary = _clean_text(fields.get("summary"))
+    issuelinks = list(fields.get("issuelinks") or [])
+    theme_refs = extract_themes(
+        issuelinks,
+        source_title=idmt_summary,
+    )
+    value_stream_resolution = resolve_value_streams(
+        theme_refs,
+        issuelinks,
+        llm_client=None,
+    )
+    linked_vs_by_group_key = {
+        normalize_ticket_key(row.get("jira_group_id")): row
+        for row in value_stream_resolution.get("linked_value_streams") or []
+        if normalize_ticket_key(row.get("jira_group_id"))
+    }
     linked_themes: list[dict[str, Any]] = []
     gt_by_value_stream: dict[str, list[str]] = {}
 
     for theme_ref in theme_refs:
-        theme_key = str(theme_ref.get("key") or "").strip()
+        theme_key = normalize_ticket_key(theme_ref.get("key"))
         if not theme_key:
             continue
+        linked_vs = linked_vs_by_group_key.get(theme_key)
         theme_issue = await _fetch_issue(jira_client, theme_key, fields=THEME_FIELDS, expand=True)
         child_epics, child_lookup_debug = await fetch_direct_child_epics(
             jira_client=jira_client,
@@ -123,6 +172,7 @@ async def build_ticket_stage_ground_truth(
             catalog=catalog,
             child_epics=child_epics,
             child_lookup_debug=child_lookup_debug,
+            resolved_value_stream=linked_vs,
         )
         linked_themes.append(theme_gt)
 
@@ -140,8 +190,9 @@ async def build_ticket_stage_ground_truth(
 
     return {
         "idmt_key": idmt_key,
-        "idmt_summary": _clean_text(fields.get("summary")),
+        "idmt_summary": idmt_summary,
         "idmt_description": _clean_text(_coerce_text(fields.get("description"))),
+        "value_stream_resolution": value_stream_resolution,
         "linked_themes": linked_themes,
         "gt_by_value_stream": gt_by_value_stream,
         "warnings": warnings,
@@ -154,14 +205,14 @@ def build_theme_stage_ground_truth(
     child_epics: list[dict[str, Any]] | None = None,
     child_lookup_debug: dict[str, Any] | None = None,
     catalog: dict,
+    resolved_value_stream: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     fields = theme_issue.get("fields") or {}
     theme_key = _clean_text(theme_issue.get("key"))
     theme_summary = _clean_text(fields.get("summary") or theme_issue.get("summary"))
-    business_value_stream = parse_business_value_stream(
-        fields.get(BUSINESS_VALUE_STREAM_FIELD)
-        or fields.get("businessValueStreams")
-        or _value_stream_from_theme_summary(theme_summary)
+    business_value_stream = business_value_stream_from_resolved_link(
+        resolved_value_stream,
+        theme_summary=theme_summary,
     )
     value_stream_name = business_value_stream.get("name") or ""
 
@@ -309,36 +360,12 @@ def build_theme_stage_ground_truth(
 
 
 def find_linked_theme_issues(issue: dict[str, Any]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    """Deprecated compatibility wrapper around Jira value-stream theme extraction."""
     fields = issue.get("fields") or {}
-    for link in fields.get("issuelinks") or []:
-        link_type = link.get("type") or {}
-        link_type_text = " ".join(
-            str(link_type.get(key) or "")
-            for key in ("name", "outward", "inward")
-        ).lower()
-        if "implement" not in link_type_text:
-            continue
-        for side in ("outwardIssue", "inwardIssue"):
-            linked = link.get(side)
-            if not isinstance(linked, dict):
-                continue
-            key = _clean_text(linked.get("key"))
-            if not key.startswith("GROUP-") or key in seen:
-                continue
-            issue_type = _issue_type_name(linked)
-            if issue_type and issue_type.lower() != "theme":
-                continue
-            seen.add(key)
-            out.append(
-                {
-                    "key": key,
-                    "summary": _clean_text((linked.get("fields") or {}).get("summary")),
-                    "issue_type": issue_type,
-                }
-            )
-    return out
+    return extract_themes(
+        list(fields.get("issuelinks") or []),
+        source_title=_clean_text(fields.get("summary")),
+    )
 
 
 async def fetch_direct_child_epics(
@@ -957,12 +984,12 @@ def _clean_text(value: Any) -> str:
 
 __all__ = [
     "BUSINESS_NEEDS_FIELD",
-    "BUSINESS_VALUE_STREAM_FIELD",
     "CHILD_EPIC_FIELDS",
     "IDMT_FIELDS",
     "PARENT_LINK_FIELD",
     "THEME_FIELDS",
     "add_verified_stage",
+    "business_value_stream_from_resolved_link",
     "build_theme_stage_ground_truth",
     "build_ticket_stage_ground_truth",
     "extract_stage_from_child_epic_summary",

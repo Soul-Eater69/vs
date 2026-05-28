@@ -17,13 +17,12 @@ import re
 from typing import Any
 
 from scripts.build_stage_ground_truth import JiraApiClient
+from vs_app.ingestion.jira.value_stream_labels import extract_themes, resolve_value_streams
 from vs_app.modules.stages.stage_ground_truth import (
-    BUSINESS_VALUE_STREAM_FIELD,
     IDMT_FIELDS,
     THEME_FIELDS,
-    find_linked_theme_issues,
+    business_value_stream_from_resolved_link,
     normalize_ticket_key,
-    parse_business_value_stream,
 )
 
 
@@ -131,13 +130,32 @@ async def scan_single_ticket(
     idmt_issue: dict[str, Any] = {}
     try:
         idmt_issue = await fetch_idmt_issue(jira_client, idmt_key)
-        theme_refs = find_linked_theme_issues(idmt_issue)
+        fields = idmt_issue.get("fields") or {}
+        issuelinks = list(fields.get("issuelinks") or [])
+        theme_refs = extract_themes(
+            issuelinks,
+            source_title=issue_summary(idmt_issue),
+        )
+        value_stream_resolution = resolve_value_streams(
+            theme_refs,
+            issuelinks,
+            llm_client=None,
+        )
+        linked_vs_by_group_key = {
+            normalize_ticket_key(row.get("jira_group_id")): row
+            for row in value_stream_resolution.get("linked_value_streams") or []
+            if normalize_ticket_key(row.get("jira_group_id"))
+        }
         theme_issues = [
             await fetch_theme_issue(jira_client, str(theme_ref.get("key") or ""))
             for theme_ref in theme_refs
             if str(theme_ref.get("key") or "").strip()
         ]
-        theme_rows = extract_theme_rows(theme_refs=theme_refs, theme_issues=theme_issues)
+        theme_rows = extract_theme_rows(
+            theme_refs=theme_refs,
+            theme_issues=theme_issues,
+            linked_vs_by_group_key=linked_vs_by_group_key,
+        )
         grouped = group_by_value_stream(theme_rows)
         return classify_ticket(
             idmt_key=idmt_key,
@@ -167,6 +185,7 @@ def extract_theme_rows(
     *,
     theme_refs: list[dict[str, Any]],
     theme_issues: list[dict[str, Any]],
+    linked_vs_by_group_key: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     ref_by_key = {
         normalize_ticket_key(theme_ref.get("key")): theme_ref
@@ -177,6 +196,9 @@ def extract_theme_rows(
         build_theme_row(
             theme_issue,
             theme_ref=ref_by_key.get(normalize_ticket_key(theme_issue.get("key"))),
+            resolved_value_stream=(linked_vs_by_group_key or {}).get(
+                normalize_ticket_key(theme_issue.get("key"))
+            ),
         )
         for theme_issue in theme_issues
         if normalize_ticket_key(theme_issue.get("key"))
@@ -312,12 +334,13 @@ def build_theme_row(
     theme_issue: dict[str, Any],
     *,
     theme_ref: dict[str, Any] | None = None,
+    resolved_value_stream: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     fields = theme_issue.get("fields") or {}
     summary = fields.get("summary") or (theme_ref or {}).get("summary")
-    business_value_stream = parse_business_value_stream(
-        fields.get(BUSINESS_VALUE_STREAM_FIELD)
-        or value_stream_from_theme_summary(summary)
+    business_value_stream = business_value_stream_from_resolved_link(
+        resolved_value_stream,
+        theme_summary=clean_text(summary),
     )
     theme_key = normalize_ticket_key(theme_issue.get("key"))
 

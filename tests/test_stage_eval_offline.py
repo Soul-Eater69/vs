@@ -17,7 +17,7 @@ from vs_app.modules.stages.stage_canonicalizer import canonicalize_stage
 from vs_app.modules.stages.stage_catalog import get_allowed_stages, load_stage_catalog
 from vs_app.modules.stages.stage_ground_truth import (
     BUSINESS_NEEDS_FIELD,
-    BUSINESS_VALUE_STREAM_FIELD,
+    business_value_stream_from_resolved_link,
     build_theme_stage_ground_truth,
     build_ticket_stage_ground_truth,
     extract_stage_from_child_epic_summary,
@@ -85,6 +85,26 @@ def test_parse_business_value_stream_name_and_id() -> None:
     assert parsed["id"] == "VSR00168130"
 
 
+def test_business_value_stream_from_resolved_link_uses_jira_label_mapping() -> None:
+    parsed = business_value_stream_from_resolved_link(
+        {
+            "id": "VSR00168130",
+            "jira_group_id": "GROUP-22223",
+            "name": "Manage Utilization Management Program",
+            "summary_raw": "CP 2026 Women's and Family Health : Manage Utilization Management Program",
+            "source": "jira_implemented_by_group_links",
+        },
+        theme_summary="Fallback : Ignore Me",
+    )
+
+    assert parsed == {
+        "raw": "CP 2026 Women's and Family Health : Manage Utilization Management Program",
+        "name": "Manage Utilization Management Program",
+        "id": "VSR00168130",
+        "source": "jira_implemented_by_group_links",
+    }
+
+
 def test_business_needs_extracts_first_stage_from_pipe_segment() -> None:
     mentions = extract_raw_stage_mentions_from_business_needs(
         "Value Stage: Manage UM | Fertility PA | Prior Authorization..."
@@ -120,9 +140,11 @@ def test_idmt_issue_links_find_themes() -> None:
         },
     }
 
-    assert find_linked_theme_issues(issue) == [
-        {"key": "GROUP-22223", "summary": "Theme summary", "issue_type": "Theme"}
-    ]
+    themes = find_linked_theme_issues(issue)
+    assert len(themes) == 1
+    assert themes[0]["key"] == "GROUP-22223"
+    assert themes[0]["summary_raw"] == "Theme summary"
+    assert themes[0]["issue_type"] == "Theme"
 
 
 def test_business_needs_does_not_create_stage_ground_truth() -> None:
@@ -130,7 +152,6 @@ def test_business_needs_does_not_create_stage_ground_truth() -> None:
         "key": "GROUP-22223",
         "fields": {
             "summary": "CP 2026 Women's and Family Health : Manage Utilization Management Program",
-            BUSINESS_VALUE_STREAM_FIELD: "Manage Utilization Management Program {VSR00168130}",
             BUSINESS_NEEDS_FIELD: "Value Stage: Deliver Response",
         },
     }
@@ -156,7 +177,6 @@ def test_child_epic_summary_creates_stage_ground_truth() -> None:
         "key": "GROUP-22223",
         "fields": {
             "summary": "CP 2026 Women's and Family Health : Manage Utilization Management Program",
-            BUSINESS_VALUE_STREAM_FIELD: "Manage Utilization Management Program {VSR00168130}",
             BUSINESS_NEEDS_FIELD: "Value Stage: Deliver Response",
         },
     }
@@ -231,7 +251,6 @@ def test_linked_group_summary_creates_stage_ground_truth_without_child_epics() -
         "key": "GROUP-18562",
         "fields": {
             "summary": "FEP 2023 I00015424 FEP PSHBP - Establish Product Offering",
-            BUSINESS_VALUE_STREAM_FIELD: "Manage Product Offering {VSR-PRODUCT}",
             BUSINESS_NEEDS_FIELD: "",
         },
     }
@@ -249,6 +268,12 @@ def test_linked_group_summary_creates_stage_ground_truth_without_child_epics() -
         catalog=catalog,
         child_epics=[],
         child_lookup_debug={},
+        resolved_value_stream={
+            "name": "Manage Product Offering",
+            "id": "VSR-PRODUCT",
+            "summary_raw": theme["fields"]["summary"],
+            "source": "test",
+        },
     )
 
     assert [stage["canonical"] for stage in result["verified_stages"]] == [
@@ -301,7 +326,6 @@ def test_duplicate_child_epic_stages_collapse_to_one_canonical_stage() -> None:
         "key": "GROUP-22223",
         "fields": {
             "summary": "CP 2026 Women's and Family Health : Manage Utilization Management Program",
-            BUSINESS_VALUE_STREAM_FIELD: "Manage Utilization Management Program {VSR00168130}",
             BUSINESS_NEEDS_FIELD: "Value Stage: Manage UM | Fertility PA",
         },
     }
@@ -351,7 +375,6 @@ def test_child_epic_candidate_resolution_populates_theme_debug() -> None:
         "key": "GROUP-22219",
         "fields": {
             "summary": "CP 2026 Women's and Family Health : Manage Leads and opportunities",
-            BUSINESS_VALUE_STREAM_FIELD: "Manage Leads and opportunities {VSR-LEADS}",
             BUSINESS_NEEDS_FIELD: "",
         },
     }
@@ -501,7 +524,10 @@ async def test_ground_truth_builder_groups_verified_stages_by_value_stream() -> 
                     "outwardIssue": {
                         "key": "GROUP-22223",
                         "fields": {
-                            "summary": "Theme",
+                            "summary": (
+                                "CP 2026 Women's and Family Health : "
+                                "Manage Utilization Management Program"
+                            ),
                             "issuetype": {"name": "Theme"},
                         },
                     },
@@ -514,7 +540,6 @@ async def test_ground_truth_builder_groups_verified_stages_by_value_stream() -> 
         "fields": {
             "summary": "CP 2026 Women's and Family Health : Manage Utilization Management Program",
             "issuetype": {"name": "Theme"},
-            BUSINESS_VALUE_STREAM_FIELD: "Manage Utilization Management Program {VSR00168130}",
             BUSINESS_NEEDS_FIELD: "Value Stage: Manage UM | Fertility PA",
             "subtasks": [],
         },
@@ -544,6 +569,10 @@ async def test_ground_truth_builder_groups_verified_stages_by_value_stream() -> 
         "Manage Utilization Management Program": ["Manage UM Operations"]
     }
     assert result["idmt_description"] == "IDMT-only description text."
+    assert result["value_stream_resolution"]["linked_value_streams"][0]["jira_group_id"] == "GROUP-22223"
+    theme_gt = result["linked_themes"][0]
+    assert theme_gt["business_value_stream"]["source"] == "jira_implemented_by_group_links"
+    assert theme_gt["business_value_stream"]["raw"].endswith("Manage Utilization Management Program")
 
 
 @pytest.mark.anyio
@@ -560,7 +589,10 @@ async def test_ground_truth_builder_uses_linked_group_summary_when_no_children()
                     "outwardIssue": {
                         "key": "GROUP-18562",
                         "fields": {
-                            "summary": "FEP 2023 I00015424 FEP PSHBP - Establish Product Offering",
+                            "summary": (
+                                "CP 2026 Women's and Family Health : "
+                                "Manage Utilization Management Program - Manage UM Operations"
+                            ),
                             "issuetype": {"name": "Theme"},
                         },
                     },
@@ -571,19 +603,14 @@ async def test_ground_truth_builder_uses_linked_group_summary_when_no_children()
     theme = {
         "key": "GROUP-18562",
         "fields": {
-            "summary": "FEP 2023 I00015424 FEP PSHBP - Establish Product Offering",
+            "summary": (
+                "CP 2026 Women's and Family Health : "
+                "Manage Utilization Management Program - Manage UM Operations"
+            ),
             "issuetype": {"name": "Theme"},
-            BUSINESS_VALUE_STREAM_FIELD: "Manage Product Offering {VSR-PRODUCT}",
             BUSINESS_NEEDS_FIELD: "",
             "subtasks": [],
         },
-    }
-    catalog = {
-        "Manage Product Offering": {
-            "stages": [
-                {"name": "Establish Product Offering", "id": "", "description": "", "aliases": []}
-            ]
-        }
     }
 
     result = await build_ticket_stage_ground_truth(
@@ -592,11 +619,11 @@ async def test_ground_truth_builder_uses_linked_group_summary_when_no_children()
             {"IDMT-19872": idmt, "GROUP-18562": theme},
             search_results={'"Parent Link" = GROUP-18562 AND issuetype = Epic': []},
         ),
-        catalog=catalog,
+        catalog=_operations_catalog(),
     )
 
     assert result["gt_by_value_stream"] == {
-        "Manage Product Offering": ["Establish Product Offering"]
+        "Manage Utilization Management Program": ["Manage UM Operations"]
     }
     theme_gt = result["linked_themes"][0]
     assert theme_gt["verified_stages"][0]["raw_mentions"][0]["source"] == "linked_group_summary"
@@ -662,7 +689,10 @@ async def test_no_parent_link_children_leaves_stage_ground_truth_empty() -> None
                     "outwardIssue": {
                         "key": "GROUP-22223",
                         "fields": {
-                            "summary": "Theme",
+                            "summary": (
+                                "CP 2026 Women's and Family Health : "
+                                "Manage Utilization Management Program"
+                            ),
                             "issuetype": {"name": "Theme"},
                         },
                     },
@@ -675,7 +705,6 @@ async def test_no_parent_link_children_leaves_stage_ground_truth_empty() -> None
         "fields": {
             "summary": "CP 2026 Women's and Family Health : Manage Utilization Management Program",
             "issuetype": {"name": "Theme"},
-            BUSINESS_VALUE_STREAM_FIELD: "Manage Utilization Management Program {VSR00168130}",
             BUSINESS_NEEDS_FIELD: "Value Stage: Deliver Response",
             "subtasks": [],
         },

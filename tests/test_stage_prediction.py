@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.evaluate_stage_prediction_batch import evaluate_prediction_row
+from scripts.evaluate_stage_prediction_batch import dataset_idea_card_text, evaluate_prediction_row
 from vs_app.modules.stages.stage_prediction import (
     allowed_stage_payload,
     build_stage_prediction_task,
@@ -78,6 +78,7 @@ def test_stage_prediction_prompt_rendering_contains_context_and_schema() -> None
     assert "Manage Leads and Opportunities" in prompt
     assert "Perform Outreach to Leads and Prospects" in prompt
     assert '"predicted_stages"' in prompt
+    assert '"rejected_stages"' not in prompt
 
 
 def test_allowed_stage_payload_supports_catalog_stage_name_variants() -> None:
@@ -156,6 +157,8 @@ async def test_non_approved_stage_is_dropped() -> None:
     assert result["predictions_by_value_stream"]["Manage Leads and Opportunities"] == []
     warnings = result["value_stream_predictions"][0]["warnings"]
     assert any("dropped non-approved stage" in warning for warning in warnings)
+    assert "rejected_stages" not in result["value_stream_predictions"][0]
+    assert "rejected_stages" not in result["value_stream_predictions"][0]["raw_response"]
 
 
 @pytest.mark.anyio
@@ -248,6 +251,22 @@ def test_stage_prediction_metrics_perfect_match() -> None:
     assert row["precision"] == 1.0
     assert row["recall"] == 1.0
     assert row["f1"] == 1.0
+
+
+def test_dataset_idea_card_text_context_modes() -> None:
+    idea_card = {
+        "idea_card_text": "raw idea",
+        "attachment_text": "attachment",
+        "extracted_text": "extracted",
+        "generated_summary": "summary",
+    }
+
+    assert dataset_idea_card_text(idea_card, context_mode="raw") == "raw idea\n\nattachment\n\nextracted"
+    assert dataset_idea_card_text(idea_card, context_mode="full") == (
+        "raw idea\n\nattachment\n\nextracted\n\nsummary"
+    )
+    assert dataset_idea_card_text(idea_card, context_mode="summary") == "summary"
+    assert dataset_idea_card_text({"generated_summary": "fallback"}, context_mode="raw") == "fallback"
 
 
 def test_stage_prediction_metrics_missed_stage() -> None:

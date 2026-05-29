@@ -75,9 +75,8 @@ async def predict_stages_for_predicted_value_streams(
                 "value_stream_name": value_stream_name,
                 "value_stream_id": task.get("value_stream_id") or "",
                 "selected_stages": selected,
-                "rejected_stages": normalized["rejected_stages"],
                 "allowed_stages": allowed_stage_names,
-                "raw_response": raw_response,
+                "raw_response": raw_response_without_rejected_stages(raw_response, parsed),
                 "warnings": row_warnings,
             }
         )
@@ -208,7 +207,6 @@ def normalize_stage_prediction(payload: dict[str, Any]) -> dict[str, Any]:
         or payload.get("picks")
         or []
     )
-    rejected_rows = normalize_rejected_stage_rows(payload.get("rejected_stages") or [])
     warnings = [
         clean_text(warning)
         for warning in list(payload.get("warnings") or [])
@@ -216,7 +214,6 @@ def normalize_stage_prediction(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     return {
         "predicted_stages": predicted_rows,
-        "rejected_stages": rejected_rows,
         "warnings": warnings,
     }
 
@@ -281,11 +278,18 @@ def empty_value_stream_prediction(task: dict[str, Any], warnings: list[str]) -> 
         "value_stream_name": task.get("value_stream_name") or "",
         "value_stream_id": task.get("value_stream_id") or "",
         "selected_stages": [],
-        "rejected_stages": [],
         "allowed_stages": list(task.get("allowed_stages") or []),
         "raw_response": "",
         "warnings": warnings,
     }
+
+
+def raw_response_without_rejected_stages(raw_response: str, parsed: dict[str, Any]) -> str:
+    if not isinstance(parsed, dict) or "rejected_stages" not in parsed:
+        return raw_response
+    sanitized = dict(parsed)
+    sanitized.pop("rejected_stages", None)
+    return json.dumps(sanitized, ensure_ascii=False)
 
 
 def allowed_stage_row(stage: Any) -> dict[str, Any]:
@@ -365,18 +369,6 @@ def normalize_predicted_stage_rows(value: Any) -> list[dict[str, Any]]:
                 }
             )
     return [row for row in out if row.get("stage_name")]
-
-
-def normalize_rejected_stage_rows(value: Any) -> list[dict[str, str]]:
-    rows = value if isinstance(value, list) else [value]
-    out: list[dict[str, str]] = []
-    for row in rows:
-        if isinstance(row, dict):
-            stage_name = clean_text(row.get("stage_name") or row.get("stage") or row.get("name"))
-            reason = clean_text(row.get("reason"))
-            if stage_name or reason:
-                out.append({"stage_name": stage_name, "reason": reason})
-    return out
 
 
 def call_generate(llm: Any, prompt: str, *, system_prompt: str) -> Any:

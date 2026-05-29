@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from time import perf_counter
 from typing import Any
 
 
@@ -38,6 +39,7 @@ DEFAULT_STAGE_CATALOG = Path("data/value_stream_stage_map.json")
 DEFAULT_OUTPUT_DIR = Path("output/stage_prediction_eval")
 DEFAULT_DATASET_INPUT = Path("output/stage_prediction_eval/stage_prediction_dataset.json")
 VALID_VS_MODES = {"pipeline", "oracle"}
+VALID_CONTEXT_MODES = {"raw", "full", "summary"}
 
 # Legacy fallback for running without stage_prediction_dataset.json.
 LEGACY_DEFAULT_VS_INPUT = Path("output/value_stream_predictions.json")
@@ -125,6 +127,11 @@ def load_runtime_config() -> dict[str, Any]:
         raise SystemExit(
             f"Unsupported STAGE_PREDICT_VS_MODE={vs_mode!r}; expected pipeline or oracle."
         )
+    context_mode = clean_text(os.getenv("STAGE_PREDICT_CONTEXT_MODE", "raw")).lower()
+    if context_mode not in VALID_CONTEXT_MODES:
+        raise SystemExit(
+            f"Unsupported STAGE_PREDICT_CONTEXT_MODE={context_mode!r}; expected raw, full, or summary."
+        )
     return {
         "tickets_input": Path(os.getenv("STAGE_PREDICT_TICKETS_INPUT", str(DEFAULT_TICKETS_INPUT))),
         "tickets_input_explicit": bool(os.getenv("STAGE_PREDICT_TICKETS_INPUT")),
@@ -136,6 +143,9 @@ def load_runtime_config() -> dict[str, Any]:
         "dataset_input": Path(dataset_env) if dataset_env else DEFAULT_DATASET_INPUT,
         "dataset_input_explicit": bool(dataset_env),
         "vs_mode": vs_mode,
+        "context_mode": context_mode,
+        "progress": env_bool("STAGE_PREDICT_PROGRESS", True),
+        "flush_outputs": env_bool("STAGE_PREDICT_FLUSH_OUTPUTS", True),
     }
 
 
@@ -152,27 +162,94 @@ async def run_batch_prediction_eval(
 ) -> dict[str, Any]:
     stage_predictions: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    processed_ticket_ids: list[str] = []
+    total = len(ticket_ids)
 
-    for ticket_id in ticket_ids:
+    if config.get("progress"):
+        print_run_header(
+            ticket_ids=ticket_ids,
+            gt_payload=gt_payload,
+            dataset_payload=dataset_payload,
+            config=config,
+        )
+
+    for index, ticket_id in enumerate(ticket_ids, start=1):
+        ticket_key = normalize_ticket_key(ticket_id)
+        started = perf_counter()
+        gt_vs_count, gt_stage_count = gt_counts_for_ticket(gt_payload, ticket_key)
+        if config.get("progress"):
+            print(
+                f"[{index}/{total}] START {ticket_key} | "
+                f"gt_vs={gt_vs_count} | gt_stages={gt_stage_count}",
+                flush=True,
+            )
         try:
             prediction = await predict_for_ticket(
-                ticket_id=ticket_id,
+                ticket_id=ticket_key,
                 legacy_vs_predictions=legacy_vs_predictions,
                 dataset_payload=dataset_payload,
                 vs_mode=str(config["vs_mode"]),
+                context_mode=str(config["context_mode"]),
                 stage_catalog=stage_catalog,
                 llm=llm,
                 jira_client=jira_client,
             )
             stage_predictions.append(prediction)
+            processed_ticket_ids.append(ticket_key)
+            if config.get("progress"):
+                pred_vs_count, pred_stage_count = prediction_counts(prediction)
+                print(
+                    f"[{index}/{total}] DONE {ticket_key} | "
+                    f"pred_vs={pred_vs_count} | pred_stages={pred_stage_count} | "
+                    f"warnings={prediction_warning_count(prediction)} | "
+                    f"seconds={perf_counter() - started:.1f}",
+                    flush=True,
+                )
         except Exception as exc:
             errors.append(
                 {
-                    "ticket_id": ticket_id,
+                    "ticket_id": ticket_key,
                     "error": compact_error(exc),
                 }
             )
+            processed_ticket_ids.append(ticket_key)
+            if config.get("progress"):
+                print(
+                    f"[{index}/{total}] ERROR {ticket_key} | {compact_error(exc)} | "
+                    f"seconds={perf_counter() - started:.1f}",
+                    flush=True,
+                )
 
+        if config.get("flush_outputs"):
+            partial_result = build_result_payload(
+                ticket_ids=processed_ticket_ids,
+                gt_payload=gt_payload,
+                stage_predictions=stage_predictions,
+                errors=errors,
+                dataset_payload=dataset_payload,
+                config=config,
+            )
+            write_outputs(partial_result, Path(config["output_dir"]))
+
+    return build_result_payload(
+        ticket_ids=ticket_ids,
+        gt_payload=gt_payload,
+        stage_predictions=stage_predictions,
+        errors=errors,
+        dataset_payload=dataset_payload,
+        config=config,
+    )
+
+
+def build_result_payload(
+    *,
+    ticket_ids: list[str],
+    gt_payload: dict[str, Any],
+    stage_predictions: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+    dataset_payload: dict[str, Any] | None,
+    config: dict[str, Any],
+) -> dict[str, Any]:
     eval_rows = evaluate_stage_predictions(
         ticket_ids=ticket_ids,
         gt_payload=gt_payload,
@@ -193,6 +270,7 @@ async def run_batch_prediction_eval(
             "legacy_vs_input": "" if dataset_payload is not None else str(config["legacy_vs_input"]),
             "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
             "vs_mode": str(config["vs_mode"]),
+            "context_mode": str(config["context_mode"]),
             "stage_catalog": str(config["stage_catalog"]),
             "tickets": stage_predictions,
             "errors": errors,
@@ -205,6 +283,7 @@ async def run_batch_prediction_eval(
             "legacy_vs_input": "" if dataset_payload is not None else str(config["legacy_vs_input"]),
             "dataset_input": str(config["dataset_input"]) if dataset_payload is not None else "",
             "vs_mode": str(config["vs_mode"]),
+            "context_mode": str(config["context_mode"]),
             "stage_catalog": str(config["stage_catalog"]),
             "summary": summary,
             "rows": eval_rows,
@@ -219,6 +298,7 @@ async def predict_for_ticket(
     legacy_vs_predictions: dict[str, Any],
     dataset_payload: dict[str, Any] | None = None,
     vs_mode: str = "oracle",
+    context_mode: str = "raw",
     stage_catalog: dict[str, Any],
     llm: Any,
     jira_client: JiraApiClient | None,
@@ -233,6 +313,7 @@ async def predict_for_ticket(
             ticket_id=ticket_key,
             dataset_record=dataset_record,
             jira_client=jira_client,
+            context_mode=context_mode,
         )
         value_stream_targets = oracle_value_stream_targets
     else:
@@ -417,6 +498,60 @@ def print_summary(result: dict[str, Any], output_dir: Path) -> None:
     print(f"Output directory: {output_dir}")
 
 
+def print_run_header(
+    *,
+    ticket_ids: list[str],
+    gt_payload: dict[str, Any],
+    dataset_payload: dict[str, Any] | None,
+    config: dict[str, Any],
+) -> None:
+    print("Stage prediction eval starting", flush=True)
+    print(f"Tickets selected: {len(ticket_ids)}", flush=True)
+    print(f"Tickets with GT in payload: {tickets_with_gt_count(gt_payload)}", flush=True)
+    print(
+        "Dataset input: "
+        f"{config['dataset_input'] if dataset_payload is not None else 'not used'}",
+        flush=True,
+    )
+    print(f"Tickets input: {tickets_input_label(config, dataset_payload)}", flush=True)
+    print(f"Context mode: {config['context_mode']}", flush=True)
+    print(f"Stage catalog: {config['stage_catalog']}", flush=True)
+    print(f"Output directory: {config['output_dir']}", flush=True)
+    print(f"Flush outputs per ticket: {bool(config.get('flush_outputs'))}", flush=True)
+
+
+def tickets_input_label(config: dict[str, Any], dataset_payload: dict[str, Any] | None) -> str:
+    if dataset_payload is None or config.get("tickets_input_explicit"):
+        return str(config["tickets_input"])
+    return "dataset_gt_keys"
+
+
+def tickets_with_gt_count(gt_payload: dict[str, Any]) -> int:
+    return sum(
+        1
+        for row in (gt_payload.get("tickets") or {}).values()
+        if isinstance(row, dict) and (row.get("gt_by_value_stream") or {})
+    )
+
+
+def gt_counts_for_ticket(gt_payload: dict[str, Any], ticket_id: str) -> tuple[int, int]:
+    ticket = (gt_payload.get("tickets") or {}).get(normalize_ticket_key(ticket_id)) or {}
+    gt_by_vs = ticket.get("gt_by_value_stream") or {}
+    return len(gt_by_vs), sum(len(stages or []) for stages in gt_by_vs.values())
+
+
+def prediction_counts(prediction: dict[str, Any]) -> tuple[int, int]:
+    by_vs = prediction.get("predictions_by_value_stream") or {}
+    return len(by_vs), sum(len(stages or []) for stages in by_vs.values())
+
+
+def prediction_warning_count(prediction: dict[str, Any]) -> int:
+    count = len(prediction.get("warnings") or [])
+    for row in prediction.get("value_stream_predictions") or []:
+        count += len(row.get("warnings") or [])
+    return count
+
+
 def load_stage_prediction_dataset_if_available(config: dict[str, Any]) -> dict[str, Any] | None:
     path = Path(config["dataset_input"])
     if path.exists():
@@ -429,10 +564,10 @@ def load_stage_prediction_dataset_if_available(config: dict[str, Any]) -> dict[s
 def ticket_ids_for_run(config: dict[str, Any], dataset_payload: dict[str, Any] | None) -> list[str]:
     if dataset_payload is None:
         return read_ticket_ids(Path(config["tickets_input"]))
-    tickets_input = Path(config["tickets_input"])
-    if config.get("tickets_input_explicit") or tickets_input.exists():
-        return read_ticket_ids(tickets_input)
-    return ticket_ids_from_dataset(dataset_payload)
+    if config.get("tickets_input_explicit"):
+        return read_ticket_ids(Path(config["tickets_input"]))
+    with_gt = ticket_ids_from_dataset_with_gt(dataset_payload)
+    return with_gt or ticket_ids_from_dataset(dataset_payload)
 
 
 def ticket_ids_from_dataset(dataset_payload: dict[str, Any]) -> list[str]:
@@ -441,6 +576,18 @@ def ticket_ids_from_dataset(dataset_payload: dict[str, Any]) -> list[str]:
         for ticket_id in (dataset_payload.get("tickets") or {}).keys()
         if normalize_ticket_key(ticket_id)
     ]
+
+
+def ticket_ids_from_dataset_with_gt(dataset_payload: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for ticket_id, row in (dataset_payload.get("tickets") or {}).items():
+        ticket_key = normalize_ticket_key(ticket_id)
+        if not ticket_key or not isinstance(row, dict):
+            continue
+        gt_by_vs = ((row.get("ground_truth") or {}).get("gt_by_value_stream") or {})
+        if gt_by_vs:
+            out.append(ticket_key)
+    return out
 
 
 def gt_payload_from_dataset(dataset_payload: dict[str, Any]) -> dict[str, Any]:
@@ -473,13 +620,17 @@ async def ticket_context_from_dataset_ticket(
     ticket_id: str,
     dataset_record: dict[str, Any],
     jira_client: JiraApiClient | None,
+    context_mode: str = "raw",
 ) -> dict[str, Any]:
     idea_card = dataset_record.get("idea_card") or {}
     context = {
         "ticket_id": ticket_id,
         "summary": clean_text(idea_card.get("summary")),
         "description": clean_text(idea_card.get("description")),
-        "idea_card_text": dataset_idea_card_text(idea_card),
+        "idea_card_text": dataset_idea_card_text(
+            idea_card,
+            context_mode=context_mode,
+        ),
         "generated_summary": clean_text(idea_card.get("generated_summary")),
     }
     if context.get("summary") or context.get("description") or context.get("idea_card_text"):
@@ -504,14 +655,31 @@ def oracle_value_streams_from_ground_truth(ground_truth: dict[str, Any]) -> list
     ]
 
 
-def dataset_idea_card_text(idea_card: dict[str, Any]) -> str:
+def dataset_idea_card_text(
+    idea_card: dict[str, Any],
+    *,
+    context_mode: str = "raw",
+) -> str:
+    if context_mode == "summary":
+        keys = ("generated_summary",)
+    elif context_mode == "full":
+        keys = ("idea_card_text", "attachment_text", "extracted_text", "generated_summary")
+    else:
+        keys = ("idea_card_text", "attachment_text", "extracted_text")
+
     parts: list[str] = []
     seen: set[str] = set()
-    for key in ("idea_card_text", "attachment_text", "extracted_text", "generated_summary"):
+    for key in keys:
         text = clean_text(idea_card.get(key))
         if text and text not in seen:
             seen.add(text)
             parts.append(text)
+
+    if not parts and context_mode == "raw":
+        generated_summary = clean_text(idea_card.get("generated_summary"))
+        if generated_summary:
+            parts.append(generated_summary)
+
     return "\n\n".join(parts)
 
 
@@ -564,6 +732,7 @@ def write_summary_text(path: Path, eval_payload: dict[str, Any], output_dir: Pat
         f"Tickets evaluated: {summary.get('tickets_evaluated', 0)}",
         f"Rows evaluated: {summary.get('rows_evaluated', 0)}",
         f"Errors: {summary.get('errors', 0)}",
+        f"Context mode: {eval_payload.get('context_mode', '')}",
         f"Micro precision: {summary.get('micro_precision', 0.0):.3f}",
         f"Micro recall: {summary.get('micro_recall', 0.0):.3f}",
         f"Micro F1: {summary.get('micro_f1', 0.0):.3f}",
@@ -631,13 +800,17 @@ def load_json(path: Path) -> Any:
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8") as fh:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    tmp_path.replace(path)
 
 
 def clean_list(values: list[Any]) -> list[str]:
@@ -666,6 +839,13 @@ def f1_score(precision: float, recall: float) -> float:
 def avg(values: Any) -> float:
     vals = [float(value or 0.0) for value in values]
     return round(sum(vals) / len(vals), 6) if vals else 0.0
+
+
+def env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return clean_text(raw).lower() not in {"0", "false", "no", "off", ""}
 
 
 def compact_error(exc: Exception) -> str:

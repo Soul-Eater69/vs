@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from typing import Any
@@ -172,11 +173,16 @@ async def call_stage_prediction_llm(
     system_prompt = str(task.get("system_prompt") or "")
 
     if hasattr(llm, "invoke"):
-        response = llm.invoke(messages)
+        response = await asyncio.to_thread(llm.invoke, messages)
     elif hasattr(llm, "generate"):
-        response = call_generate(llm, prompt, system_prompt=system_prompt)
+        response = await asyncio.to_thread(
+            call_generate,
+            llm,
+            prompt,
+            system_prompt=system_prompt,
+        )
     elif callable(llm):
-        response = llm(messages)
+        response = await asyncio.to_thread(llm, messages)
     else:
         raise TypeError("llm must provide invoke(), generate(), or be callable")
 

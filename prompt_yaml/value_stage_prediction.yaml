@@ -1,9 +1,9 @@
 system: |
   You are a senior business architecture analyst.
 
-  Your task is to select the approved Value Stream Stage(s) that are supported by an IDMT / idea card context for one already-predicted Business Value Stream.
+  Select the approved Value Stream Stage(s) supported by an IDMT / idea card context for one already-selected Business Value Stream.
 
-  You are not predicting the Business Value Stream. The Business Value Stream has already been selected by another model. Your task is to select the correct stage(s) inside that value stream.
+  You are not predicting the Business Value Stream. The Business Value Stream is already selected. Your task is to select the correct stage(s) inside that value stream.
 
   This is multi-label classification:
   - Select zero, one, or multiple stages.
@@ -11,25 +11,15 @@ system: |
   - Never invent stage names.
   - Never select every stage by default.
   - Never select a stage only because it appears in the catalog.
-  - If evidence is weak or ambiguous, do not include the stage.
-
-  Important distinction:
-  - A Value Stream is the broad business process area.
-  - A Value Stream Stage is a specific activity/stage inside that process.
-  Do not confuse the value stream name with a stage name.
 
   Evidence rules:
-  - Direct support means the IDMT / idea card explicitly names the stage or clearly names activities, deliverables, entrance criteria, exit criteria, or value items that match the stage.
-  - Implied support means the IDMT / idea card does not name the stage, but the requested work strongly requires that stage based on the approved stage definition.
-  - Do not select a stage from vague, generic, historical, or background-only mentions.
-  - Do not select a stage when the evidence is only a weak semantic association.
+  - Primary evidence is the full ticket and attachment context provided below.
+  - Summary fields are useful, but full context may contain details that the summary omits.
+  - Direct support means the context explicitly names the stage or a close business synonym.
+  - Reasonable implied support means the context describes business actions, deliverables, decisions, criteria, value items, stakeholders, or outcomes that map to an approved stage definition.
+  - Prefer recall: include a stage when the full context reasonably supports it, even if the exact stage name is not written verbatim.
+  - Do not select a stage from purely generic, historical, or background-only mentions.
   - Do not select a stage just because the work is generally related to the value stream.
-
-  Conservative rule:
-  Prefer missing a weak stage over adding an unsupported stage. If uncertain, reject the stage and explain why.
-
-  Leakage rule:
-  You are not seeing Jira child Epics or ground truth. Do not assume child issue names. Use only the provided IDMT context, predicted Value Stream, and approved stage catalog.
 
   Output only valid JSON. Do not include markdown. Do not include prose outside JSON.
 
@@ -39,17 +29,11 @@ schema: |
     "value_stream_name": "string",
     "predicted_stages": [
       {
-        "stage_name": "exact approved stage name",
+        "stage_name": "approved stage name",
         "confidence": 0.0,
         "support": "direct | implied",
-        "reason": "short explanation grounded in the IDMT context",
+        "reason": "short explanation grounded in the ticket context",
         "evidence_summary": "short paraphrase of the supporting evidence"
-      }
-    ],
-    "rejected_stages": [
-      {
-        "stage_name": "exact approved stage name",
-        "reason": "why this approved stage was not selected"
       }
     ],
     "warnings": []
@@ -59,13 +43,12 @@ user: |
   Predict the applicable Value Stream Stage(s) for this IDMT ticket.
 
   Follow these steps internally:
-  1. Read the IDMT / idea card context.
+  1. Read the full ticket / attachment context first.
   2. Understand the actual business work being requested.
-  3. Review the already-predicted Business Value Stream.
-  4. Compare the requested work against each approved stage.
-  5. Select only stages with direct or strong implied support.
-  6. Reject stages that are merely related but not clearly supported.
-  7. Return exact approved stage names only.
+  3. Review the selected Business Value Stream.
+  4. Compare the requested work against each approved stage's description, criteria, value items, and stakeholders.
+  5. Select every approved stage with direct or reasonable implied support.
+  6. Return approved stage names only.
 
   IDMT / IDEA CARD CONTEXT
   Ticket ID: {{ticket_id}}
@@ -76,14 +59,14 @@ user: |
   Description:
   {{description}}
 
-  Idea Card Text:
+  Full Ticket / Attachment Context:
   {{idea_card_text}}
 
-  PREDICTED BUSINESS VALUE STREAM
+  SELECTED BUSINESS VALUE STREAM
   Name: {{value_stream_name}}
   ID: {{value_stream_id}}
   Confidence: {{value_stream_confidence}}
-  VS prediction reason:
+  VS selection reason:
   {{value_stream_reason}}
 
   Value Stream Description:
@@ -97,25 +80,25 @@ user: |
   {{output_schema}}
 
   Additional classification guidance:
+  - Prioritize the full ticket / attachment context over generated summary wording when they differ.
   - Match requested business actions to stage descriptions, entrance criteria, exit criteria, and value items.
-  - If the ticket explicitly names a stage or a close shorthand for a stage, use the approved stage name.
-  - If the ticket contains several business activities, select multiple stages only when each is clearly supported.
-  - If the ticket only identifies the value stream but no actionable stage-level evidence, return an empty predicted_stages array.
-  - Do not choose stages based on implementation-only details unless those details clearly indicate the business stage.
+  - If the ticket explicitly names a stage, stage synonym, shorthand, deliverable, or business activity that maps to an approved stage, select the approved stage name.
+  - If the ticket contains several business activities, select multiple stages when each has reasonable support.
+  - Do not output rejected_stages or reject reasons.
   - Do not output stages outside the approved list.
+  - Do not select every stage by default.
 
   Domain-specific examples:
   - For "Manage Leads and Opportunities":
-    - Evidence like "perform outreach", "communicate with leads", "prospects", "prioritized leads", or "targeted lead actions" can support "Perform Outreach to Leads and Prospects" if that exact stage is approved.
-    - Evidence like "pre-sale analytics" should not become a stage unless an approved stage directly matches analytics work.
-    - Product training, reporting labels, or implementation notes should not be selected as stages by themselves.
+    - Evidence like "perform outreach", "communicate with leads", "prospects", "prioritized leads", or "targeted lead actions" can support "Perform Outreach to Leads and Prospects" if approved.
+    - Evidence like "pre-sale analytics" can support an analytics stage when an approved stage directly matches analytics work.
 
   - For "Manage Utilization Management Program":
-    - Evidence like "prior authorization", "PA", "appeals", "authorization review", "UM processing", "review/approve/deny authorization", "pre-service", "post-service", or "appeal services" can support "Manage UM Operations" if approved.
-    - Evidence about creating or changing policies, grids, rules, standards, or guidelines should support a guidelines stage, not operations.
-    - Evidence about monitoring, reporting, performance measures, analytics, or outcomes should support an evaluation/performance stage, not operations.
+    - Evidence like "prior authorization", "PA", "appeals", "authorization review", "UM processing", "review/approve/deny authorization", "pre-service", "post-service", or "appeal services" can support matching UM operations, assessment, review, or appeals stages if approved.
+    - Evidence about creating or changing policies, grids, rules, standards, or guidelines can support a guidelines/policy stage if approved.
+    - Evidence about monitoring, reporting, performance measures, analytics, or outcomes can support an evaluation/performance stage if approved.
 
   - For any value stream:
-    - Do not select every stage.
+    - Include stages when context supports the business action even if the approved stage name is not repeated exactly.
     - Do not select stages from generic nouns alone.
     - A stage must be tied to requested work, business action, deliverable, decision, or outcome.

@@ -46,6 +46,7 @@ DEFAULT_OUTPUT_DIR = Path("output/stage_prediction_eval")
 DEFAULT_DATASET_INPUT = Path("output/stage_prediction_eval/stage_prediction_dataset.json")
 VALID_VS_MODES = {"pipeline", "oracle"}
 VALID_CONTEXT_MODES = {"raw", "full", "summary"}
+EVAL_CONCURRENCY = 5
 
 # Legacy fallback for running without stage_prediction_dataset.json.
 LEGACY_DEFAULT_VS_INPUT = Path("output/value_stream_predictions.json")
@@ -176,61 +177,49 @@ async def run_batch_prediction_eval(
     jira_client: JiraApiClient | None,
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    stage_predictions: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-    processed_ticket_ids: list[str] = []
+    results: list[dict[str, Any] | None] = [None] * len(ticket_ids)
     total = len(ticket_ids)
+    semaphore = asyncio.Semaphore(EVAL_CONCURRENCY)
 
     if config.get("flush_outputs"):
         write_incremental_outputs(
             config=config,
-            processed_ticket_ids=processed_ticket_ids,
+            processed_ticket_ids=[],
             all_ticket_ids=ticket_ids,
             gt_payload=gt_payload,
-            stage_predictions=stage_predictions,
-            errors=errors,
+            stage_predictions=[],
+            errors=[],
             dataset_payload=dataset_payload,
         )
 
-    for index, ticket_id in enumerate(ticket_ids, start=1):
-        ticket_key = normalize_ticket_key(ticket_id)
-        start_time = time.perf_counter()
-        print_ticket_start(index, total, ticket_key, gt_payload, enabled=bool(config.get("progress")))
-        try:
-            prediction = await predict_for_ticket(
-                ticket_id=ticket_key,
+    tasks = [
+        asyncio.create_task(
+            predict_ticket_result(
+                index=index,
+                total=total,
+                ticket_id=ticket_id,
+                semaphore=semaphore,
+                gt_payload=gt_payload,
                 legacy_vs_predictions=legacy_vs_predictions,
                 dataset_payload=dataset_payload,
-                vs_mode=str(config["vs_mode"]),
-                context_mode=str(config["context_mode"]),
                 stage_catalog=stage_catalog,
                 llm=llm,
                 jira_client=jira_client,
+                config=config,
             )
-            stage_predictions.append(prediction)
-            processed_ticket_ids.append(ticket_key)
-            print_ticket_done(
-                index,
-                total,
-                ticket_key,
-                prediction,
-                elapsed_seconds=time.perf_counter() - start_time,
-                enabled=bool(config.get("progress")),
-            )
-        except Exception as exc:
-            error = {"ticket_id": ticket_key, "error": compact_error(exc)}
-            errors.append(error)
-            processed_ticket_ids.append(ticket_key)
-            print_ticket_error(
-                index,
-                total,
-                ticket_key,
-                error,
-                elapsed_seconds=time.perf_counter() - start_time,
-                enabled=bool(config.get("progress")),
-            )
+        )
+        for index, ticket_id in enumerate(ticket_ids, start=1)
+    ]
+
+    for completed in asyncio.as_completed(tasks):
+        result = await completed
+        results[int(result["index"]) - 1] = result
 
         if config.get("flush_outputs"):
+            processed_ticket_ids, stage_predictions, errors = ordered_completed_outputs(
+                ticket_ids=ticket_ids,
+                results=results,
+            )
             write_incremental_outputs(
                 config=config,
                 processed_ticket_ids=processed_ticket_ids,
@@ -241,6 +230,10 @@ async def run_batch_prediction_eval(
                 dataset_payload=dataset_payload,
             )
 
+    processed_ticket_ids, stage_predictions, errors = ordered_completed_outputs(
+        ticket_ids=ticket_ids,
+        results=results,
+    )
     eval_rows = evaluate_stage_predictions(
         ticket_ids=ticket_ids,
         gt_payload=gt_payload,
@@ -261,6 +254,90 @@ async def run_batch_prediction_eval(
         errors=errors,
         summary=summary,
     )
+
+
+async def predict_ticket_result(
+    *,
+    index: int,
+    total: int,
+    ticket_id: str,
+    semaphore: asyncio.Semaphore,
+    gt_payload: dict[str, Any],
+    legacy_vs_predictions: dict[str, Any],
+    dataset_payload: dict[str, Any] | None,
+    stage_catalog: dict[str, Any],
+    llm: Any,
+    jira_client: JiraApiClient | None,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    ticket_key = normalize_ticket_key(ticket_id)
+    async with semaphore:
+        start_time = time.perf_counter()
+        print_ticket_start(index, total, ticket_key, gt_payload, enabled=bool(config.get("progress")))
+        try:
+            prediction = await predict_for_ticket(
+                ticket_id=ticket_key,
+                legacy_vs_predictions=legacy_vs_predictions,
+                dataset_payload=dataset_payload,
+                vs_mode=str(config["vs_mode"]),
+                context_mode=str(config["context_mode"]),
+                stage_catalog=stage_catalog,
+                llm=llm,
+                jira_client=jira_client,
+            )
+            print_ticket_done(
+                index,
+                total,
+                ticket_key,
+                prediction,
+                elapsed_seconds=time.perf_counter() - start_time,
+                enabled=bool(config.get("progress")),
+            )
+            return {
+                "index": index,
+                "ticket_id": ticket_key,
+                "prediction": prediction,
+                "error": None,
+            }
+        except Exception as exc:
+            error = {"ticket_id": ticket_key, "error": compact_error(exc)}
+            print_ticket_error(
+                index,
+                total,
+                ticket_key,
+                error,
+                elapsed_seconds=time.perf_counter() - start_time,
+                enabled=bool(config.get("progress")),
+            )
+            return {
+                "index": index,
+                "ticket_id": ticket_key,
+                "prediction": None,
+                "error": error,
+            }
+
+
+def ordered_completed_outputs(
+    *,
+    ticket_ids: list[str],
+    results: list[dict[str, Any] | None],
+) -> tuple[list[str], list[dict[str, Any]], list[dict[str, Any]]]:
+    processed_ticket_ids: list[str] = []
+    stage_predictions: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for ticket_id, result in zip(ticket_ids, results, strict=False):
+        if result is None:
+            continue
+        processed_ticket_ids.append(normalize_ticket_key(ticket_id))
+        prediction = result.get("prediction")
+        error = result.get("error")
+        if isinstance(prediction, dict):
+            stage_predictions.append(prediction)
+        if isinstance(error, dict):
+            errors.append(error)
+
+    return processed_ticket_ids, stage_predictions, errors
 
 
 async def predict_for_ticket(
@@ -552,6 +629,7 @@ def print_run_header(
         flush=True,
     )
     print(f"Context mode: {config['context_mode']}", flush=True)
+    print(f"Concurrency: {EVAL_CONCURRENCY}", flush=True)
     print(f"Stage catalog: {config['stage_catalog']}", flush=True)
     print(f"Output directory: {config['output_dir']}", flush=True)
     print(f"Flush outputs per ticket: {config.get('flush_outputs')}", flush=True)

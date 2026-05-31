@@ -10,9 +10,10 @@ from typing import Any, Optional
 from vs_app.integrations.embeddings.client import embed_batch
 from vs_app.modules.tickets.documents import TicketSummaryDocument
 
+from vs_app.ingestion.extraction.text_consolidator import consolidate_ticket_text
+
 from .llm_summary_extractor import classify_ticket_value_streams, summarize_ticket
 from .mapper import format_structured_summary_text
-from .text_consolidator import consolidate_ticket_text
 
 logger = logging.getLogger(__name__)
 

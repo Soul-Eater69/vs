@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from vs_app.ingestion.summary import llm_summary_extractor as extractor
+from vs_app.ingestion.summary import llm_io
 from vs_app.ingestion.summary.llm_summary_extractor import (
     SummaryExtractionError,
     ValueStreamClassificationError,
@@ -25,21 +25,21 @@ def test_empty_consolidated_text_raises() -> None:
 
 
 def test_llm_empty_response_raises(monkeypatch) -> None:
-    monkeypatch.setattr(extractor, "complete_text", lambda *args, **kwargs: "")
+    monkeypatch.setattr(llm_io, "complete_text", lambda *args, **kwargs: "")
 
     with pytest.raises(SummaryExtractionError, match="LLM returned empty response"):
         summarize_ticket("IDMT-1", "real source text", object(), Cfg())
 
 
 def test_invalid_summary_json_raises(monkeypatch) -> None:
-    monkeypatch.setattr(extractor, "complete_text", lambda *args, **kwargs: "not json")
+    monkeypatch.setattr(llm_io, "complete_text", lambda *args, **kwargs: "not json")
 
     with pytest.raises(SummaryExtractionError, match="Missing summary_text"):
         summarize_ticket("IDMT-1", "real source text", object(), Cfg())
 
 
 def test_labeled_ticket_missing_classification_rows_raises(monkeypatch) -> None:
-    monkeypatch.setattr(extractor, "complete_text", lambda *args, **kwargs: '{"value_streams": []}')
+    monkeypatch.setattr(llm_io, "complete_text", lambda *args, **kwargs: '{"value_streams": []}')
 
     with pytest.raises(ValueStreamClassificationError, match="returned no rows"):
         classify_ticket_value_streams(
@@ -55,7 +55,7 @@ def test_labeled_ticket_missing_classification_rows_raises(monkeypatch) -> None:
 
 def test_labeled_ticket_missing_coverage_raises(monkeypatch) -> None:
     monkeypatch.setattr(
-        extractor,
+        llm_io,
         "complete_text",
         lambda *args, **kwargs: (
             '{"value_streams": [{"vs_name": "Other", "inference_type": "direct", "reason": "x"}]}'
@@ -88,7 +88,7 @@ def test_summary_input_char_limit_comes_from_cfg(monkeypatch) -> None:
             '"systems_and_products":[],"key_terms":[]}'
         )
 
-    monkeypatch.setattr(extractor, "complete_text", fake_complete_text)
+    monkeypatch.setattr(llm_io, "complete_text", fake_complete_text)
 
     summarize_ticket("IDMT-1", "x" * 1500, object(), SmallCfg())
 
@@ -109,7 +109,7 @@ def test_content_filter_summary_retries_with_sanitized_prompt(monkeypatch) -> No
             '"systems_and_products":[],"key_terms":[]}'
         )
 
-    monkeypatch.setattr(extractor, "complete_text", fake_complete_text)
+    monkeypatch.setattr(llm_io, "complete_text", fake_complete_text)
 
     doc = summarize_ticket(
         "IDMT-1",

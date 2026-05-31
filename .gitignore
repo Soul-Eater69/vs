@@ -5,7 +5,6 @@ __pycache__/
 *.egg-info/
 build/
 dist/
-uv.lock
 
 .pytest_cache/
 pytest-cache-files-*/

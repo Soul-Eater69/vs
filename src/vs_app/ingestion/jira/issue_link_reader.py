@@ -3,8 +3,8 @@
 Pure helpers that pull the issue-link structures out of a Jira issue. They sit
 *below* link classification: no Value Stream / Theme resolution and no
 categorisation happen here. Classifying links into vs / parent / dependency /
-etc. is the job of ``vs_app.ingestion.jira.value_stream_labels`` (and the
-ground truth cleanups), which consume the raw links returned here.
+etc. is the job of ``vs_app.ingestion.ground_truth.value_stream_ground_truth``
+(the ground truth cleanups), which consume the raw links returned here.
 
 Each accepts either a full issue JSON (``{"fields": {...}}``) or a bare fields
 dict, so call-sites can pass whichever they already hold.

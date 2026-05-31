@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 
 from vs_app.ingestion.index_documents.idmt_document_builder import (
+    RETRIEVAL_TEXT_MAX_CHARS,
     build_document_from_stage_dataset_row,
     build_indexed_idmt_document,
 )
-from vs_app.ingestion.index_documents.models import TicketContext, ValueStreamSupport
+from vs_app.ingestion.index_documents.models import (
+    StageSupport,
+    TicketContext,
+    ValueStreamSupport,
+)
 
 
 def _sample_row() -> dict:
@@ -122,3 +127,72 @@ def test_duplicate_and_messy_values_are_cleaned_and_deduped() -> None:
         "Generate Quote and Present to Customer",
     ]
     assert doc["value_stream_support"] and len(doc["value_stream_support"]) == 1
+
+
+def test_partial_stage_support_is_merged_with_gt_fallback() -> None:
+    ticket_context = TicketContext(ticket_id="IDMT-4", summary="Quoting work")
+    stage_support = [
+        StageSupport(
+            value_stream_name="Configure, Price, and Quote",
+            stage_name="Account Configuration",
+            support_type="direct",
+            source="description",
+            confidence=0.9,
+        )
+    ]
+    gt_by_value_stream = {
+        "Configure, Price, and Quote": [
+            "Account Configuration",
+            "Generate Quote and Present to Customer",
+        ]
+    }
+
+    doc = build_indexed_idmt_document(
+        ticket_context=ticket_context,
+        value_stream_support=[],
+        gt_by_value_stream=gt_by_value_stream,
+        stage_support=stage_support,
+    )
+
+    rows = {row["stage_name"]: row for row in doc["stage_support"]}
+    assert set(rows) == {"Account Configuration", "Generate Quote and Present to Customer"}
+    # Provided classification is preserved.
+    assert rows["Account Configuration"]["support_type"] == "direct"
+    assert rows["Account Configuration"]["source"] == "description"
+    # The uncovered GT stage gets an unknown fallback row.
+    assert rows["Generate Quote and Present to Customer"]["support_type"] == "unknown"
+    assert rows["Generate Quote and Present to Customer"]["source"] == "jira_gt"
+
+
+def test_document_text_preserves_line_breaks() -> None:
+    ticket_context = TicketContext(
+        ticket_id="IDMT-5",
+        summary="Line one\nLine two",
+        description="Para one\n\n\n\nPara two   with   spaces",
+    )
+
+    doc = build_indexed_idmt_document(
+        ticket_context=ticket_context,
+        value_stream_support=[],
+        gt_by_value_stream={},
+    )
+
+    # Summary is a label field: whitespace collapsed.
+    assert doc["summary"] == "Line one Line two"
+    # Description is a document field: line breaks preserved, blank runs squeezed.
+    assert doc["description"] == "Para one\n\nPara two with spaces"
+
+
+def test_fallback_retrieval_text_is_capped() -> None:
+    ticket_context = TicketContext(
+        ticket_id="IDMT-6",
+        summary="x" * 6000,
+    )
+
+    doc = build_indexed_idmt_document(
+        ticket_context=ticket_context,
+        value_stream_support=[],
+        gt_by_value_stream={},
+    )
+
+    assert len(doc["retrieval_text"]) <= RETRIEVAL_TEXT_MAX_CHARS

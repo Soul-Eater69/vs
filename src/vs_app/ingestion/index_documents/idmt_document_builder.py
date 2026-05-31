@@ -11,6 +11,7 @@ prediction input here.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -35,19 +36,19 @@ def build_indexed_idmt_document(
     """Convert an IDMT packet plus Jira GT into one Azure-ready document."""
     ticket_id = normalize_ticket_id(ticket_context.ticket_id)
 
-    summary = clean_text(ticket_context.summary)
-    description = clean_text(ticket_context.description)
-    idea_card_text = clean_text(ticket_context.idea_card_text)
-    attachment_text = clean_text(ticket_context.attachment_text)
-    extracted_text = clean_text(ticket_context.extracted_text)
-    generated_summary = clean_text(ticket_context.generated_summary)
-    retrieval_text = clean_text(ticket_context.retrieval_text) or build_retrieval_text(
+    summary = clean_label_text(ticket_context.summary)
+    generated_summary = clean_label_text(ticket_context.generated_summary)
+    description = clean_document_text(ticket_context.description)
+    idea_card_text = clean_document_text(ticket_context.idea_card_text)
+    attachment_text = clean_document_text(ticket_context.attachment_text)
+    extracted_text = clean_document_text(ticket_context.extracted_text)
+    retrieval_text = clean_document_text(ticket_context.retrieval_text) or build_retrieval_text(
         summary, generated_summary, description, extracted_text
     )
 
     gt_map = clean_gt_by_value_stream(gt_by_value_stream)
     vs_rows = clean_value_stream_support(value_stream_support)
-    stage_rows = clean_stage_support(stage_support) or stage_support_from_gt(gt_map)
+    stage_rows = merge_stage_support_with_gt(clean_stage_support(stage_support), gt_map)
 
     valid_vs_names = build_value_stream_names(vs_rows, gt_map)
     valid_vs_ids = dedupe_text(row["value_stream_id"] for row in vs_rows)
@@ -144,11 +145,25 @@ def build_document_from_stage_dataset_row(
 # --- text helpers -----------------------------------------------------------
 
 
-def clean_text(value: Any) -> str:
-    """Strip and collapse internal whitespace to a single space."""
+def clean_label_text(value: Any) -> str:
+    """Collapse all whitespace to single spaces. For names, IDs, and support fields."""
     if value is None:
         return ""
     return " ".join(str(value).split())
+
+
+def clean_document_text(value: Any) -> str:
+    """Clean prose while preserving line breaks.
+
+    Used for description / idea card / attachment / extracted text where the
+    line structure carries meaning. Collapses intra-line whitespace, trims each
+    line, and squeezes blank-line runs down to a single blank line.
+    """
+    if value is None:
+        return ""
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    lines = [" ".join(line.split()) for line in text.split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 def dedupe_text(values: Iterable[Any]) -> list[str]:
@@ -156,7 +171,7 @@ def dedupe_text(values: Iterable[Any]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for value in values:
-        text = clean_text(value)
+        text = clean_label_text(value)
         if not text or text in seen:
             continue
         seen.add(text)
@@ -165,11 +180,15 @@ def dedupe_text(values: Iterable[Any]) -> list[str]:
 
 
 def normalize_ticket_id(ticket_id: Any) -> str:
-    return clean_text(ticket_id).upper()
+    return clean_label_text(ticket_id).upper()
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+RETRIEVAL_TEXT_MAX_CHARS = 4000
+RETRIEVAL_TEXT_MIN_CHARS = 200
 
 
 def build_retrieval_text(
@@ -178,9 +197,16 @@ def build_retrieval_text(
     description: str,
     extracted_text: str,
 ) -> str:
-    """Compact retrieval text built from the strongest available context."""
-    parts = [summary, generated_summary, description, extracted_text]
-    return "\n\n".join(part for part in parts if part)
+    """Build compact retrieval text, capped at ``RETRIEVAL_TEXT_MAX_CHARS``.
+
+    Prefers the curated context (summary, generated summary, description) and only
+    falls back to raw extracted text when that context is too thin to retrieve on.
+    """
+    parts = [part for part in (summary, generated_summary, description) if part]
+    text = "\n\n".join(parts)
+    if len(text) < RETRIEVAL_TEXT_MIN_CHARS and extracted_text:
+        text = "\n\n".join([*parts, extracted_text])
+    return text[:RETRIEVAL_TEXT_MAX_CHARS].strip()
 
 
 # --- value stream / stage cleaning ------------------------------------------
@@ -192,7 +218,7 @@ def clean_gt_by_value_stream(
     """Clean Value Stream names and dedupe their stages, dropping empties."""
     cleaned: dict[str, list[str]] = {}
     for raw_name, raw_stages in (gt_by_value_stream or {}).items():
-        name = clean_text(raw_name)
+        name = clean_label_text(raw_name)
         if not name:
             continue
         existing = cleaned.setdefault(name, [])
@@ -205,17 +231,17 @@ def clean_gt_by_value_stream(
 def clean_value_stream_support(rows: list[ValueStreamSupport] | None) -> list[dict[str, Any]]:
     cleaned: list[dict[str, Any]] = []
     for row in rows or []:
-        name = clean_text(row.value_stream_name)
+        name = clean_label_text(row.value_stream_name)
         if not name:
             continue
         cleaned.append(
             {
                 "value_stream_name": name,
-                "value_stream_id": clean_text(row.value_stream_id),
-                "support_type": clean_text(row.support_type) or "unknown",
-                "reason": clean_text(row.reason),
-                "evidence": clean_text(row.evidence),
-                "source": clean_text(row.source),
+                "value_stream_id": clean_label_text(row.value_stream_id),
+                "support_type": clean_label_text(row.support_type) or "unknown",
+                "reason": clean_label_text(row.reason),
+                "evidence": clean_label_text(row.evidence),
+                "source": clean_label_text(row.source),
                 "confidence": row.confidence,
             }
         )
@@ -225,20 +251,20 @@ def clean_value_stream_support(rows: list[ValueStreamSupport] | None) -> list[di
 def clean_stage_support(rows: list[StageSupport] | None) -> list[dict[str, Any]]:
     cleaned: list[dict[str, Any]] = []
     for row in rows or []:
-        value_stream_name = clean_text(row.value_stream_name)
-        stage_name = clean_text(row.stage_name)
+        value_stream_name = clean_label_text(row.value_stream_name)
+        stage_name = clean_label_text(row.stage_name)
         if not value_stream_name or not stage_name:
             continue
         cleaned.append(
             {
                 "value_stream_name": value_stream_name,
-                "value_stream_id": clean_text(row.value_stream_id),
+                "value_stream_id": clean_label_text(row.value_stream_id),
                 "stage_name": stage_name,
-                "stage_id": clean_text(row.stage_id),
-                "support_type": clean_text(row.support_type) or "unknown",
-                "reason": clean_text(row.reason),
-                "evidence": clean_text(row.evidence),
-                "source": clean_text(row.source),
+                "stage_id": clean_label_text(row.stage_id),
+                "support_type": clean_label_text(row.support_type) or "unknown",
+                "reason": clean_label_text(row.reason),
+                "evidence": clean_label_text(row.evidence),
+                "source": clean_label_text(row.source),
                 "confidence": row.confidence,
             }
         )
@@ -258,25 +284,39 @@ def dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def stage_support_from_gt(gt_map: dict[str, list[str]]) -> list[dict[str, Any]]:
-    """Fallback stage support rows: BA-created stages with unclassified support."""
-    rows: list[dict[str, Any]] = []
+def merge_stage_support_with_gt(
+    stage_rows: list[dict[str, Any]],
+    gt_map: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    """Keep classified stage support and add unknown fallback rows for GT stages.
+
+    Every BA-created stage from Jira GT must appear. Provided rows are kept as-is;
+    any GT (value stream, stage) pair not already covered gets an ``unknown`` /
+    ``jira_gt`` row, since we know the stage exists but not yet whether the
+    original context directly or implicitly supports it.
+    """
+    covered = {(row["value_stream_name"], row["stage_name"]) for row in stage_rows}
+    merged = list(stage_rows)
     for value_stream_name in sorted(gt_map):
         for stage_name in sorted(gt_map[value_stream_name]):
-            rows.append(
-                {
-                    "value_stream_name": value_stream_name,
-                    "value_stream_id": "",
-                    "stage_name": stage_name,
-                    "stage_id": "",
-                    "support_type": "unknown",
-                    "reason": "",
-                    "evidence": "",
-                    "source": "jira_gt",
-                    "confidence": None,
-                }
-            )
-    return rows
+            if (value_stream_name, stage_name) not in covered:
+                merged.append(unknown_stage_row(value_stream_name, stage_name))
+    return merged
+
+
+def unknown_stage_row(value_stream_name: str, stage_name: str) -> dict[str, Any]:
+    """A GT stage whose support has not been classified yet."""
+    return {
+        "value_stream_name": value_stream_name,
+        "value_stream_id": "",
+        "stage_name": stage_name,
+        "stage_id": "",
+        "support_type": "unknown",
+        "reason": "",
+        "evidence": "",
+        "source": "jira_gt",
+        "confidence": None,
+    }
 
 
 # --- derived list / text fields ---------------------------------------------
@@ -398,7 +438,7 @@ def resolve_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     if metadata:
         for key in ("source_system", "index_version", "ingested_at"):
             if metadata.get(key):
-                resolved[key] = clean_text(metadata[key])
+                resolved[key] = clean_label_text(metadata[key])
         if "warnings" in metadata:
             resolved["warnings"] = dedupe_text(metadata["warnings"] or [])
     return resolved
@@ -407,12 +447,13 @@ def resolve_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
 __all__ = [
     "build_indexed_idmt_document",
     "build_document_from_stage_dataset_row",
-    "clean_text",
+    "clean_label_text",
+    "clean_document_text",
     "dedupe_text",
     "normalize_ticket_id",
     "utc_now",
     "clean_gt_by_value_stream",
-    "stage_support_from_gt",
+    "merge_stage_support_with_gt",
     "build_stage_pairs",
     "build_stage_history_text",
     "build_gt_by_value_stream_json",

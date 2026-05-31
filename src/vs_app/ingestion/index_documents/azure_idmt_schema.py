@@ -50,7 +50,15 @@ def build_idmt_index_schema(
         _complex_collection("value_stream_support"),
         _text("value_stream_support_text"),
         # Stage
-        _text("gt_by_value_stream_json"),
+        # Reconstruction/debug JSON: retrievable for rebuilding/inspection,
+        # but not full-text searchable. Search uses stage_names, stage_pairs,
+        # stage_history_text, and stage_support_text instead.
+        {
+            "name": "gt_by_value_stream_json",
+            "type": "Edm.String",
+            "searchable": False,
+            "retrievable": True,
+        },
         _string_collection("stage_names", searchable=True),
         _string_collection("stage_ids"),
         _string_collection("stage_pairs"),

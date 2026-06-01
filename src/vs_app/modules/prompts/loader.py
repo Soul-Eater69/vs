@@ -180,6 +180,25 @@ def build_value_stream_classification_prompt(
     )
 
 
+def build_stage_support_classification_prompt(
+    *,
+    ticket_id: str,
+    text: str,
+    stages: str,
+) -> str:
+    payload = _load_required_prompt_yaml(
+        "stage_support_classification",
+        ["schema", "template"],
+    )
+    return render_prompt(
+        str(payload["template"]),
+        ticket_id=ticket_id,
+        text=text,
+        stages=stages,
+        stage_support_schema=str(payload["schema"]).strip(),
+    )
+
+
 def build_value_stage_prediction_system_prompt() -> str:
     payload = _load_required_prompt_yaml("value_stage_prediction", ["system"])
     return str(payload["system"]).strip()
@@ -269,6 +288,7 @@ __all__ = [
     "build_review_pool_selection_prompt",
     "build_review_pool_selection_system_prompt",
     "build_selection_system_prompt",
+    "build_stage_support_classification_prompt",
     "build_value_stage_prediction_prompt",
     "build_value_stage_prediction_system_prompt",
     "build_value_stream_classification_prompt",

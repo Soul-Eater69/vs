@@ -3,6 +3,7 @@
 One module per output domain; import from this package directly.
 """
 
+from .stage import StageSupportItem, StageSupportResult
 from .summary import SummaryOutput
 from .value_stream import (
     InferenceType,
@@ -17,6 +18,9 @@ from .value_stream import (
 )
 
 __all__ = [
+    # stage
+    "StageSupportItem",
+    "StageSupportResult",
     # summary
     "SummaryOutput",
     # value_stream

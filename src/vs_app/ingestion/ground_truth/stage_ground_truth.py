@@ -200,6 +200,52 @@ async def build_ticket_stage_ground_truth(
     }
 
 
+def _unresolved_stage_mention(
+    *,
+    resolution: dict[str, Any],
+    source: str,
+    source_type: str,
+    epic_key: str,
+    theme_key: str,
+    value_stream_name: str,
+    allowed_stages: list[Any],
+    extra: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a diagnostic record for a stage mention that failed canonicalization.
+
+    Diagnostics only: this never affects which stages are verified or which
+    enter gt_by_value_stream. It captures enough context to analyse stage GT
+    false negatives later -- the failed candidates, the reason, the allowed
+    catalog stages, and the Epic's discovery source.
+    """
+    warnings = list(resolution.get("warnings") or [])
+    allowed_stage_names = [
+        stage.get("name") if isinstance(stage, dict) else _clean_text(stage)
+        for stage in allowed_stages
+    ]
+    record: dict[str, Any] = {
+        "raw_stage": resolution.get("cleaned_stage_name") or "",
+        "source": source,
+        "source_type": source_type,
+        "epic_key": epic_key,
+        "epic_summary": resolution.get("raw_summary") or "",
+        "source_text": resolution.get("raw_summary") or "",
+        "theme_key": theme_key,
+        "value_stream_name": value_stream_name,
+        "included": False,
+        "candidates": list(resolution.get("candidates") or []),
+        "match_method": resolution.get("match_method"),
+        "confidence": resolution.get("confidence"),
+        "reason": "; ".join(warnings)
+        or "stage candidates did not match the approved stage catalog",
+        "allowed_stage_count": len(allowed_stages),
+        "allowed_stage_names": allowed_stage_names,
+        "warnings": warnings,
+    }
+    record.update(extra)
+    return record
+
+
 def build_theme_stage_ground_truth(
     *,
     theme_issue: dict[str, Any],
@@ -253,16 +299,21 @@ def build_theme_stage_ground_truth(
         linked_epic_stage_resolution_debug.append(resolution)
         if not resolution.get("included"):
             unresolved.append(
-                {
-                    "raw_stage": resolution.get("cleaned_stage_name") or "",
-                    "source": "theme_issue_link_epic_summary",
-                    "source_text": resolution.get("raw_summary") or "",
-                    "linked_issue_key": resolution.get("linked_issue_key") or "",
-                    "theme_key": theme_key,
-                    "included": False,
-                    "candidates": list(resolution.get("candidates") or []),
-                    "warnings": list(resolution.get("warnings") or []),
-                }
+                _unresolved_stage_mention(
+                    resolution=resolution,
+                    source="theme_issue_link_epic_summary",
+                    source_type="linked_epic",
+                    epic_key=resolution.get("linked_issue_key") or "",
+                    theme_key=theme_key,
+                    value_stream_name=value_stream_name,
+                    allowed_stages=allowed_stage_options,
+                    extra={
+                        "linked_issue_key": resolution.get("linked_issue_key") or "",
+                        "link_source": linked_epic.get("link_source"),
+                        "link_type": linked_epic.get("link_type"),
+                        "link_direction": linked_epic.get("link_direction"),
+                    },
+                )
             )
             continue
 
@@ -309,17 +360,22 @@ def build_theme_stage_ground_truth(
         )
         child_issue_stage_resolution_debug.append(resolution)
         if not resolution.get("included"):
+            child_key = resolution.get("child_key") or ""
+            child_sources = (child_lookup_debug or {}).get("child_issue_sources") or {}
             unresolved.append(
-                {
-                    "raw_stage": resolution.get("cleaned_stage_name") or "",
-                    "source": "parent_link_child_epic_summary",
-                    "source_text": resolution.get("raw_summary") or "",
-                    "child_key": resolution.get("child_key") or "",
-                    "theme_key": theme_key,
-                    "included": False,
-                    "candidates": list(resolution.get("candidates") or []),
-                    "warnings": list(resolution.get("warnings") or []),
-                }
+                _unresolved_stage_mention(
+                    resolution=resolution,
+                    source="parent_link_child_epic_summary",
+                    source_type="child_epic",
+                    epic_key=child_key,
+                    theme_key=theme_key,
+                    value_stream_name=value_stream_name,
+                    allowed_stages=allowed_stage_options,
+                    extra={
+                        "child_key": child_key,
+                        "child_lookup_source": list(child_sources.get(child_key) or []),
+                    },
+                )
             )
             continue
 

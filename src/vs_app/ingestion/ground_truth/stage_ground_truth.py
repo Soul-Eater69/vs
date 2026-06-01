@@ -419,44 +419,124 @@ def extract_epic_links_from_theme_issue(theme_issue: dict[str, Any]) -> list[dic
     return out
 
 
+def _issue_keys(issues: list[dict[str, Any]]) -> set[str]:
+    keys: set[str] = set()
+    for issue in issues:
+        key = _clean_text(issue.get("key"))
+        if key:
+            keys.add(key)
+    return keys
+
+
+async def _run_child_epic_lookup(
+    jira_client: Any,
+    jql: str,
+    *,
+    attempt: dict[str, Any],
+    warnings: list[str],
+    failure_warning: str,
+) -> list[dict[str, Any]]:
+    """Run one child-Epic JQL and record its outcome on ``attempt``.
+
+    Returns the raw issues found (empty on failure or no results); never raises,
+    so one lookup path failing does not stop the other.
+    """
+    try:
+        result = await _search_issues(jira_client, jql, fields=CHILD_EPIC_FIELDS)
+    except Exception as exc:
+        attempt["error"] = _compact_error(exc)
+        warnings.append(failure_warning)
+        return []
+
+    issues = [issue for issue in (result.get("issues") or []) if isinstance(issue, dict)]
+    keys: list[str] = []
+    seen: set[str] = set()
+    for issue in issues:
+        key = _clean_text(issue.get("key"))
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
+    attempt["keys"] = keys
+    attempt["count"] = len(keys)
+    return issues
+
+
 async def fetch_direct_child_epics(
     *,
     jira_client: Any,
     theme_key: str,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     normalized_theme_key = _clean_text(theme_key).upper()
-    jql = f'"Parent Link" = {normalized_theme_key} AND issuetype = Epic'
+    parent_link_jql = f'"Parent Link" = {normalized_theme_key} AND issuetype = Epic'
+    parent_jql = f"parent = {normalized_theme_key} AND issuetype = Epic"
     lookup: dict[str, Any] = {
         "theme_key": normalized_theme_key,
-        "lookup_strategy": "parent_link_only",
+        "lookup_strategy": "parent_link_and_parent",
         "jql_attempts": [
             {
                 "name": "parent_link",
-                "jql": jql,
+                "jql": parent_link_jql,
                 "count": 0,
                 "keys": [],
                 "error": None,
-            }
+            },
+            {
+                "name": "parent",
+                "jql": parent_jql,
+                "count": 0,
+                "keys": [],
+                "error": None,
+            },
         ],
         "child_issue_keys": [],
+        "child_issue_sources": {},
         "warnings": [],
     }
 
-    try:
-        result = await _search_issues(jira_client, jql, fields=CHILD_EPIC_FIELDS)
-    except Exception as exc:
-        lookup["jql_attempts"][0]["error"] = _compact_error(exc)
-        lookup["warnings"].append("direct Parent Link child Epic lookup failed")
-        return [], lookup
+    # Two independent lookups: the original Parent Link custom field plus the
+    # standard Jira ``parent`` relation. Each is guarded so one failing/empty
+    # does not affect the other; Parent Link alone reproduces old behavior.
+    parent_link_issues = await _run_child_epic_lookup(
+        jira_client,
+        parent_link_jql,
+        attempt=lookup["jql_attempts"][0],
+        warnings=lookup["warnings"],
+        failure_warning="direct Parent Link child Epic lookup failed",
+    )
+    parent_issues = await _run_child_epic_lookup(
+        jira_client,
+        parent_jql,
+        attempt=lookup["jql_attempts"][1],
+        warnings=lookup["warnings"],
+        failure_warning="Jira parent-relation child Epic lookup failed",
+    )
 
-    child_epics = _dedupe_child_epics(result.get("issues") or [], lookup["warnings"])
+    # Parent Link results take precedence; parent-relation adds any extras.
+    # _dedupe_child_epics dedupes by key (first seen wins) and drops non-Epics.
+    child_epics = _dedupe_child_epics(parent_link_issues + parent_issues, lookup["warnings"])
     child_epics = sorted(child_epics, key=lambda item: _clean_text(item.get("key")))
-    child_keys = [_clean_text(child.get("key")) for child in child_epics if _clean_text(child.get("key"))]
-    lookup["jql_attempts"][0]["keys"] = child_keys
-    lookup["jql_attempts"][0]["count"] = len(child_keys)
+
+    parent_link_keys = _issue_keys(parent_link_issues)
+    parent_keys = _issue_keys(parent_issues)
+
+    child_keys: list[str] = []
+    child_sources: dict[str, list[str]] = {}
+    for child in child_epics:
+        key = _clean_text(child.get("key"))
+        if not key:
+            continue
+        child_keys.append(key)
+        found_in: list[str] = []
+        if key in parent_link_keys:
+            found_in.append("parent_link")
+        if key in parent_keys:
+            found_in.append("parent")
+        child_sources[key] = found_in
+
     lookup["child_issue_keys"] = child_keys
+    lookup["child_issue_sources"] = child_sources
     if not child_keys:
-        lookup["warnings"].append("no direct Parent Link child Epics found")
+        lookup["warnings"].append("no direct child Epics found via Parent Link or parent relation")
     return child_epics, lookup
 
 

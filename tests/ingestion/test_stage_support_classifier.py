@@ -123,6 +123,35 @@ def test_empty_llm_response_returns_empty(monkeypatch) -> None:
     assert _run(monkeypatch, "") == []
 
 
+def test_llm_exception_returns_empty(monkeypatch) -> None:
+    def _boom(*_a, **_k):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(llm_io, "complete_text", _boom)
+    assert classify_stage_support(
+        ticket_id="IDMT-1",
+        consolidated_text=CTX,
+        gt_by_value_stream=GT,
+        llm_client=object(),
+        cfg=Cfg(),
+    ) == []
+
+
+def test_confidence_is_clamped_to_unit_interval(monkeypatch) -> None:
+    response = json.dumps(
+        {
+            "stages": [
+                _item(VS, "Manage UM Operations", "direct", confidence=4.2),
+                _item(VS, "Evaluate UM Performance", "implied", confidence=-1.0),
+            ]
+        }
+    )
+    rows = _run(monkeypatch, response)
+    by_stage = {row.stage_name: row for row in rows}
+    assert by_stage["Manage UM Operations"].confidence == 1.0
+    assert by_stage["Evaluate UM Performance"].confidence == 0.0
+
+
 def test_document_builder_backfills_unknown_for_uncovered_stage(monkeypatch) -> None:
     rows = _run(monkeypatch, json.dumps({"stages": [_item(VS, "Manage UM Operations", "direct")]}))
 

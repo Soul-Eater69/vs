@@ -79,9 +79,14 @@ def classify_stage_support(
         )
         try:
             output = _classify_once(ticket_id, sanitized, allowed, llm_client, cfg)
-        except StageSupportClassificationError as retry_exc:
+        except Exception as retry_exc:  # noqa: BLE001 - non-blocking ingestion support
             logger.warning("Stage support retry failed for %s: %s", ticket_id, retry_exc)
             return []
+    except Exception as exc:  # noqa: BLE001 - non-blocking ingestion support
+        # Any unexpected failure (parser changes, gateway errors) must not block
+        # ingestion; uncovered GT stages fall through to the builder's unknown row.
+        logger.warning("Stage support classification failed for %s: %s", ticket_id, exc)
+        return []
 
     return _build_rows(output, allowed)
 

@@ -133,16 +133,107 @@ def theme_generation_documents_from_gt_payload(
     payload: Any,
     *,
     limit: int | None = None,
+    support_by_ticket: dict[str, dict[str, Any]] | None = None,
+    summary_by_ticket: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Map a full offline GT payload (build_stage_ground_truth output) into docs."""
+    """Map a full offline GT payload (build_stage_ground_truth output) into docs.
+
+    Optional ``support_by_ticket`` / ``summary_by_ticket`` (keyed by ticket id,
+    case-insensitive) supply precomputed enrichment. A ticket absent from either
+    map keeps the blank-support / empty-summary fallback.
+    """
+    support_index = _ci_index(support_by_ticket)
+    summary_index = _ci_index(summary_by_ticket)
+
     docs: list[dict[str, Any]] = []
     for index, (ticket_id, record) in enumerate(_iter_gt_records(payload)):
         if limit is not None and index >= limit:
             break
         if not ticket_id or not isinstance(record, dict):
             continue
-        docs.extend(theme_generation_documents_from_gt_record(ticket_id, record))
+        support = support_index.get(_norm(ticket_id)) or {}
+        summary = summary_index.get(_norm(ticket_id)) or {}
+        docs.extend(
+            theme_generation_documents_from_gt_record(
+                ticket_id,
+                record,
+                value_stream_support=support.get("value_stream_support"),
+                stage_support=support.get("stage_support"),
+                key_terms=summary.get("key_terms"),
+                stakeholders=summary.get("stakeholders"),
+                systems_and_products=summary.get("systems_and_products"),
+            )
+        )
     return docs
+
+
+def index_support_by_ticket(payload: Any) -> dict[str, dict[str, Any]]:
+    """Index a support-input payload by ticket id, leniently.
+
+    Accepts: a dict keyed by ticket id (Shape A), or a list of rows each with a
+    ``ticket_id`` (Shape B / Feature 8B dataset rows, Shape C). Each value keeps
+    ``value_stream_support`` and ``stage_support`` (missing -> absent). Entries
+    without a usable ticket id or that are not dicts are skipped.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for ticket_id, row in _iter_keyed_rows(payload):
+        if not ticket_id or not isinstance(row, dict):
+            continue
+        out[_norm(ticket_id)] = {
+            "value_stream_support": row.get("value_stream_support") or [],
+            "stage_support": row.get("stage_support") or [],
+        }
+    return out
+
+
+def index_summary_by_ticket(payload: Any) -> dict[str, dict[str, Any]]:
+    """Index a summary-input payload by ticket id, leniently (see index_support)."""
+    out: dict[str, dict[str, Any]] = {}
+    for ticket_id, row in _iter_keyed_rows(payload):
+        if not ticket_id or not isinstance(row, dict):
+            continue
+        out[_norm(ticket_id)] = {
+            "key_terms": _str_list(row.get("key_terms")),
+            "stakeholders": _str_list(row.get("stakeholders")),
+            "systems_and_products": _str_list(row.get("systems_and_products")),
+        }
+    return out
+
+
+def _iter_keyed_rows(payload: Any) -> Iterator[tuple[str, Any]]:
+    """Yield (ticket_id, row) from a dict-keyed or list-of-rows enrichment file."""
+    if isinstance(payload, dict):
+        # Shape A: {ticket_id: {...}}. Also tolerate a wrapping list key.
+        for list_key in ("tickets", "results", "rows"):
+            inner = payload.get(list_key)
+            if isinstance(inner, list):
+                yield from _iter_keyed_rows(inner)
+                return
+            if isinstance(inner, dict):
+                for key, row in inner.items():
+                    yield (_row_ticket_id(row, key), row)
+                return
+        for key, row in payload.items():
+            yield (_row_ticket_id(row, key), row)
+    elif isinstance(payload, list):
+        for row in payload:
+            yield (_row_ticket_id(row, ""), row)
+
+
+def _row_ticket_id(row: Any, fallback_key: str) -> str:
+    if isinstance(row, dict):
+        return _text(row.get("ticket_id") or row.get("idmt_key") or fallback_key)
+    return _text(fallback_key)
+
+
+def _ci_index(mapping: dict[str, dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    return {_norm(key): value for key, value in (mapping or {}).items()}
+
+
+def _str_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [_text(item) for item in value if _text(item)]
+    return []
 
 
 def _iter_gt_records(payload: Any) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -229,4 +320,6 @@ __all__ = [
     "theme_generation_documents_from_ground_truth",
     "theme_generation_documents_from_gt_record",
     "theme_generation_documents_from_gt_payload",
+    "index_support_by_ticket",
+    "index_summary_by_ticket",
 ]

@@ -419,6 +419,15 @@ def extract_epic_links_from_theme_issue(theme_issue: dict[str, Any]) -> list[dic
     return out
 
 
+def _issue_keys(issues: list[dict[str, Any]]) -> set[str]:
+    keys: set[str] = set()
+    for issue in issues:
+        key = _clean_text(issue.get("key"))
+        if key:
+            keys.add(key)
+    return keys
+
+
 async def _run_child_epic_lookup(
     jira_client: Any,
     jql: str,
@@ -464,8 +473,20 @@ async def fetch_direct_child_epics(
         "theme_key": normalized_theme_key,
         "lookup_strategy": "parent_link_and_parent",
         "jql_attempts": [
-            {"name": "parent_link", "jql": parent_link_jql, "count": 0, "keys": [], "error": None},
-            {"name": "parent", "jql": parent_jql, "count": 0, "keys": [], "error": None},
+            {
+                "name": "parent_link",
+                "jql": parent_link_jql,
+                "count": 0,
+                "keys": [],
+                "error": None,
+            },
+            {
+                "name": "parent",
+                "jql": parent_jql,
+                "count": 0,
+                "keys": [],
+                "error": None,
+            },
         ],
         "child_issue_keys": [],
         "child_issue_sources": {},
@@ -495,12 +516,8 @@ async def fetch_direct_child_epics(
     child_epics = _dedupe_child_epics(parent_link_issues + parent_issues, lookup["warnings"])
     child_epics = sorted(child_epics, key=lambda item: _clean_text(item.get("key")))
 
-    parent_link_keys = {
-        _clean_text(issue.get("key")) for issue in parent_link_issues if _clean_text(issue.get("key"))
-    }
-    parent_keys = {
-        _clean_text(issue.get("key")) for issue in parent_issues if _clean_text(issue.get("key"))
-    }
+    parent_link_keys = _issue_keys(parent_link_issues)
+    parent_keys = _issue_keys(parent_issues)
 
     child_keys: list[str] = []
     child_sources: dict[str, list[str]] = {}

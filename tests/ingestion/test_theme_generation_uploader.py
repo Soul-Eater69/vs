@@ -120,3 +120,50 @@ def test_embed_idmt_skips_already_vectored_idmt() -> None:
 def test_summarize_counts_vectors() -> None:
     summary = summarize_documents([{**IDMT, "content_vector": [0.1]}, THEME])
     assert summary == {"total": 2, "idmt": 1, "theme": 1, "with_vectors": 1}
+
+
+# --- CLI dry-run safety: index create/recreate only run in real (--upload) mode ---
+
+import scripts.upload_theme_generation_index as cli  # noqa: E402
+
+
+def _jsonl(tmp_path) -> str:
+    path = tmp_path / "docs.jsonl"
+    write_jsonl(path, [IDMT, THEME])
+    return str(path)
+
+
+def _spy_cli(monkeypatch):
+    create_calls: list[dict] = []
+    upload_calls: list[dict] = []
+    monkeypatch.setattr(
+        cli,
+        "create_theme_generation_index",
+        lambda **kwargs: create_calls.append(kwargs) or {"action": "created"},
+    )
+    monkeypatch.setattr(
+        cli,
+        "upload_theme_generation_documents",
+        lambda **kwargs: upload_calls.append(kwargs)
+        or {"uploaded": not kwargs.get("dry_run", True)},
+    )
+    return create_calls, upload_calls
+
+
+def test_cli_dry_run_does_not_create_or_recreate_index(tmp_path, monkeypatch) -> None:
+    create_calls, upload_calls = _spy_cli(monkeypatch)
+    rc = cli.main(["--jsonl", _jsonl(tmp_path), "--create-index", "--recreate-index"])
+    assert rc == 0
+    # No index op runs in dry-run, even with --create-index / --recreate-index.
+    assert create_calls == []
+    # Upload runs in dry-run mode (no Azure calls inside it).
+    assert upload_calls and upload_calls[0]["dry_run"] is True
+
+
+def test_cli_upload_with_create_calls_index_manager(tmp_path, monkeypatch) -> None:
+    create_calls, upload_calls = _spy_cli(monkeypatch)
+    rc = cli.main(["--jsonl", _jsonl(tmp_path), "--upload", "--create-index"])
+    assert rc == 0
+    assert len(create_calls) == 1
+    assert create_calls[0]["recreate"] is False
+    assert upload_calls and upload_calls[0]["dry_run"] is False

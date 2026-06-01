@@ -36,12 +36,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         default=True,
-        help="Report only; make no Azure calls (default).",
+        help="DEFAULT. Report only and make no Azure or embedding calls; "
+        "index create/recreate is skipped even if requested.",
     )
     parser.add_argument(
         "--upload",
         action="store_true",
-        help="Perform real Azure operations (disables dry-run).",
+        help="Perform real Azure operations (index ops + document upload); "
+        "disables the default dry-run.",
     )
     parser.add_argument("--create-index", action="store_true", help="Create the index (with --upload).")
     parser.add_argument(

@@ -200,6 +200,16 @@ async def build_ticket_stage_ground_truth(
     }
 
 
+def _allowed_stage_names(allowed_stages: list[Any]) -> list[str]:
+    names: list[str] = []
+    for stage in allowed_stages:
+        name = stage.get("name") if isinstance(stage, dict) else stage
+        clean_name = _clean_text(name)
+        if clean_name:
+            names.append(clean_name)
+    return names
+
+
 def _unresolved_stage_mention(
     *,
     resolution: dict[str, Any],
@@ -219,10 +229,7 @@ def _unresolved_stage_mention(
     catalog stages, and the Epic's discovery source.
     """
     warnings = list(resolution.get("warnings") or [])
-    allowed_stage_names = [
-        stage.get("name") if isinstance(stage, dict) else _clean_text(stage)
-        for stage in allowed_stages
-    ]
+    reason = "; ".join(warnings) or "stage candidates did not match the approved stage catalog"
     record: dict[str, Any] = {
         "raw_stage": resolution.get("cleaned_stage_name") or "",
         "source": source,
@@ -236,10 +243,9 @@ def _unresolved_stage_mention(
         "candidates": list(resolution.get("candidates") or []),
         "match_method": resolution.get("match_method"),
         "confidence": resolution.get("confidence"),
-        "reason": "; ".join(warnings)
-        or "stage candidates did not match the approved stage catalog",
+        "reason": reason,
         "allowed_stage_count": len(allowed_stages),
-        "allowed_stage_names": allowed_stage_names,
+        "allowed_stage_names": _allowed_stage_names(allowed_stages),
         "warnings": warnings,
     }
     record.update(extra)

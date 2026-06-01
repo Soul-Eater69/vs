@@ -354,6 +354,188 @@ def test_extract_epic_links_includes_non_implement_epic_via_inward_issue() -> No
     assert rows[0]["link_source"] == "non_implement_epic"
 
 
+_UMP_VS = "Manage Utilization Management Program"
+_UMP_THEME_SUMMARY = f"CP 2026 Women's and Family Health : {_UMP_VS}"
+_UMP_RESOLVED_VS = {"name": _UMP_VS, "id": "VSR00168130", "source": "test"}
+
+
+def test_unresolved_linked_epic_records_diagnostic_fields() -> None:
+    theme = {
+        "key": "GROUP-22223",
+        "fields": {
+            "summary": _UMP_THEME_SUMMARY,
+            BUSINESS_NEEDS_FIELD: "",
+            "issuelinks": [
+                {
+                    "type": {"name": "implements", "outward": "is implemented by"},
+                    "outwardIssue": {
+                        "key": "GROUP-55555",
+                        "fields": {
+                            "summary": f"{_UMP_THEME_SUMMARY} - Quantum Widget Provisioning",
+                            "issuetype": {"name": "Epic"},
+                            "status": {"name": "In Progress"},
+                        },
+                    },
+                }
+            ],
+        },
+    }
+
+    result = build_theme_stage_ground_truth(
+        theme_issue=theme,
+        catalog=_operations_catalog(),
+        child_epics=[],
+        child_lookup_debug={},
+        resolved_value_stream=_UMP_RESOLVED_VS,
+    )
+
+    assert result["verified_stages"] == []
+    unresolved = result["unresolved_stage_mentions"]
+    assert len(unresolved) == 1
+    entry = unresolved[0]
+    assert entry["source_type"] == "linked_epic"
+    assert entry["epic_key"] == "GROUP-55555"
+    assert "Quantum Widget Provisioning" in entry["epic_summary"]
+    assert entry["value_stream_name"] == _UMP_VS
+    assert entry["candidates"]
+    assert entry["reason"]
+    assert entry["allowed_stage_count"] == 4
+    assert "Manage UM Operations" in entry["allowed_stage_names"]
+    assert entry["link_source"] == "implement"
+    assert entry["link_type"] == "implements | is implemented by"
+    assert entry["link_direction"] == "outwardIssue"
+
+
+def test_unresolved_child_epic_records_diagnostic_fields() -> None:
+    theme = {
+        "key": "GROUP-22223",
+        "fields": {"summary": _UMP_THEME_SUMMARY, BUSINESS_NEEDS_FIELD: "", "issuelinks": []},
+    }
+    child = {
+        "key": "GROUP-66666",
+        "fields": {
+            "summary": f"{_UMP_THEME_SUMMARY} - Quantum Widget Provisioning",
+            "issuetype": {"name": "Epic"},
+            "status": {"name": "In Progress"},
+        },
+    }
+
+    result = build_theme_stage_ground_truth(
+        theme_issue=theme,
+        catalog=_operations_catalog(),
+        child_epics=[child],
+        child_lookup_debug={"child_issue_sources": {"GROUP-66666": ["parent_link"]}},
+        resolved_value_stream=_UMP_RESOLVED_VS,
+    )
+
+    assert result["verified_stages"] == []
+    unresolved = result["unresolved_stage_mentions"]
+    assert len(unresolved) == 1
+    entry = unresolved[0]
+    assert entry["source_type"] == "child_epic"
+    assert entry["epic_key"] == "GROUP-66666"
+    assert entry["value_stream_name"] == _UMP_VS
+    assert entry["candidates"]
+    assert entry["reason"]
+    assert entry["allowed_stage_count"] == 4
+    assert entry["child_lookup_source"] == ["parent_link"]
+
+
+@pytest.mark.anyio
+async def test_canonicalization_failure_keeps_gt_by_value_stream_empty() -> None:
+    idmt = {
+        "key": "IDMT-19761",
+        "fields": {
+            "summary": "CP 2026 Women's and Family Health",
+            "description": "IDMT-only description text.",
+            "issuetype": {"name": "Engagement Request"},
+            "issuelinks": [
+                {
+                    "type": {"name": "implements"},
+                    "outwardIssue": {
+                        "key": "GROUP-22223",
+                        "fields": {"summary": _UMP_THEME_SUMMARY, "issuetype": {"name": "Theme"}},
+                    },
+                }
+            ],
+        },
+    }
+    theme = {
+        "key": "GROUP-22223",
+        "fields": {
+            "summary": _UMP_THEME_SUMMARY,
+            "issuetype": {"name": "Theme"},
+            BUSINESS_NEEDS_FIELD: "",
+            "subtasks": [],
+        },
+    }
+    bad_child = {
+        "key": "GROUP-77777",
+        "fields": {
+            "summary": f"{_UMP_THEME_SUMMARY} - Quantum Widget Provisioning",
+            "issuetype": {"name": "Epic"},
+            "status": {"name": "In Progress"},
+            "customfield_11401": "GROUP-22223",
+        },
+    }
+    jira = _SearchFakeJira(
+        {"IDMT-19761": idmt, "GROUP-22223": theme},
+        search_results={'"Parent Link" = GROUP-22223 AND issuetype = Epic': [bad_child]},
+    )
+
+    result = await build_ticket_stage_ground_truth(
+        ticket_key="IDMT-19761",
+        jira_client=jira,
+        catalog=_operations_catalog(),
+    )
+
+    assert result["gt_by_value_stream"] == {}
+    theme_gt = result["linked_themes"][0]
+    assert theme_gt["verified_stages"] == []
+    assert any(
+        entry["epic_key"] == "GROUP-77777" and entry["source_type"] == "child_epic"
+        for entry in theme_gt["unresolved_stage_mentions"]
+    )
+
+
+def test_verified_stage_unaffected_by_unresolved_sibling() -> None:
+    def _implements_link(key: str, stage_suffix: str) -> dict:
+        return {
+            "type": {"name": "implements", "outward": "is implemented by"},
+            "outwardIssue": {
+                "key": key,
+                "fields": {
+                    "summary": f"{_UMP_THEME_SUMMARY} - {stage_suffix}",
+                    "issuetype": {"name": "Epic"},
+                    "status": {"name": "In Progress"},
+                },
+            },
+        }
+
+    theme = {
+        "key": "GROUP-22223",
+        "fields": {
+            "summary": _UMP_THEME_SUMMARY,
+            BUSINESS_NEEDS_FIELD: "",
+            "issuelinks": [
+                _implements_link("GROUP-1001", "Manage UM Operations (PA)"),
+                _implements_link("GROUP-1002", "Quantum Widget Provisioning"),
+            ],
+        },
+    }
+
+    result = build_theme_stage_ground_truth(
+        theme_issue=theme,
+        catalog=_operations_catalog(),
+        child_epics=[],
+        child_lookup_debug={},
+        resolved_value_stream=_UMP_RESOLVED_VS,
+    )
+
+    assert [stage["canonical"] for stage in result["verified_stages"]] == ["Manage UM Operations"]
+    assert [entry["epic_key"] for entry in result["unresolved_stage_mentions"]] == ["GROUP-1002"]
+
+
 def test_resolve_linked_epic_stage_reuses_child_epic_summary_logic() -> None:
     resolution = resolve_linked_epic_stage(
         linked_issue={

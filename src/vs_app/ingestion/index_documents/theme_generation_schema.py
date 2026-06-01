@@ -8,7 +8,12 @@ vector retrieval (no ``content_vector`` is produced for them by the builder).
 The schema is a plain dict (Azure REST index definition shape) so it can be
 serialized, diffed, or handed to the SDK/REST API later. It is NOT wired into a
 live index in this phase. ``properties`` is a defined complex object (not raw
-JSON). Embedding dimensions default to 3072 to match ``text-embedding-3-large``.
+JSON).
+
+``embedding_dimensions`` defaults to 3072 for the intended embedding model
+(``text-embedding-3-large``). This is only a default; callers should override it
+to match whatever embedding model is actually deployed (e.g. 1536 for
+``text-embedding-3-small`` / ``ada-002``-style deployments).
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ _STAGE_SUBFIELDS = [
 def build_theme_generation_index_schema(
     *,
     index_name: str = "idp_theme_generation_poc",
+    # Default for text-embedding-3-large; override to match the deployed model.
     embedding_dimensions: int = 3072,
     vector_profile_name: str = "theme-gen-vector-profile",
 ) -> dict[str, Any]:

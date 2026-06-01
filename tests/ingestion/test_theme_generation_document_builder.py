@@ -11,8 +11,13 @@ from vs_app.ingestion.index_documents.theme_generation_document_builder import (
 
 _FORBIDDEN_FLAT_FIELDS = {
     "value_stream_names",
+    "value_stream_ids",
     "stage_names",
+    "stage_ids",
+    "direct_value_stream_names",
+    "implied_value_stream_names",
     "direct_stage_names",
+    "implied_stage_names",
     "taxonomy_text",
     "source_metadata_json",
 }

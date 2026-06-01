@@ -265,8 +265,93 @@ def test_extract_epic_links_from_theme_issue_reads_implemented_by_epics() -> Non
             "issue_type": "Epic",
             "link_direction": "outwardIssue",
             "link_type": "implements | is implemented by",
+            "link_source": "implement",
         }
     ]
+
+
+def _epic_link(link_type: str, key: str, *, issue_type: str = "Epic") -> dict:
+    return {
+        "type": {"name": link_type},
+        "outwardIssue": {
+            "key": key,
+            "fields": {
+                "summary": f"VS - Stage for {key}",
+                "issuetype": {"name": issue_type},
+                "status": {"name": "Open"},
+            },
+        },
+    }
+
+
+def test_extract_epic_links_includes_non_implement_epic_link() -> None:
+    theme = {"key": "GROUP-1", "fields": {"issuelinks": [_epic_link("delivers", "GROUP-50")]}}
+
+    rows = extract_epic_links_from_theme_issue(theme)
+
+    assert [row["key"] for row in rows] == ["GROUP-50"]
+    assert rows[0]["link_source"] == "non_implement_epic"
+    assert rows[0]["link_type"] == "delivers"
+
+
+def test_extract_epic_links_ignores_non_epic_linked_issue() -> None:
+    theme = {
+        "key": "GROUP-1",
+        "fields": {"issuelinks": [_epic_link("delivers", "GROUP-60", issue_type="Story")]},
+    }
+
+    assert extract_epic_links_from_theme_issue(theme) == []
+
+
+def test_extract_epic_links_excludes_obvious_non_stage_link_types() -> None:
+    theme = {"key": "GROUP-1", "fields": {"issuelinks": [_epic_link("blocks", "GROUP-70")]}}
+
+    assert extract_epic_links_from_theme_issue(theme) == []
+
+
+def test_extract_epic_links_dedupes_with_implement_precedence() -> None:
+    theme = {
+        "key": "GROUP-1",
+        "fields": {
+            "issuelinks": [
+                _epic_link("delivers", "GROUP-80"),
+                _epic_link("implements", "GROUP-80"),
+            ]
+        },
+    }
+
+    rows = extract_epic_links_from_theme_issue(theme)
+
+    assert [row["key"] for row in rows] == ["GROUP-80"]
+    assert rows[0]["link_source"] == "implement"
+    assert rows[0]["link_type"] == "implements"
+
+
+def test_extract_epic_links_includes_non_implement_epic_via_inward_issue() -> None:
+    theme = {
+        "key": "GROUP-1",
+        "fields": {
+            "issuelinks": [
+                {
+                    "type": {"name": "delivers"},
+                    "inwardIssue": {
+                        "key": "GROUP-90",
+                        "fields": {
+                            "summary": "VS - Stage via inward",
+                            "issuetype": {"name": "Epic"},
+                            "status": {"name": "Open"},
+                        },
+                    },
+                }
+            ]
+        },
+    }
+
+    rows = extract_epic_links_from_theme_issue(theme)
+
+    assert [row["key"] for row in rows] == ["GROUP-90"]
+    assert rows[0]["link_direction"] == "inwardIssue"
+    assert rows[0]["link_source"] == "non_implement_epic"
 
 
 def test_resolve_linked_epic_stage_reuses_child_epic_summary_logic() -> None:

@@ -387,35 +387,75 @@ def find_linked_theme_issues(issue: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
+# Link-type tokens that are usually relationship/dependency links, not
+# stage-membership links. Used only to filter the non-implement Epic-link
+# expansion; implement links are always kept (high-confidence, unchanged
+# behavior). Words like "relate"/"depend" are not always impossible, but they
+# are risky enough to exclude in this conservative expansion.
+_NON_STAGE_EPIC_LINK_TOKENS = (
+    "relate",
+    "duplicate",
+    "clone",
+    "block",
+    "depend",
+    "caused",
+    "split",
+    "supersede",
+)
+
+
+def _is_non_stage_epic_link(link_type_text: str) -> bool:
+    text = link_type_text.lower()
+    return any(token in text for token in _NON_STAGE_EPIC_LINK_TOKENS)
+
+
 def extract_epic_links_from_theme_issue(theme_issue: dict[str, Any]) -> list[dict[str, Any]]:
     fields = theme_issue.get("fields") or {}
+    links = [link for link in (fields.get("issuelinks") or []) if isinstance(link, dict)]
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for link in fields.get("issuelinks") or []:
-        if not isinstance(link, dict):
-            continue
-        link_type = link.get("type") or {}
-        link_type_text = _link_type_text(link_type)
+
+    def _record(linked: dict[str, Any], *, link_type_text: str, side: str, link_source: str) -> None:
+        key = normalize_ticket_key(linked.get("key"))
+        if not key or key in seen:
+            return
+        seen.add(key)
+        out.append(
+            {
+                "key": key,
+                "summary": _clean_text((linked.get("fields") or {}).get("summary") or linked.get("summary")),
+                "status": _status_name(linked),
+                "issue_type": _issue_type_name(linked),
+                "link_direction": side,
+                "link_type": link_type_text,
+                "link_source": link_source,
+            }
+        )
+
+    # Pass 1: implement links (high-confidence; unchanged selection behavior).
+    for link in links:
+        link_type_text = _link_type_text(link.get("type") or {})
         if "implement" not in link_type_text.lower():
             continue
         for side in ("outwardIssue", "inwardIssue"):
             linked = link.get(side)
-            if not isinstance(linked, dict) or not _is_stage_epic_link_candidate(linked):
-                continue
-            key = normalize_ticket_key(linked.get("key"))
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            out.append(
-                {
-                    "key": key,
-                    "summary": _clean_text((linked.get("fields") or {}).get("summary") or linked.get("summary")),
-                    "status": _status_name(linked),
-                    "issue_type": _issue_type_name(linked),
-                    "link_direction": side,
-                    "link_type": link_type_text,
-                }
-            )
+            if isinstance(linked, dict) and _is_stage_epic_link_candidate(linked):
+                _record(linked, link_type_text=link_type_text, side=side, link_source="implement")
+
+    # Pass 2: other links to Epics, excluding obvious non-stage relationships.
+    # Stricter than pass 1: the linked issue type must be exactly Epic. Runs
+    # after pass 1 so implement links keep precedence on dedupe.
+    for link in links:
+        link_type_text = _link_type_text(link.get("type") or {})
+        if "implement" in link_type_text.lower():
+            continue
+        if _is_non_stage_epic_link(link_type_text):
+            continue
+        for side in ("outwardIssue", "inwardIssue"):
+            linked = link.get(side)
+            if isinstance(linked, dict) and _issue_type_name(linked).lower() == "epic":
+                _record(linked, link_type_text=link_type_text, side=side, link_source="non_implement_epic")
+
     return out
 
 

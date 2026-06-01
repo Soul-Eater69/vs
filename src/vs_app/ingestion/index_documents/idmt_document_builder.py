@@ -130,6 +130,25 @@ def build_document_from_stage_dataset_row(
         for value_stream_name in gt_by_value_stream
     ]
 
+    # If the dataset row carries classified stage support (e.g. produced during
+    # dataset building), pass it through. Absent/empty -> the builder backfills
+    # unknown/jira_gt for every GT stage as before.
+    stage_support = [
+        StageSupport(
+            value_stream_name=str(support_row.get("value_stream_name", "")),
+            stage_name=str(support_row.get("stage_name", "")),
+            value_stream_id=str(support_row.get("value_stream_id", "")),
+            stage_id=str(support_row.get("stage_id", "")),
+            support_type=str(support_row.get("support_type", "")),
+            reason=str(support_row.get("reason", "")),
+            evidence=str(support_row.get("evidence", "")),
+            source=str(support_row.get("source", "")),
+            confidence=support_row.get("confidence"),
+        )
+        for support_row in (row.get("stage_support") or [])
+        if isinstance(support_row, dict)
+    ]
+
     doc_metadata = {"warnings": warnings}
     if metadata:
         doc_metadata.update(metadata)
@@ -138,6 +157,7 @@ def build_document_from_stage_dataset_row(
         ticket_context=ticket_context,
         value_stream_support=value_stream_support,
         gt_by_value_stream=gt_by_value_stream,
+        stage_support=stage_support or None,
         metadata=doc_metadata,
     )
 

@@ -1,9 +1,11 @@
 """Offline export of Theme-generation POC documents to JSONL.
 
-Reads an offline stage-ground-truth payload (produced by
-``scripts/build_stage_ground_truth.py``) and writes Theme-generation documents
-(one IDMT doc + one theme doc per GROUP) as JSONL, ready for the Feature 10
-uploader. This is an offline backfill/export step:
+INPUT IS AN EXISTING GROUND-TRUTH JSON FILE, NOT JIRA. This script reads an
+offline stage-ground-truth payload already produced by
+``scripts/build_stage_ground_truth.py`` (it does NOT fetch Jira itself) and
+writes Theme-generation documents (one IDMT doc + one theme doc per GROUP) as
+JSONL, ready for the Feature 10 uploader. This is an offline backfill/export
+step:
 
 - Writes JSONL only. Never connects to Azure, never creates an index, never
   uploads.
@@ -37,7 +39,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gt-input",
         required=True,
-        help="Offline stage ground-truth JSON (build_stage_ground_truth.py output).",
+        help=(
+            "Path to an existing stage ground-truth JSON file produced by "
+            "scripts/build_stage_ground_truth.py. This script reads that file; "
+            "it does NOT fetch Jira."
+        ),
     )
     parser.add_argument("--out", default=None, help="Output JSONL path (required unless --dry-run).")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of tickets.")
@@ -76,8 +82,23 @@ def summarize(docs: list[dict]) -> dict[str, int]:
     }
 
 
+RESERVED_FLAG_WARNING = (
+    "Reserved flag accepted but not implemented in this PR; "
+    "no LLM enrichment will run."
+)
+
+
+def warn_reserved_flags(args: argparse.Namespace) -> bool:
+    """Warn (no-op) if a reserved enrichment flag was passed. Returns True if so."""
+    if args.classify_support or args.summary_enrich:
+        print(f"WARNING: {RESERVED_FLAG_WARNING}", flush=True)
+        return True
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    warn_reserved_flags(args)
 
     payload = load_payload(args.gt_input)
     docs = theme_generation_documents_from_gt_payload(payload, limit=args.limit)

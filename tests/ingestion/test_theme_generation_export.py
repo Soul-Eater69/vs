@@ -191,3 +191,30 @@ def test_script_flags_off_by_default_make_no_llm_calls(tmp_path, monkeypatch) ->
     args = parser.parse_args(["--gt-input", "x"])
     assert args.classify_support is False
     assert args.summary_enrich is False
+
+
+def test_reserved_flags_warn_and_produce_identical_output(tmp_path, capsys) -> None:
+    gt_path = tmp_path / "gt.json"
+    gt_path.write_text(json.dumps(_gt_payload()), encoding="utf-8")
+    plain_out = tmp_path / "plain.jsonl"
+    flagged_out = tmp_path / "flagged.jsonl"
+
+    rc1 = export_script.main(["--gt-input", str(gt_path), "--out", str(plain_out)])
+    capsys.readouterr()  # clear
+    rc2 = export_script.main(
+        [
+            "--gt-input",
+            str(gt_path),
+            "--out",
+            str(flagged_out),
+            "--classify-support",
+            "--summary-enrich",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert rc1 == 0 and rc2 == 0
+    # Reserved-flag run emits the warning...
+    assert export_script.RESERVED_FLAG_WARNING in out
+    # ...and produces byte-identical JSONL (no enrichment ran).
+    assert flagged_out.read_text() == plain_out.read_text()

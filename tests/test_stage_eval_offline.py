@@ -327,6 +327,33 @@ def test_extract_epic_links_dedupes_with_implement_precedence() -> None:
     assert rows[0]["link_type"] == "implements"
 
 
+def test_extract_epic_links_includes_non_implement_epic_via_inward_issue() -> None:
+    theme = {
+        "key": "GROUP-1",
+        "fields": {
+            "issuelinks": [
+                {
+                    "type": {"name": "delivers"},
+                    "inwardIssue": {
+                        "key": "GROUP-90",
+                        "fields": {
+                            "summary": "VS - Stage via inward",
+                            "issuetype": {"name": "Epic"},
+                            "status": {"name": "Open"},
+                        },
+                    },
+                }
+            ]
+        },
+    }
+
+    rows = extract_epic_links_from_theme_issue(theme)
+
+    assert [row["key"] for row in rows] == ["GROUP-90"]
+    assert rows[0]["link_direction"] == "inwardIssue"
+    assert rows[0]["link_source"] == "non_implement_epic"
+
+
 def test_resolve_linked_epic_stage_reuses_child_epic_summary_logic() -> None:
     resolution = resolve_linked_epic_stage(
         linked_issue={

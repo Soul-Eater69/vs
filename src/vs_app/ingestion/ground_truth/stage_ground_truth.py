@@ -387,9 +387,11 @@ def find_linked_theme_issues(issue: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
-# Link-type tokens that clearly are NOT "this Epic is a stage of the
-# Theme/GROUP". Used only to filter the non-implement Epic-link expansion;
-# implement links are always kept (high-confidence, unchanged behavior).
+# Link-type tokens that are usually relationship/dependency links, not
+# stage-membership links. Used only to filter the non-implement Epic-link
+# expansion; implement links are always kept (high-confidence, unchanged
+# behavior). Words like "relate"/"depend" are not always impossible, but they
+# are risky enough to exclude in this conservative expansion.
 _NON_STAGE_EPIC_LINK_TOKENS = (
     "relate",
     "duplicate",

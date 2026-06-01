@@ -826,10 +826,113 @@ async def test_parent_link_lookup_returns_child_epics() -> None:
 
     assert [issue["key"] for issue in child_issues] == ["GROUP-22805", "GROUP-22838"]
     assert lookup["child_issue_keys"] == ["GROUP-22805", "GROUP-22838"]
-    assert lookup["lookup_strategy"] == "parent_link_only"
+    assert lookup["lookup_strategy"] == "parent_link_and_parent"
     assert lookup["jql_attempts"][0]["jql"] == '"Parent Link" = GROUP-22223 AND issuetype = Epic'
     assert lookup["jql_attempts"][0]["count"] == 2
-    assert jira.seen_jqls == ['"Parent Link" = GROUP-22223 AND issuetype = Epic']
+    assert lookup["jql_attempts"][1]["jql"] == "parent = GROUP-22223 AND issuetype = Epic"
+    assert lookup["jql_attempts"][1]["count"] == 0
+    assert lookup["child_issue_sources"] == {
+        "GROUP-22805": ["parent_link"],
+        "GROUP-22838": ["parent_link"],
+    }
+    assert jira.seen_jqls == [
+        '"Parent Link" = GROUP-22223 AND issuetype = Epic',
+        "parent = GROUP-22223 AND issuetype = Epic",
+    ]
+
+
+def _epic(key: str, summary: str) -> dict:
+    return {
+        "key": key,
+        "fields": {
+            "summary": summary,
+            "status": {"name": "In Progress"},
+            "issuetype": {"name": "Epic"},
+        },
+    }
+
+
+@pytest.mark.anyio
+async def test_fetch_direct_child_epics_parent_relation_only() -> None:
+    epic_a = _epic("GROUP-30", "VS - Stage A")
+    epic_b = _epic("GROUP-31", "VS - Stage B")
+    jira = _SearchFakeJira(
+        {},
+        search_results={"parent = GROUP-1 AND issuetype = Epic": [epic_a, epic_b]},
+    )
+
+    child_issues, lookup = await fetch_direct_child_epics(jira_client=jira, theme_key="GROUP-1")
+
+    assert [issue["key"] for issue in child_issues] == ["GROUP-30", "GROUP-31"]
+    assert lookup["child_issue_keys"] == ["GROUP-30", "GROUP-31"]
+    assert lookup["jql_attempts"][0]["count"] == 0
+    assert lookup["jql_attempts"][1]["count"] == 2
+    assert lookup["child_issue_sources"] == {
+        "GROUP-30": ["parent"],
+        "GROUP-31": ["parent"],
+    }
+    assert jira.seen_jqls == [
+        '"Parent Link" = GROUP-1 AND issuetype = Epic',
+        "parent = GROUP-1 AND issuetype = Epic",
+    ]
+
+
+@pytest.mark.anyio
+async def test_fetch_direct_child_epics_merges_and_dedupes_both_sources() -> None:
+    shared = _epic("GROUP-10", "VS - Shared")
+    parent_link_only = _epic("GROUP-11", "VS - PL Only")
+    parent_only = _epic("GROUP-12", "VS - Parent Only")
+    jira = _SearchFakeJira(
+        {},
+        search_results={
+            '"Parent Link" = GROUP-1 AND issuetype = Epic': [shared, parent_link_only],
+            "parent = GROUP-1 AND issuetype = Epic": [shared, parent_only],
+        },
+    )
+
+    child_issues, lookup = await fetch_direct_child_epics(jira_client=jira, theme_key="GROUP-1")
+
+    assert [issue["key"] for issue in child_issues] == ["GROUP-10", "GROUP-11", "GROUP-12"]
+    assert lookup["child_issue_keys"] == ["GROUP-10", "GROUP-11", "GROUP-12"]
+    assert lookup["child_issue_sources"] == {
+        "GROUP-10": ["parent_link", "parent"],
+        "GROUP-11": ["parent_link"],
+        "GROUP-12": ["parent"],
+    }
+
+
+@pytest.mark.anyio
+async def test_fetch_direct_child_epics_no_children() -> None:
+    jira = _SearchFakeJira({}, search_results={})
+
+    child_issues, lookup = await fetch_direct_child_epics(jira_client=jira, theme_key="GROUP-1")
+
+    assert child_issues == []
+    assert lookup["child_issue_keys"] == []
+    assert lookup["child_issue_sources"] == {}
+    assert (
+        "no direct child Epics found via Parent Link or parent relation"
+        in lookup["warnings"]
+    )
+
+
+@pytest.mark.anyio
+async def test_fetch_direct_child_epics_parent_failure_preserves_parent_link() -> None:
+    epic = _epic("GROUP-40", "VS - Stage")
+    parent_jql = "parent = GROUP-1 AND issuetype = Epic"
+    jira = _SearchFakeJira(
+        {},
+        search_results={'"Parent Link" = GROUP-1 AND issuetype = Epic': [epic]},
+        error_jqls={parent_jql},
+    )
+
+    child_issues, lookup = await fetch_direct_child_epics(jira_client=jira, theme_key="GROUP-1")
+
+    assert [issue["key"] for issue in child_issues] == ["GROUP-40"]
+    assert lookup["child_issue_keys"] == ["GROUP-40"]
+    assert lookup["jql_attempts"][1]["error"]
+    assert "Jira parent-relation child Epic lookup failed" in lookup["warnings"]
+    assert lookup["child_issue_sources"] == {"GROUP-40": ["parent_link"]}
 
 
 @pytest.mark.anyio
@@ -883,10 +986,13 @@ async def test_no_parent_link_children_leaves_stage_ground_truth_empty() -> None
     assert theme_gt["verified_stages"] == []
     assert result["gt_by_value_stream"] == {}
     assert any(
-        "no direct Parent Link child Epics found" in warning
+        "no direct child Epics found via Parent Link or parent relation" in warning
         for warning in theme_gt["warnings"]
     )
-    assert jira.seen_jqls == ['"Parent Link" = GROUP-22223 AND issuetype = Epic']
+    assert jira.seen_jqls == [
+        '"Parent Link" = GROUP-22223 AND issuetype = Epic',
+        "parent = GROUP-22223 AND issuetype = Epic",
+    ]
 
 
 @pytest.mark.anyio

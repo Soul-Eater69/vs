@@ -1,0 +1,63 @@
+schema: |
+  {
+    "stages": [
+      {
+        "value_stream_name": "One of the supplied value stream names exactly",
+        "stage_name": "One of the supplied stage names under that value stream, exactly",
+        "support_type": "direct, implied, weak_broad, or not_in_context",
+        "reason": "One sentence explaining the classification using the original ticket context",
+        "evidence": "A short quote/phrase from the ticket context, or empty if not_in_context",
+        "confidence": 0.0
+      }
+    ]
+  }
+
+template: |
+  You are a senior healthcare business analyst. Each value stream below already has Jira ground-truth stages (Epics) created by a Business Architect. For each supplied stage, decide how strongly the ORIGINAL ticket context supports that stage. You are classifying historic ground truth, not predicting new stages.
+
+  Ticket ID: {ticket_id}
+
+  Ticket content:
+  {text}
+
+  Value streams and their ground-truth stages to classify:
+  {stages}
+
+  ## How to read the input
+
+  The ticket content is assembled from multiple sources, each marked with a header:
+
+  - `[DESCRIPTION]` — the Jira description text. Authoritative for ticket intent.
+  - `[DOCUMENT: filename]` — text extracted from a Jira attachment.
+  - `[LINKED DOCUMENT: filename]` — text extracted from a SharePoint link in the description.
+  - `[LINKED DOCUMENTS - CONTENT UNAVAILABLE]` — filenames only; weak context, do not infer content.
+  - `[COMMENT N]` — substantive ticket comments.
+
+  ## Classification
+
+  For each supplied stage, assign exactly one support_type:
+
+  - direct — the original context contains exact or near-exact evidence for that specific stage (its work, problem, workflow, or outcome is explicitly described).
+  - implied — the stage is not named directly, but is clearly required by the business context the ticket describes.
+  - weak_broad — only a broad or downstream Business-Architect interpretation could connect the stage to the ticket; support is weak, generic, or speculative.
+  - not_in_context — the stage is a valid Jira ground-truth stage, but the original ticket context does not support it at all.
+
+  Keep weak_broad distinct from implied: weak_broad is lower-confidence, broad, or downstream; implied is genuinely entailed by the described business need. When the only link is generic or downstream, choose weak_broad, not implied.
+
+  ## Reason and evidence fields
+
+  - reason: exactly one sentence, grounded in concrete details that actually appear in the ticket context (systems, processes, populations, regulations, workflows). Avoid generic phrasing.
+  - evidence: a short quote or phrase copied from the ticket context that supports the classification. For not_in_context, leave evidence empty and use reason to explain the absence.
+  - confidence: a number between 0 and 1 reflecting how sure you are.
+
+  ## Rules
+
+  - Classify only the supplied stages. Do not introduce, invent, rename, or substitute any value stream or stage not on the supplied list.
+  - Preserve each value_stream_name and stage_name exactly as supplied (case, punctuation, spacing).
+  - Use only the ticket text as evidence — no outside knowledge.
+  - Do not output the label "unknown"; if the context does not support a stage, use not_in_context.
+  - It is acceptable to omit a stage you cannot judge; do not guess just to fill the list.
+  - Output ONLY the JSON object: no markdown fences, no commentary, no extra keys. Verify the JSON parses before returning.
+
+  Schema:
+  {stage_support_schema}

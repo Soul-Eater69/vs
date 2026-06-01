@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from datetime import datetime, timezone
 import json
 import os
@@ -17,6 +18,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from scripts.build_stage_ground_truth import JiraApiClient
+from vs_app.ingestion.ground_truth.stage_support import classify_stage_support
 from vs_app.ingestion.summary.text_consolidator import consolidate_ticket_text
 from vs_app.jobs.jira_batch.config import JiraIngestionConfig
 from vs_app.modules.rag.query.views import condense_idea_card
@@ -50,6 +52,7 @@ async def async_main() -> int:
     fallback_gt_payload = load_gt_payload_if_available(config["gt_input"])
     stage_catalog = load_stage_catalog(path=config["stage_catalog"], source="json")
     jira_client = make_jira_client_if_configured()
+    classify_support, support_llm_client, support_cfg = make_stage_support_classifier_inputs(config)
 
     if jira_client is not None:
         async with jira_client:
@@ -59,6 +62,9 @@ async def async_main() -> int:
                 stage_catalog=stage_catalog,
                 jira_client=jira_client,
                 config=config,
+                classify_support=classify_support,
+                support_llm_client=support_llm_client,
+                support_cfg=support_cfg,
             )
     else:
         dataset = await build_stage_prediction_dataset(
@@ -67,6 +73,9 @@ async def async_main() -> int:
             stage_catalog=stage_catalog,
             jira_client=None,
             config=config,
+            classify_support=classify_support,
+            support_llm_client=support_llm_client,
+            support_cfg=support_cfg,
         )
 
     write_dataset_outputs(dataset, config["output"])
@@ -84,7 +93,24 @@ def load_runtime_config() -> dict[str, Any]:
             "STAGE_DATASET_CONCURRENCY",
             env_int("STAGE_GT_CONCURRENCY", DEFAULT_GT_CONCURRENCY),
         ),
+        "classify_stage_support": env_flag("STAGE_DATASET_CLASSIFY_STAGE_SUPPORT"),
     }
+
+
+def make_stage_support_classifier_inputs(
+    config: dict[str, Any],
+) -> tuple[bool, Any, Any]:
+    """Return (enabled, llm_client, cfg) for optional stage support classification.
+
+    An LLM client is constructed only when STAGE_DATASET_CLASSIFY_STAGE_SUPPORT is
+    enabled, so default dataset generation creates no client and makes no LLM call.
+    """
+    if not config.get("classify_stage_support"):
+        return False, None, None
+    cfg = JiraIngestionConfig()
+    from vs_app.integrations.clients.llm import IDPChatOpenAI
+
+    return True, IDPChatOpenAI(model=cfg.llm_model), cfg
 
 
 async def build_stage_prediction_dataset(
@@ -94,6 +120,9 @@ async def build_stage_prediction_dataset(
     stage_catalog: dict[str, Any],
     jira_client: JiraApiClient | None,
     config: dict[str, Any],
+    classify_support: bool = False,
+    support_llm_client: Any = None,
+    support_cfg: Any = None,
 ) -> dict[str, Any]:
     tickets: dict[str, Any] = {}
     errors: list[dict[str, Any]] = []
@@ -111,6 +140,9 @@ async def build_stage_prediction_dataset(
                     fallback_gt_payload=fallback_gt_payload,
                     stage_catalog=stage_catalog,
                     jira_client=jira_client,
+                    classify_support=classify_support,
+                    support_llm_client=support_llm_client,
+                    support_cfg=support_cfg,
                 )
                 print_ticket_status_done(index, total, ticket_key, row)
                 return {"ticket_id": ticket_key, "row": row, "error": None}
@@ -163,12 +195,75 @@ async def build_stage_prediction_dataset(
     }
 
 
+def _stage_support_context_text(idea_card: dict[str, Any]) -> str:
+    """Assemble the original IDMT packet for stage support classification.
+
+    Uses only original-context fields; never any predicted/evaluation output.
+    Identical fields are de-duplicated so the prompt is not padded with repeats.
+    """
+    parts = [
+        idea_card.get("summary", ""),
+        idea_card.get("description", ""),
+        idea_card.get("idea_card_text", ""),
+        idea_card.get("attachment_text", ""),
+        idea_card.get("extracted_text", ""),
+        idea_card.get("generated_summary", ""),
+    ]
+    seen: set[str] = set()
+    blocks: list[str] = []
+    for part in parts:
+        text = clean_text(part)
+        if text and text not in seen:
+            seen.add(text)
+            blocks.append(text)
+    return "\n\n".join(blocks)
+
+
+async def classify_stage_support_for_row(
+    *,
+    ticket_id: str,
+    idea_card: dict[str, Any],
+    ground_truth: dict[str, Any],
+    llm_client: Any,
+    cfg: Any,
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Classify stage support for a dataset row's GT stages (answer-key evidence).
+
+    Returns JSON-ready rows. Lenient: returns [] (and records a warning) on any
+    failure so the dataset build never breaks; uncovered GT stages are backfilled
+    as unknown/jira_gt by the document builder later. Never fed into prediction.
+    """
+    gt_by_value_stream = (ground_truth or {}).get("gt_by_value_stream") or {}
+    if llm_client is None or not gt_by_value_stream:
+        return []
+    context_text = _stage_support_context_text(idea_card)
+    if not context_text.strip():
+        return []
+    try:
+        rows = await asyncio.to_thread(
+            classify_stage_support,
+            ticket_id=ticket_id,
+            consolidated_text=context_text,
+            gt_by_value_stream=gt_by_value_stream,
+            llm_client=llm_client,
+            cfg=cfg,
+        )
+    except Exception as exc:
+        warnings.append(f"stage support classification failed: {compact_error(exc)}")
+        return []
+    return [asdict(row) for row in rows]
+
+
 async def build_dataset_ticket(
     *,
     ticket_id: str,
     fallback_gt_payload: dict[str, Any],
     stage_catalog: dict[str, Any],
     jira_client: JiraApiClient | None,
+    classify_support: bool = False,
+    support_llm_client: Any = None,
+    support_cfg: Any = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
     idmt_issue = await fetch_idmt_context_issue(ticket_id, jira_client, warnings)
@@ -191,12 +286,23 @@ async def build_dataset_ticket(
     if not has_ground_truth(ground_truth):
         warnings.append("stage ground truth unavailable")
 
-    return {
+    row: dict[str, Any] = {
         "ticket_id": ticket_id,
         "idea_card": idea_card,
         "ground_truth": ground_truth,
         "warnings": dedupe_text(warnings),
     }
+    if classify_support:
+        row["stage_support"] = await classify_stage_support_for_row(
+            ticket_id=ticket_id,
+            idea_card=idea_card,
+            ground_truth=ground_truth,
+            llm_client=support_llm_client,
+            cfg=support_cfg,
+            warnings=warnings,
+        )
+        row["warnings"] = dedupe_text(warnings)
+    return row
 
 
 async def fetch_idmt_context_issue(
@@ -484,6 +590,10 @@ def env_int(name: str, default: int) -> int:
         return max(1, int(os.getenv(name, str(default))))
     except (TypeError, ValueError):
         return default
+
+
+def env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def dedupe_text(values: Any) -> list[str]:

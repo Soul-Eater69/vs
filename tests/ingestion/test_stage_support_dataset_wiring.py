@@ -95,6 +95,24 @@ def test_helper_empty_gt_skips_llm(monkeypatch) -> None:
     assert rows == []
 
 
+def test_env_flag_enables_only_explicit_truthy_values(monkeypatch) -> None:
+    for value in ("1", "true", "TRUE", "yes", "on", "On"):
+        monkeypatch.setenv("STAGE_DATASET_CLASSIFY_STAGE_SUPPORT", value)
+        assert dataset.env_flag("STAGE_DATASET_CLASSIFY_STAGE_SUPPORT") is True
+    for value in ("0", "false", "", "2", "enable", "no"):
+        monkeypatch.setenv("STAGE_DATASET_CLASSIFY_STAGE_SUPPORT", value)
+        assert dataset.env_flag("STAGE_DATASET_CLASSIFY_STAGE_SUPPORT") is False
+    monkeypatch.delenv("STAGE_DATASET_CLASSIFY_STAGE_SUPPORT", raising=False)
+    assert dataset.env_flag("STAGE_DATASET_CLASSIFY_STAGE_SUPPORT") is False
+
+
+def test_classifier_inputs_disabled_constructs_no_client() -> None:
+    enabled, client, cfg = dataset.make_stage_support_classifier_inputs(
+        {"classify_stage_support": False}
+    )
+    assert (enabled, client, cfg) == (False, None, None)
+
+
 def test_build_dataset_ticket_omits_stage_support_when_off() -> None:
     row = asyncio.run(
         dataset.build_dataset_ticket(

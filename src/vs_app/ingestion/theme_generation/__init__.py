@@ -7,6 +7,7 @@ assembly and generation arrive in Feature 14B.
 
 from __future__ import annotations
 
+from vs_app.ingestion.theme_generation.generation import generate_theme_description
 from vs_app.ingestion.theme_generation.retrieval import (
     extract_matching_theme_refs,
     fetch_theme_examples,
@@ -19,4 +20,5 @@ __all__ = [
     "extract_matching_theme_refs",
     "fetch_theme_examples",
     "select_theme_examples_for_prompt",
+    "generate_theme_description",
 ]

@@ -199,6 +199,30 @@ def build_stage_support_classification_prompt(
     )
 
 
+def build_theme_generation_system_prompt() -> str:
+    payload = _load_required_prompt_yaml("theme_generation", ["system"])
+    return str(payload["system"]).strip()
+
+
+def build_theme_generation_prompt(
+    *,
+    idea_context: str,
+    value_stream_name: str,
+    allowed_stages: str,
+    selected_stages: str,
+    examples: str,
+) -> str:
+    payload = _load_required_prompt_yaml("theme_generation", ["system", "user"])
+    return render_prompt(
+        str(payload["user"]),
+        idea_context=idea_context,
+        value_stream_name=value_stream_name,
+        allowed_stages=allowed_stages,
+        selected_stages=selected_stages,
+        examples=examples,
+    )
+
+
 def build_value_stage_prediction_system_prompt() -> str:
     payload = _load_required_prompt_yaml("value_stage_prediction", ["system"])
     return str(payload["system"]).strip()
@@ -289,6 +313,8 @@ __all__ = [
     "build_review_pool_selection_system_prompt",
     "build_selection_system_prompt",
     "build_stage_support_classification_prompt",
+    "build_theme_generation_prompt",
+    "build_theme_generation_system_prompt",
     "build_value_stage_prediction_prompt",
     "build_value_stage_prediction_system_prompt",
     "build_value_stream_classification_prompt",

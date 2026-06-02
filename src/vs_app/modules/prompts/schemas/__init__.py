@@ -5,6 +5,7 @@ One module per output domain; import from this package directly.
 
 from .stage import StageSupportItem, StageSupportResult
 from .summary import SummaryOutput
+from .theme import ThemeGenerationResult
 from .value_stream import (
     InferenceType,
     ReviewPoolPick,
@@ -23,6 +24,8 @@ __all__ = [
     "StageSupportResult",
     # summary
     "SummaryOutput",
+    # theme
+    "ThemeGenerationResult",
     # value_stream
     "InferenceType",
     "ReviewPoolPick",

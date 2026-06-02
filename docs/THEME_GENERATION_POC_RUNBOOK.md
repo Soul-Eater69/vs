@@ -120,6 +120,62 @@ uv run python scripts/upload_theme_generation_index.py \
 - Embedding dimensions come from `EMBEDDING_DIMENSION` (deployed model), not a
   hardcoded value.
 
+## Manual theme generation (retrieval → stage picks → theme text)
+
+`scripts/run_theme_generation.py` runs the assembled Theme-generation POC for a
+sample idea. **Default is dry-run** (plan only): it validates inputs, loads the
+local stage catalog for reporting, and constructs **no** embedding/Azure/LLM
+client and makes **no** network call. Live retrieval + embedding + LLM run only
+with the explicit `--run` flag. This script does **no Jira, no upload, no index
+create/delete, and no API/UI wiring**.
+
+> Note: `--value-streams` is comma-separated, so a value-stream name that itself
+> contains a comma cannot be passed as-is in this POC CLI.
+>
+> **TODO (next CLI improvement):** replace the single comma-separated
+> `--value-streams` flag with a repeatable `--value-stream` flag so names
+> containing commas are supported, e.g.
+> `--value-stream "Configure, Price, and Quote" --value-stream "Lead to Opportunity"`.
+> Many real Value Stream names contain commas; the comma-separated form is only a
+> documented stopgap for the POC. Do not change parsing until that improvement is
+> scheduled.
+
+### Dry-run (default; no Azure/embedding/LLM)
+
+```bash
+uv run python scripts/run_theme_generation.py \
+  --idea "Update UM operations for prior authorization handling." \
+  --value-streams "Manage Utilization Management Program"
+```
+
+Prints a JSON plan: resolved index name, idea length, selected value streams,
+stage catalog path, allowed-stage counts per VS, `top_k_idmt`, `max_examples`,
+`would_run`, and `skipped: true`.
+
+### Live run (`--run`; uses real Azure read-search + embedding + LLM)
+
+> ⚠️ Manual / not covered by tests. `--run` performs a live embedding call, a
+> read-only Azure vector search against the POC index, and live LLM calls.
+
+```bash
+uv run python scripts/run_theme_generation.py \
+  --idea-file idea.txt \
+  --value-streams "Manage Utilization Management Program,Manage Leads and opportunities" \
+  --stage-catalog data/value_stream_stage_map.json \
+  --top-k-idmt 15 --max-examples 5 \
+  --run --output /tmp/theme_result.json
+```
+
+Required environment for `--run`:
+
+- `AZURE_SEARCH_ENDPOINT`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`
+- `THEME_GENERATION_AZURE_SEARCH_INDEX_NAME` (default `idp_theme_generation_poc`)
+- `EMBEDDING_MODEL` / `EMBEDDING_DIMENSION` (must match the index's `content_vector` dims)
+- the LLM gateway vars used by `GenerationService` / `IDPChatOpenAI`
+
+`--run` is **read-only**: it searches the POC index and calls the LLM. It never
+fetches Jira, never uploads, and never creates or deletes an index.
+
 ## Remaining gaps
 
 - Real GT payload generation from Jira is **not** included here (offline,
@@ -127,4 +183,7 @@ uv run python scripts/upload_theme_generation_index.py \
 - Real Azure upload is **not** validated by tests (manual step).
 - Direct LLM enrichment inside export is **not** built (Feature 12 Phase 2);
   use precomputed `--support-input` / `--summary-input`.
-- Runtime theme generation is **not** built (out of scope).
+- The manual `--run` theme-generation path is **not** validated by tests (it uses
+  live Azure/embedding/LLM); only the dry-run and injected-dependency core are
+  tested.
+- No API/UI wiring (out of scope until separately approved).

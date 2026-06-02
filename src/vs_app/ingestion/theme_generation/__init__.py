@@ -18,6 +18,9 @@ from vs_app.ingestion.theme_generation.retrieval import (
     search_idmt_examples,
     select_theme_examples_for_prompt,
 )
+from vs_app.ingestion.theme_generation.search_adapter import (
+    ThemeGenerationSearchAdapter,
+)
 
 __all__ = [
     "search_idmt_examples",
@@ -27,4 +30,5 @@ __all__ = [
     "generate_theme_description",
     "generate_theme_for_value_stream",
     "generate_themes_for_idea",
+    "ThemeGenerationSearchAdapter",
 ]

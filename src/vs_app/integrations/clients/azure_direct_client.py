@@ -78,6 +78,7 @@ class AzureDirectSearchClient:
         embedding_client: Optional[EmbeddingClient] = None,
     ) -> None:
         self._index_name = index_name
+        self._endpoint = endpoint
 
         self._credential: TokenCredential = credential or ClientSecretCredential(
             tenant_id=tenant_id,
@@ -92,6 +93,16 @@ class AzureDirectSearchClient:
         )
 
         self._embedder = embedding_client or EmbeddingClient()
+
+    def _search_client_for(self, index_name: Optional[str]) -> SearchClient:
+        """Return the default search client, or a temporary one for an override index."""
+        if not index_name or index_name == self._index_name:
+            return self._search_client
+        return SearchClient(
+            endpoint=self._endpoint,
+            index_name=index_name,
+            credential=self._credential,
+        )
 
     # -------------------------------------------------------------------------
     # Public search methods
@@ -143,6 +154,56 @@ class AzureDirectSearchClient:
         )
 
         return self._collect(results)
+
+    def search_by_vector(
+        self,
+        *,
+        vector: List[float],
+        top_k: int,
+        vector_field: str = "content_vector",
+        exhaustive: bool = False,
+        filter_expression: Optional[str] = None,
+        select: Optional[List[str]] = None,
+        index_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Pure vector search using a PRECOMPUTED vector (no embedding here).
+
+        Unlike ``search_vector`` (which embeds a query string), this accepts an
+        already-computed embedding so the caller controls embedding. Read-only.
+        ``index_name`` overrides the default index for this call only.
+        """
+        vector_query = VectorizedQuery(
+            vector=vector,
+            k_nearest_neighbors=top_k,
+            fields=vector_field,
+            exhaustive=exhaustive,
+        )
+        results = self._search_client_for(index_name).search(
+            search_text=None,
+            vector_queries=[vector_query],
+            filter=filter_expression,
+            top=top_k,
+            select=select or _DEFAULT_SELECT_FIELDS,
+        )
+        return self._collect(results)
+
+    def get_document_by_id(
+        self,
+        *,
+        doc_id: str,
+        select: Optional[List[str]] = None,
+        index_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single document by key; return ``None`` if absent. Read-only."""
+        from azure.core.exceptions import ResourceNotFoundError
+
+        try:
+            result = self._search_client_for(index_name).get_document(
+                key=doc_id, selected_fields=select
+            )
+        except ResourceNotFoundError:
+            return None
+        return dict(result) if result is not None else None
 
     def search_bm25(
         self,

@@ -131,6 +131,14 @@ create/delete, and no API/UI wiring**.
 
 > Note: `--value-streams` is comma-separated, so a value-stream name that itself
 > contains a comma cannot be passed as-is in this POC CLI.
+>
+> **TODO (next CLI improvement):** replace the single comma-separated
+> `--value-streams` flag with a repeatable `--value-stream` flag so names
+> containing commas are supported, e.g.
+> `--value-stream "Configure, Price, and Quote" --value-stream "Lead to Opportunity"`.
+> Many real Value Stream names contain commas; the comma-separated form is only a
+> documented stopgap for the POC. Do not change parsing until that improvement is
+> scheduled.
 
 ### Dry-run (default; no Azure/embedding/LLM)
 

@@ -41,9 +41,7 @@ addopts = ["-p", "no:cacheprovider"]
 norecursedirs = [
     ".git",
     ".pytest_cache",
-    "deprecated",
     "frontend",
-    "legacy",
     "node_modules",
     "pytest-cache-files-*",
 ]

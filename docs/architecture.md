@@ -6,7 +6,6 @@ Final root tree:
 VS/
   docs/
   frontend/
-  legacy/
   prompt_yaml/
   src/
   tests/
@@ -32,8 +31,6 @@ Canonical app code lives under `src/vs_app/`.
 `src/vs_app/shared` is reserved for low-level shared utilities.
 
 `prompt_yaml/` remains at repo root intentionally as a runtime prompt resource folder.
-
-`legacy/` contains quarantined old code and should not be imported by runtime code.
 
 ## Optional local runtime data
 
@@ -68,4 +65,4 @@ uvicorn vs_app.main:app --reload --port 8000
 python -m vs_app.jobs.jira_batch.jobs.extract_tickets
 ```
 
-Jira is the active ticket source. Deprecated Neo4j and chunk-ingestion surfaces are parked under `deprecated/` and are not imported by runtime code.
+Jira is the active ticket source. Older Neo4j and chunk-ingestion surfaces have been removed; they are not part of the runtime.

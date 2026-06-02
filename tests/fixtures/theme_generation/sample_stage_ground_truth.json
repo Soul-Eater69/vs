@@ -1,0 +1,75 @@
+{
+  "source": "fixture",
+  "generated_at": "2026-06-02T00:00:00Z",
+  "tickets": {
+    "IDMT-1001": {
+      "idmt_key": "IDMT-1001",
+      "idmt_summary": "Improve quoting and lead handling for commercial sales",
+      "idmt_description": "Sales teams need faster account configuration and clearer lead routing.",
+      "linked_themes": [
+        {
+          "theme_key": "GROUP-2001",
+          "business_value_stream": {
+            "name": "Configure, Price, and Quote",
+            "id": "VS-CPQ"
+          },
+          "business_needs_raw": "Streamline account configuration and quote generation.",
+          "verified_stages": [
+            {
+              "canonical": "Account Configuration",
+              "raw_mentions": [
+                {"child_key": "EPIC-3001", "source": "parent_link_child_epic_summary"}
+              ]
+            },
+            {
+              "canonical": "Generate Quote and Present to Customer",
+              "raw_mentions": [
+                {"linked_issue_key": "EPIC-3002", "source": "theme_issue_link_epic_summary"}
+              ]
+            }
+          ]
+        },
+        {
+          "theme_key": "GROUP-2002",
+          "business_value_stream": {
+            "name": "Manage Leads and opportunities",
+            "id": "VS-LEADS"
+          },
+          "business_needs_raw": "Route inbound leads to the right sales pod.",
+          "verified_stages": [
+            {
+              "canonical": "Perform Outreach to Leads and Prospects",
+              "raw_mentions": [
+                {"child_key": "EPIC-3003", "source": "parent_link_child_epic_summary"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "IDMT-1002": {
+      "idmt_key": "IDMT-1002",
+      "idmt_summary": "Member care utilization management updates",
+      "idmt_description": "Update UM operations workflow for prior authorization handling.",
+      "linked_themes": [
+        {
+          "theme_key": "GROUP-2003",
+          "business_value_stream": {
+            "name": "Manage Utilization Management Program",
+            "id": "VS-UM"
+          },
+          "business_needs_raw": "Improve UM operations for prior authorization.",
+          "verified_stages": [
+            {
+              "canonical": "Manage UM Operations",
+              "raw_mentions": [
+                {"child_key": "EPIC-3004", "source": "parent_link_child_epic_summary"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "errors": []
+}

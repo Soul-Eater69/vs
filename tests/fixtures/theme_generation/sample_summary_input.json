@@ -1,0 +1,7 @@
+{
+  "IDMT-1001": {
+    "key_terms": ["quoting", "account configuration", "lead routing"],
+    "stakeholders": ["Commercial Sales", "Sales Operations"],
+    "systems_and_products": ["CPQ", "CRM"]
+  }
+}

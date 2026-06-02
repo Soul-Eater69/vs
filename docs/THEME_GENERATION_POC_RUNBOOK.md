@@ -152,6 +152,25 @@ Prints a JSON plan: resolved index name, idea length, selected value streams,
 stage catalog path, allowed-stage counts per VS, `top_k_idmt`, `max_examples`,
 `would_run`, and `skipped: true`.
 
+### Stage catalog requirement
+
+- `--stage-catalog` must point to a **real** `value_stream_stage_map.json` file
+  (the approved stage dropdown per Value Stream).
+- The default path `data/value_stream_stage_map.json` is an **operator-provided
+  local path** and is **not currently committed in the repo**.
+- If the file is missing, **dry-run still works** and reports
+  `allowed_stage_counts = 0` for each Value Stream plus a warning — it does not
+  crash.
+- Before a live `--run`, provide the catalog explicitly:
+
+  ```bash
+  --stage-catalog /path/to/value_stream_stage_map.json
+  ```
+
+- **Do not proceed with a live `--run` until `allowed_stage_counts` for the
+  selected Value Stream is greater than 0** — otherwise stage selection has an
+  empty dropdown and returns no stages.
+
 ### Live run (`--run`; uses real Azure read-search + embedding + LLM)
 
 > ⚠️ Manual / not covered by tests. `--run` performs a live embedding call, a

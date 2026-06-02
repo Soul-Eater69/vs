@@ -30,6 +30,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from vs_app.ingestion.index_documents.theme_generation_export import (
+    index_summary_by_ticket,
+    index_support_by_ticket,
     theme_generation_documents_from_gt_payload,
 )
 
@@ -48,6 +50,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", default=None, help="Output JSONL path (required unless --dry-run).")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of tickets.")
     parser.add_argument(
+        "--support-input",
+        default=None,
+        help=(
+            "Optional precomputed support JSON/JSONL keyed by ticket_id, with "
+            "value_stream_support and/or stage_support (e.g. a Feature 8B dataset). "
+            "Missing tickets keep blank support fields."
+        ),
+    )
+    parser.add_argument(
+        "--summary-input",
+        default=None,
+        help=(
+            "Optional precomputed summary JSON/JSONL keyed by ticket_id, with "
+            "key_terms / stakeholders / systems_and_products. Missing tickets keep []."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report counts only; write no file and make no Azure/LLM calls.",
@@ -55,18 +74,33 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--classify-support",
         action="store_true",
-        help="(reserved) Enable LLM support classification. Off by default; not used in this PR.",
+        help="(reserved, no-op) Direct LLM support classification is not implemented; "
+        "use --support-input for precomputed enrichment.",
     )
     parser.add_argument(
         "--summary-enrich",
         action="store_true",
-        help="(reserved) Enable LLM summary enrichment. Off by default; not used in this PR.",
+        help="(reserved, no-op) Direct LLM summary enrichment is not implemented; "
+        "use --summary-input for precomputed enrichment.",
     )
     return parser
 
 
 def load_payload(path: str) -> object:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def load_jsonl_or_json(path: str) -> object:
+    """Load a JSON document, or a JSONL file (one JSON value per line)."""
+    text = Path(path).read_text(encoding="utf-8")
+    stripped = text.lstrip()
+    if stripped[:1] in ("{", "["):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+    return rows
 
 
 def write_jsonl(path: str, docs: list[dict]) -> None:
@@ -83,8 +117,8 @@ def summarize(docs: list[dict]) -> dict[str, int]:
 
 
 RESERVED_FLAG_WARNING = (
-    "Reserved flag accepted but not implemented in this PR; "
-    "no LLM enrichment will run."
+    "Direct LLM enrichment is not implemented. "
+    "Use --support-input and --summary-input for precomputed enrichment."
 )
 
 
@@ -101,7 +135,26 @@ def main(argv: list[str] | None = None) -> int:
     warn_reserved_flags(args)
 
     payload = load_payload(args.gt_input)
-    docs = theme_generation_documents_from_gt_payload(payload, limit=args.limit)
+
+    # Optional precomputed enrichment; invalid path fails clearly (the loader
+    # raises FileNotFoundError). A missing ticket simply keeps blank fields.
+    support_by_ticket = (
+        index_support_by_ticket(load_jsonl_or_json(args.support_input))
+        if args.support_input
+        else None
+    )
+    summary_by_ticket = (
+        index_summary_by_ticket(load_jsonl_or_json(args.summary_input))
+        if args.summary_input
+        else None
+    )
+
+    docs = theme_generation_documents_from_gt_payload(
+        payload,
+        limit=args.limit,
+        support_by_ticket=support_by_ticket,
+        summary_by_ticket=summary_by_ticket,
+    )
     counts = summarize(docs)
 
     wrote = False
@@ -119,8 +172,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  idmt docs    : {counts['idmt']}")
     print(f"  theme docs   : {counts['theme']}")
     print(f"  output       : {args.out if wrote else '(none)'}")
-    print(f"  classify_support: {args.classify_support} (not used in this PR)")
-    print(f"  summary_enrich  : {args.summary_enrich} (not used in this PR)")
+    print(f"  support input: {args.support_input or '(none)'} "
+          f"({len(support_by_ticket or {})} tickets)")
+    print(f"  summary input: {args.summary_input or '(none)'} "
+          f"({len(summary_by_ticket or {})} tickets)")
+    print(f"  classify_support: {args.classify_support} (reserved no-op)")
+    print(f"  summary_enrich  : {args.summary_enrich} (reserved no-op)")
     return 0
 
 

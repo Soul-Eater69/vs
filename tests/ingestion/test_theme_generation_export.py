@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import scripts.export_theme_generation_jsonl as export_script
 from vs_app.ingestion.index_documents.theme_generation_export import (
     theme_generation_documents_from_ground_truth,
@@ -191,6 +193,137 @@ def test_script_flags_off_by_default_make_no_llm_calls(tmp_path, monkeypatch) ->
     args = parser.parse_args(["--gt-input", "x"])
     assert args.classify_support is False
     assert args.summary_enrich is False
+
+
+def _write(path, payload) -> str:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return str(path)
+
+
+def test_support_input_maps_stage_support(tmp_path) -> None:
+    gt = _write(tmp_path / "gt.json", _gt_payload())
+    support = _write(
+        tmp_path / "support.json",
+        {
+            "IDMT-1": {
+                "stage_support": [
+                    {
+                        "value_stream_name": "Configure, Price, and Quote",
+                        "stage_name": "Account Configuration",
+                        "support_type": "direct",
+                        "reason": "explicit",
+                        "evidence": "set up account",
+                    }
+                ]
+            }
+        },
+    )
+    out = tmp_path / "out.jsonl"
+    assert export_script.main(["--gt-input", gt, "--support-input", support, "--out", str(out)]) == 0
+    docs = [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
+    theme_g1 = next(d for d in docs if d["id"] == "theme::IDMT-1::GROUP-1")
+    stage = next(s for s in theme_g1["properties"]["stages"] if s["stage_name"] == "Account Configuration")
+    assert stage["support_type"] == "direct"
+    assert stage["evidence"] == "set up account"
+
+
+def test_support_input_maps_value_stream_support_list_shape(tmp_path) -> None:
+    gt = _write(tmp_path / "gt.json", _gt_payload())
+    # Shape B: list of rows with ticket_id.
+    support = _write(
+        tmp_path / "support.json",
+        [
+            {
+                "ticket_id": "IDMT-1",
+                "value_stream_support": [
+                    {"jira_group_id": "GROUP-1", "inference_type": "implied", "reason": "adjacent"}
+                ],
+            }
+        ],
+    )
+    out = tmp_path / "out.jsonl"
+    assert export_script.main(["--gt-input", gt, "--support-input", support, "--out", str(out)]) == 0
+    docs = [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
+    idmt = next(d for d in docs if d["document_type"] == "idmt")
+    vs_g1 = next(v for v in idmt["properties"]["value_streams"] if v["group_id"] == "GROUP-1")
+    assert vs_g1["support_type"] == "implied"
+    assert vs_g1["reason"] == "adjacent"
+    assert vs_g1["evidence"] == ""
+
+
+def test_summary_input_fills_taxonomy_fields(tmp_path) -> None:
+    gt = _write(tmp_path / "gt.json", _gt_payload())
+    summary = _write(
+        tmp_path / "summary.json",
+        {"IDMT-1": {"key_terms": ["quote"], "stakeholders": ["Sales"], "systems_and_products": ["CPQ"]}},
+    )
+    out = tmp_path / "out.jsonl"
+    assert export_script.main(["--gt-input", gt, "--summary-input", summary, "--out", str(out)]) == 0
+    docs = [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
+    props = next(d for d in docs if d["document_type"] == "idmt")["properties"]
+    assert props["key_terms"] == ["quote"]
+    assert props["stakeholders"] == ["Sales"]
+    assert props["systems_and_products"] == ["CPQ"]
+
+
+def test_missing_ticket_in_inputs_produces_blanks_no_failure(tmp_path) -> None:
+    gt = _write(tmp_path / "gt.json", _gt_payload())
+    support = _write(tmp_path / "support.json", {"IDMT-OTHER": {"stage_support": []}})
+    summary = _write(tmp_path / "summary.json", {"IDMT-OTHER": {"key_terms": ["x"]}})
+    out = tmp_path / "out.jsonl"
+    rc = export_script.main(
+        ["--gt-input", gt, "--support-input", support, "--summary-input", summary, "--out", str(out)]
+    )
+    assert rc == 0
+    docs = [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
+    idmt = next(d for d in docs if d["document_type"] == "idmt")
+    assert idmt["properties"]["key_terms"] == []
+    assert all(v["support_type"] == "" for v in idmt["properties"]["value_streams"])
+
+
+def test_feature_8b_like_row_with_stage_support_accepted(tmp_path) -> None:
+    # Shape C: Feature 8B-like dataset rows (ticket_id + stage_support, no VS support).
+    gt = _write(tmp_path / "gt.json", _gt_payload())
+    support = _write(
+        tmp_path / "support.json",
+        [
+            {
+                "ticket_id": "IDMT-1",
+                "stage_support": [
+                    {
+                        "value_stream_name": "Configure, Price, and Quote",
+                        "stage_name": "Account Configuration",
+                        "support_type": "implied",
+                        "reason": "needed",
+                    }
+                ],
+            }
+        ],
+    )
+    out = tmp_path / "out.jsonl"
+    assert export_script.main(["--gt-input", gt, "--support-input", support, "--out", str(out)]) == 0
+    docs = [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
+    theme_g1 = next(d for d in docs if d["id"] == "theme::IDMT-1::GROUP-1")
+    stage = next(s for s in theme_g1["properties"]["stages"] if s["stage_name"] == "Account Configuration")
+    assert stage["support_type"] == "implied"
+
+
+def test_malformed_support_row_skipped_without_failing(tmp_path) -> None:
+    gt = _write(tmp_path / "gt.json", _gt_payload())
+    # One bad entry (not a dict) alongside a good one.
+    support = _write(tmp_path / "support.json", ["not-a-dict", {"ticket_id": "IDMT-1", "stage_support": []}])
+    out = tmp_path / "out.jsonl"
+    assert export_script.main(["--gt-input", gt, "--support-input", support, "--out", str(out)]) == 0
+    assert out.exists()
+
+
+def test_invalid_support_path_fails_clearly(tmp_path) -> None:
+    gt = _write(tmp_path / "gt.json", _gt_payload())
+    out = tmp_path / "out.jsonl"
+    with pytest.raises(FileNotFoundError):
+        export_script.main(
+            ["--gt-input", gt, "--support-input", str(tmp_path / "missing.json"), "--out", str(out)]
+        )
 
 
 def test_reserved_flags_warn_and_produce_identical_output(tmp_path, capsys) -> None:

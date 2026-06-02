@@ -1,0 +1,34 @@
+{
+  "IDMT-1001": {
+    "value_stream_support": [
+      {
+        "jira_group_id": "GROUP-2001",
+        "vs_name": "Configure, Price, and Quote",
+        "inference_type": "direct",
+        "reason": "Ticket explicitly describes quote generation and account configuration."
+      },
+      {
+        "jira_group_id": "GROUP-2002",
+        "vs_name": "Manage Leads and opportunities",
+        "inference_type": "implied",
+        "reason": "Lead routing is adjacent to the quoting work described."
+      }
+    ],
+    "stage_support": [
+      {
+        "value_stream_name": "Configure, Price, and Quote",
+        "stage_name": "Account Configuration",
+        "support_type": "direct",
+        "reason": "Account setup is explicitly required.",
+        "evidence": "faster account configuration"
+      },
+      {
+        "value_stream_name": "Manage Leads and opportunities",
+        "stage_name": "Perform Outreach to Leads and Prospects",
+        "support_type": "implied",
+        "reason": "Outreach is implied by lead routing needs.",
+        "evidence": ""
+      }
+    ]
+  }
+}

@@ -6,6 +6,8 @@ import math
 import re
 from typing import Iterable, List
 
+from vs_app.modules.value_streams.canonical import normalize_value_stream_key
+
 from .prompt_context import (
     build_direct_candidate_prompt,
     build_historical_gap_prompt,
@@ -791,7 +793,8 @@ def _sentence_fragment(text: str) -> str:
 
 
 def _norm_key(value: str) -> str:
-    return " ".join((value or "").strip().lower().split())
+    # Thin wrapper over the shared key helper; behavior is unchanged.
+    return normalize_value_stream_key(value)
 
 
 def _dedupe_selected(rows: Iterable[dict]) -> List[dict]:

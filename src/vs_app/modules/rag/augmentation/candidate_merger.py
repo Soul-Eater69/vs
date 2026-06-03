@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass
 import logging
 from typing import Iterable
 
+from vs_app.modules.value_streams.canonical import normalize_value_stream_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -415,7 +417,8 @@ def _float(value: object) -> float:
 
 
 def _norm_name(value: str) -> str:
-    return " ".join((value or "").strip().lower().split())
+    # Thin wrapper over the shared key helper; behavior is unchanged.
+    return normalize_value_stream_key(value)
 
 
 def _unique_text(values: Iterable[object]) -> list[str]:

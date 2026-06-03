@@ -14,6 +14,21 @@ def normalize_vs_name(value: str) -> str:
     return " ".join(text.split())
 
 
+def normalize_value_stream_key(name: str) -> str:
+    """Normalized key used for value-stream dedup / merge / candidate lookup.
+
+    Lowercase + whitespace-collapse only; punctuation is preserved. This is the
+    shared definition of the key the RAG candidate merger and finalizer have each
+    been computing locally, kept byte-for-byte identical to that prior behavior so
+    dedup/lookup results do not shift.
+
+    Distinct from :func:`normalize_vs_name` (which also folds ``&`` to ``and`` and
+    strips punctuation for approved-registry canonicalization) — do not conflate
+    the two: they serve different purposes and produce different keys.
+    """
+    return " ".join((name or "").strip().lower().split())
+
+
 # Alias overrides that are not exact approved-registry names.
 VALUE_STREAM_ALIAS_MAP: dict[str, str] = {
     "order to cash": "Order to Cash for Group Coverage",

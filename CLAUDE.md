@@ -347,3 +347,74 @@ remaining risks / next steps
 ```
 
 Keep summaries honest and specific.
+
+## Architecture and Production-Code Rules
+
+These rules capture decisions already made. Do not silently undo them. They exist
+so future runs do not mix ingestion and runtime code or re-merge things that were
+intentionally separated.
+
+### 1. Production package boundaries
+
+Target top-level packages under `src/vs_app/` and their responsibilities:
+
+```text
+sources/                = external data extraction, especially Jira.
+                          No storage writes, no prompt logic.
+data_ingestion/         = batch/offline transformation and persistence into
+                          Cosmos / Azure AI Search. No runtime generation
+                          business logic.
+value_stream_generation/= runtime Value Stream generation contract. Wraps RAG
+                          and returns API-facing VS candidates.
+stage_generation/       = runtime stage selection/generation contract. Uses the
+                          allowed dropdown / stage catalog.
+theme_generation/       = runtime Theme/Epic generation and the API-facing
+                          facade. API/backend should call its service.py.
+storage/                = persistence repositories / adapters. No business logic.
+integrations/           = low-level external clients only.
+domain/ and validation/ = shared domain models and validation helpers.
+```
+
+- `modules/prompts` and `modules/stages` remain existing shared modules for now.
+- Some of these packages are currently skeletons. Do not assume a package is
+  wired until it is actually implemented and has tests.
+
+### 2. Runtime vs ingestion
+
+- Runtime theme-generation code lives under `vs_app.theme_generation`.
+- `vs_app.ingestion.theme_generation` is compatibility shims only.
+- Do not add new runtime generation under `ingestion`.
+- Ingestion / index / export code stays under `ingestion` until intentionally
+  migrated.
+- API-facing code should import from `vs_app.theme_generation.service` when
+  available, not low-level internals.
+
+### 3. Value Stream canonicalization rule
+
+- `normalize_value_stream_key` is the shared dedup / merge / lookup key for RAG
+  candidate merging and finalizer lookup.
+- `normalize_vs_name` / approved-registry canonicalization is intentionally
+  different (folds `&`→`and`, strips punctuation).
+- `reranker._norm` / fuzzy-matching normalization is intentionally different.
+- Do not merge these normalizers unless golden tests prove behavior preservation.
+
+### 4. LLM context rule for historic stages
+
+- Historic stage details must not be passed into theme prompt examples by default.
+- `select_theme_examples_for_prompt` defaults to `include_stage_context=False`.
+- Index / storage docs may still store `properties.stages`.
+- Current `allowed_stages` and `selected_stages` for the new idea may still be
+  passed to generation.
+- Historic stage names / reasons / evidence / support_type / epic ids require
+  explicit approval before being used as LLM context.
+
+### General rules
+
+- Unit tests must not make live Azure / Jira / LLM calls.
+- Use dependency injection for clients (so tests can inject fakes).
+- New public contracts should include model / `to_dict` tests.
+- Avoid generic `common` / `utils` dumping grounds.
+- Keep compatibility shims small and documented.
+- Default PR target is `cleanup/ingestion-staging` unless explicitly told
+  otherwise.
+- No `main` merge without explicit approval.

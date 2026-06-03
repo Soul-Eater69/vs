@@ -140,8 +140,17 @@ def select_theme_examples_for_prompt(
     *,
     theme_docs: list[dict[str, Any]],
     max_examples: int = 5,
+    include_stage_context: bool = False,
 ) -> list[dict[str, Any]]:
-    """Produce compact prompt examples; drop vectors, raw blobs, and empties."""
+    """Produce compact prompt examples; drop vectors, raw blobs, and empties.
+
+    Historic stage details are excluded from prompt examples by default
+    (``include_stage_context=False``): the LLM learns theme description /
+    business-needs writing style only, never historic stage names, reasons,
+    evidence, support types, or epic ids. Stored/index documents are unaffected;
+    this flag only governs what is handed to the LLM as context. Set the flag to
+    ``True`` to opt back into historic stage context in a later phase.
+    """
     examples: list[dict[str, Any]] = []
     for doc in theme_docs or []:
         if not isinstance(doc, dict):
@@ -151,16 +160,16 @@ def select_theme_examples_for_prompt(
         business_needs = _text(properties.get("business_needs"))
         if not theme_description and not business_needs:
             continue  # nothing to learn from
-        examples.append(
-            {
-                "ticket_id": _text(doc.get("ticket_id")),
-                "group_id": _text(doc.get("group_id")),
-                "theme_description": theme_description,
-                "business_needs": business_needs,
-                "value_streams": list(properties.get("value_streams") or []),
-                "stages": list(properties.get("stages") or []),
-            }
-        )
+        example = {
+            "ticket_id": _text(doc.get("ticket_id")),
+            "group_id": _text(doc.get("group_id")),
+            "theme_description": theme_description,
+            "business_needs": business_needs,
+            "value_streams": list(properties.get("value_streams") or []),
+        }
+        if include_stage_context:
+            example["stages"] = list(properties.get("stages") or [])
+        examples.append(example)
         if max_examples is not None and len(examples) >= max_examples:
             break
     return examples

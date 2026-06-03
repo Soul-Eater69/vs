@@ -188,7 +188,21 @@ def test_select_examples_strips_content_vector_and_keeps_compact_fields() -> Non
     ex = examples[0]
     assert "content_vector" not in ex
     assert "content" not in ex
-    assert set(ex) == {"ticket_id", "group_id", "theme_description", "business_needs", "value_streams", "stages"}
+    # Historic stages are excluded from prompt examples by default.
+    assert set(ex) == {"ticket_id", "group_id", "theme_description", "business_needs", "value_streams"}
+
+
+def test_select_examples_excludes_historic_stages_by_default() -> None:
+    doc = _theme("IDMT-1", "G1")  # _theme includes properties.stages
+    examples = select_theme_examples_for_prompt(theme_docs=[doc])
+    assert "stages" not in examples[0]
+
+
+def test_select_examples_includes_stages_only_when_flag_set() -> None:
+    doc = _theme("IDMT-1", "G1")
+    examples = select_theme_examples_for_prompt(theme_docs=[doc], include_stage_context=True)
+    assert "stages" in examples[0]
+    assert examples[0]["stages"] == [{"stage_name": "Account Configuration"}]
 
 
 def test_select_examples_skips_blank_examples() -> None:

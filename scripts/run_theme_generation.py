@@ -22,7 +22,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from vs_app.ingestion.theme_generation.orchestrator import generate_themes_for_idea
+from vs_app.theme_generation.orchestrator import generate_themes_for_idea
 from vs_app.ingestion.upload.azure_search_client import resolve_index_name
 from vs_app.modules.stages.stage_catalog import get_allowed_stages, load_stage_catalog
 
@@ -80,7 +80,7 @@ def make_generation_service() -> Any:
 
 def make_theme_generation_search_adapter(index_name: str) -> Any:
     from vs_app.integrations.clients.azure_direct_client import AzureDirectSearchClient
-    from vs_app.ingestion.theme_generation.search_adapter import (
+    from vs_app.theme_generation.search_adapter import (
         ThemeGenerationSearchAdapter,
     )
 

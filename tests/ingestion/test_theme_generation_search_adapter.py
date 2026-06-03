@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from vs_app.ingestion.theme_generation.search_adapter import ThemeGenerationSearchAdapter
+from vs_app.theme_generation.search_adapter import ThemeGenerationSearchAdapter
 
 IDMT_FILTER = "document_type eq 'idmt'"
 
@@ -186,7 +186,7 @@ def test_adapter_is_read_only() -> None:
 
 def test_adapter_works_in_retrieval_pipeline() -> None:
     # End-to-end with the 14A helpers using the adapter as the injected client.
-    from vs_app.ingestion.theme_generation.retrieval import (
+    from vs_app.theme_generation.retrieval import (
         extract_matching_theme_refs,
         fetch_theme_examples,
         search_idmt_examples,

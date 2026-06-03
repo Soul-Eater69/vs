@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import vs_app.ingestion.theme_generation.orchestrator as orch
-from vs_app.ingestion.theme_generation.orchestrator import (
+import vs_app.theme_generation.orchestrator as orch
+from vs_app.theme_generation.orchestrator import (
     generate_theme_for_value_stream,
     generate_themes_for_idea,
 )

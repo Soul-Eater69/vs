@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from vs_app.ingestion.theme_generation.generation import generate_theme_description
+from vs_app.theme_generation.descriptions import generate_theme_description
 from vs_app.modules.prompts.loader import build_theme_generation_prompt
 from vs_app.modules.prompts.schemas import ThemeGenerationResult
 
@@ -172,7 +172,7 @@ def test_no_retrieval_or_stage_prediction_imports() -> None:
     # jira / embedding code (docstrings may reference them by name; imports may not).
     import ast
 
-    import vs_app.ingestion.theme_generation.generation as gen
+    import vs_app.theme_generation.descriptions as gen
 
     tree = ast.parse(open(gen.__file__, encoding="utf-8").read())
     imported: list[str] = []

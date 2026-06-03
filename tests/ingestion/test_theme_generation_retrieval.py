@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from vs_app.ingestion.theme_generation.retrieval import (
+from vs_app.theme_generation.retrieval import (
     IDMT_FILTER,
     extract_matching_theme_refs,
     fetch_theme_examples,

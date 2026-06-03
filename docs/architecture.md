@@ -66,3 +66,27 @@ python -m vs_app.jobs.jira_batch.jobs.extract_tickets
 ```
 
 Jira is the active ticket source. Older Neo4j and chunk-ingestion surfaces have been removed; they are not part of the runtime.
+
+## Production package boundaries
+
+Phase 1 of the production restructure introduces first-class top-level packages
+under `src/vs_app/` that mark the intended boundaries:
+
+- `sources/` — external extraction (e.g. Jira).
+- `data_ingestion/` — batch/offline storage and indexing into Cosmos / Azure AI Search.
+- `value_stream_generation/` — runtime Value Stream generation.
+- `stage_generation/` — runtime stage selection.
+- `theme_generation/` — runtime Theme/Epic field generation.
+- `storage/` — persistence adapters (Cosmos, search).
+- `integrations/` — low-level external clients.
+
+Runtime Theme-generation code now lives at `vs_app.theme_generation`
+(`retrieval`, `descriptions`, `orchestrator`, `search_adapter`). The previous
+location `vs_app.ingestion.theme_generation` remains as thin compatibility shims
+that re-export from the new path, so existing imports keep working. Ingestion,
+index-document building, upload, ground-truth, extraction, and persistence code
+remain under `vs_app.ingestion`.
+
+The `data_ingestion`, `sources`, `value_stream_generation`, `stage_generation`,
+`storage`, `domain`, and `validation` packages are docstring-only skeletons in
+Phase 1 — boundaries are declared but not yet wired.

@@ -224,7 +224,7 @@ def test_debug_counts_and_top_n_passthrough() -> None:
         ThemeGenerationRequest(idea_card_text="idea", top_n_value_streams=7),
         captured=captured,
     )
-    assert result.debug == {"value_stream_count": 1, "theme_count": 1}
+    assert result.debug == {"value_stream_count": 1, "theme_count": 1, "ticket_resolved": False}
     # top_n flows through to Value Stream generation.
     assert captured.get("final_output_count") == 7
 

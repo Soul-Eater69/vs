@@ -13,10 +13,30 @@ from pydantic import BaseModel
 
 
 class ThemeGenerationResult(BaseModel):
-    """Output of the theme_generation prompt (description + business needs)."""
+    """Output of the legacy combined theme_generation prompt (description + needs).
+
+    Retained for backward compatibility. Runtime generation now uses the split
+    ``ThemeDescriptionResult`` and ``BusinessNeedsResult`` below.
+    """
 
     theme_description: str = ""
     business_needs: str = ""
 
 
-__all__ = ["ThemeGenerationResult"]
+class ThemeDescriptionResult(BaseModel):
+    """Output of theme_description_generation.yaml."""
+
+    theme_description: str = ""
+
+
+class BusinessNeedsResult(BaseModel):
+    """Output of business_needs_generation.yaml."""
+
+    business_needs: str = ""
+
+
+__all__ = [
+    "ThemeGenerationResult",
+    "ThemeDescriptionResult",
+    "BusinessNeedsResult",
+]

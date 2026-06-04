@@ -1,13 +1,14 @@
-"""Theme Description generation (split from Business Needs).
+"""Business Needs generation (split from Theme Description).
 
-Generates the Jira Theme Description (high-level product/program overview +
-Product Availability) for one selected value stream via an injected LLM. Pure LLM
-wrapper: no retrieval, no embedding, no Azure, no Jira, no stage selection, and no
-historic stage context. Stages are passed as reference context only.
+Generates the Jira Business Needs for one selected value stream, organized by the
+already-selected Value Stage(s), via an injected LLM. Pure LLM wrapper: no
+retrieval, no Azure, no Jira, no stage selection.
 
-The ``llm`` duck-type exposes ``generate_structured(query, output_schema,
-system_prompt, reasoning_effort)``, or ``invoke``/``generate``, or is callable.
-Lenient: never raises — failures become a blank description plus warnings.
+Inputs are intentionally narrow: the generated summary / idea context, the
+selected value stream, and the selected stages. It does NOT receive historic
+examples, historic stage context, or L2/L3 capabilities.
+
+Lenient: a missing llm or malformed output returns an empty string plus warnings.
 """
 
 from __future__ import annotations
@@ -17,70 +18,60 @@ import re
 from typing import Any
 
 from vs_app.modules.prompts.loader import load_prompt_yaml, render_prompt, safe_json_extract
-from vs_app.modules.prompts.schemas import ThemeDescriptionResult
+from vs_app.modules.prompts.schemas import BusinessNeedsResult
 
-# Jira id shapes that must not appear in generated narrative text.
 _JIRA_ID_RE = re.compile(r"\b(?:IDMT|GROUP|EPIC)-\d+\b", re.IGNORECASE)
 
-# Example fields shown to the LLM for style only — never stages (no historic
-# stage context) and never vectors / raw content.
-_EXAMPLE_FIELDS = ("ticket_id", "group_id", "theme_description", "business_needs", "value_streams")
 
-
-def generate_theme_description(
+def generate_business_needs(
     *,
     idea_context: str,
     value_stream_name: str,
-    allowed_stages: list[str],
     selected_stages: list[dict[str, Any]] | list[str],
-    examples: list[dict[str, Any]],
     llm: Any,
 ) -> dict[str, Any]:
-    """Generate the theme_description for the selected value stream.
+    """Generate business_needs organized by the selected stages.
 
-    Returns ``{theme_description, warnings, raw_response}``. Business needs are a
-    separate generator (:func:`vs_app.theme_generation.business_needs`).
+    Returns ``{business_needs, warnings, raw_response}``.
     """
     warnings: list[str] = []
-    if not examples:
-        warnings.append("no historic examples available")
+    if not selected_stages:
+        warnings.append("no selected stages provided")
 
     if llm is None:
-        warnings.append("no llm provided for theme description")
+        warnings.append("no llm provided for business needs")
         return _result("", warnings, "")
 
-    payload = load_prompt_yaml("theme_description_generation")
+    payload = load_prompt_yaml("business_needs_generation")
     prompt = render_prompt(
         str(payload.get("user") or payload.get("template") or ""),
         idea_context=_clean(idea_context),
         value_stream_name=_clean(value_stream_name),
-        allowed_stages=json.dumps(_stage_name_list(allowed_stages), indent=2),
         selected_stages=json.dumps(_selected_stage_list(selected_stages), indent=2),
-        examples=json.dumps(_compact_examples(examples), indent=2),
     )
     system_prompt = str(payload.get("system") or "").strip()
 
     try:
         parsed, raw_response = _call_llm(prompt, system_prompt, llm)
-        output = ThemeDescriptionResult.model_validate(parsed or {})
+        output = BusinessNeedsResult.model_validate(parsed or {})
     except Exception as exc:  # noqa: BLE001 - lenient: never raise
-        warnings.append(f"theme description failed: {type(exc).__name__}")
+        warnings.append(f"business needs failed: {type(exc).__name__}")
         return _result("", warnings, "")
 
-    theme_description = _clean(output.theme_description)
-    if not theme_description:
-        warnings.append("empty theme_description")
-    if _JIRA_ID_RE.search(theme_description):
+    business_needs = _clean(output.business_needs)
+    if not business_needs:
+        warnings.append("empty business_needs")
+    if _JIRA_ID_RE.search(business_needs):
         warnings.append("generated text contains Jira-like IDs")
 
-    return _result(theme_description, warnings, raw_response)
+    return _result(business_needs, warnings, raw_response)
 
 
 def _call_llm(prompt: str, system_prompt: str, llm: Any) -> tuple[dict[str, Any], str]:
     if hasattr(llm, "generate_structured"):
         result = llm.generate_structured(
             query=prompt,
-            output_schema=ThemeDescriptionResult,
+            output_schema=BusinessNeedsResult,
             system_prompt=system_prompt,
             reasoning_effort="low",
         )
@@ -116,16 +107,6 @@ def _call_llm(prompt: str, system_prompt: str, llm: Any) -> tuple[dict[str, Any]
     return safe_json_extract(raw_response), raw_response
 
 
-def _compact_examples(examples: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep only safe style fields — never stages, vectors, or raw content."""
-    compact: list[dict[str, Any]] = []
-    for example in examples or []:
-        if not isinstance(example, dict):
-            continue
-        compact.append({field: example.get(field) for field in _EXAMPLE_FIELDS if field in example})
-    return compact
-
-
 def _selected_stage_list(selected_stages: list[dict[str, Any]] | list[str]) -> list[str]:
     names: list[str] = []
     for stage in selected_stages or []:
@@ -138,13 +119,9 @@ def _selected_stage_list(selected_stages: list[dict[str, Any]] | list[str]) -> l
     return names
 
 
-def _stage_name_list(allowed_stages: list[str]) -> list[str]:
-    return [_clean(stage) for stage in allowed_stages or [] if _clean(stage)]
-
-
-def _result(theme_description: str, warnings: list[str], raw_response: str) -> dict[str, Any]:
+def _result(business_needs: str, warnings: list[str], raw_response: str) -> dict[str, Any]:
     return {
-        "theme_description": theme_description,
+        "business_needs": business_needs,
         "warnings": warnings,
         "raw_response": raw_response,
     }
@@ -154,4 +131,4 @@ def _clean(value: Any) -> str:
     return " ".join(str(value or "").split())
 
 
-__all__ = ["generate_theme_description"]
+__all__ = ["generate_business_needs"]

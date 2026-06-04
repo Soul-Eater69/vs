@@ -75,8 +75,10 @@ class FakeLLM:
             return output_schema(
                 picks=[{"stage": "Account Configuration", "confidence": 0.88, "reason": "Set up accounts."}]
             )
-        if name == "ThemeGenerationResult":
-            return output_schema(theme_description="A CPQ theme.", business_needs="Faster quoting.")
+        if name == "ThemeDescriptionResult":
+            return output_schema(theme_description="A CPQ theme.")
+        if name == "BusinessNeedsResult":
+            return output_schema(business_needs="Faster quoting.")
         if name == "L2CapabilityResult":
             return output_schema(
                 capabilities=[{"capability_name": "Quote Management", "rationale": "Manage quotes.", "confidence": 0.9}]
@@ -139,9 +141,19 @@ def test_composes_value_stream_stages_and_description() -> None:
     assert "Generated ticket summary about quoting." in llm.stage_query
     assert "SECRET idea card body" not in llm.stage_query
 
-    # Description / business needs
+    # Description / business needs (two independent LLM calls)
     assert theme.theme_description == "A CPQ theme."
     assert theme.business_needs == "Faster quoting."
+
+    # Composition order: stages -> description -> business_needs -> L2 -> L3.
+    order = [s for s in llm.seen_schemas if s != "ThemeTitleResult"]
+    assert order == [
+        "ValueStageSelectionResult",
+        "ThemeDescriptionResult",
+        "BusinessNeedsResult",
+        "L2CapabilityResult",
+        "L3CapabilityResult",
+    ]
 
     # L2 / L3 capabilities
     assert [c.capability_name for c in theme.l2_capabilities] == ["Quote Management"]

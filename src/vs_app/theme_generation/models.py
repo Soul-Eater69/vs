@@ -16,6 +16,52 @@ from vs_app.value_stream_generation.models import GeneratedValueStream
 
 
 @dataclass(slots=True)
+class GeneratedL2Capability:
+    """One L2 (mid-level) business capability for a theme."""
+
+    capability_name: str
+    rationale: str
+    confidence: float
+    capability_id: str = ""
+
+    @property
+    def confidence_score(self) -> int:
+        return max(0, min(100, round(float(self.confidence or 0.0) * 100)))
+
+    def to_dict(self) -> dict:
+        return {
+            "capability_id": self.capability_id,
+            "capability_name": self.capability_name,
+            "rationale": self.rationale,
+            "confidence_score": self.confidence_score,
+        }
+
+
+@dataclass(slots=True)
+class GeneratedL3Capability:
+    """One L3 (sub-) business capability rolling up to an L2 capability."""
+
+    capability_name: str
+    parent_l2_capability_name: str
+    rationale: str
+    confidence: float
+    capability_id: str = ""
+
+    @property
+    def confidence_score(self) -> int:
+        return max(0, min(100, round(float(self.confidence or 0.0) * 100)))
+
+    def to_dict(self) -> dict:
+        return {
+            "capability_id": self.capability_id,
+            "capability_name": self.capability_name,
+            "parent_l2_capability_name": self.parent_l2_capability_name,
+            "rationale": self.rationale,
+            "confidence_score": self.confidence_score,
+        }
+
+
+@dataclass(slots=True)
 class ThemeGenerationRequest:
     """Input for runtime theme composition for one IDMT request."""
 
@@ -33,6 +79,8 @@ class GeneratedTheme:
     stages: list[GeneratedStage] = field(default_factory=list)
     theme_description: str = ""
     business_needs: str = ""
+    l2_capabilities: list[GeneratedL2Capability] = field(default_factory=list)
+    l3_capabilities: list[GeneratedL3Capability] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -41,6 +89,8 @@ class GeneratedTheme:
             "stages": [stage.to_dict() for stage in self.stages],
             "theme_description": self.theme_description,
             "business_needs": self.business_needs,
+            "l2_capabilities": [cap.to_dict() for cap in self.l2_capabilities],
+            "l3_capabilities": [cap.to_dict() for cap in self.l3_capabilities],
         }
 
 
@@ -61,6 +111,8 @@ class ThemeGenerationResult:
 
 
 __all__ = [
+    "GeneratedL2Capability",
+    "GeneratedL3Capability",
     "ThemeGenerationRequest",
     "GeneratedTheme",
     "ThemeGenerationResult",

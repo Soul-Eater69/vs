@@ -71,6 +71,21 @@ class FakeLLM:
             )
         if name == "ThemeGenerationResult":
             return output_schema(theme_description="A CPQ theme.", business_needs="Faster quoting.")
+        if name == "L2CapabilityResult":
+            return output_schema(
+                capabilities=[{"capability_name": "Quote Management", "rationale": "Manage quotes.", "confidence": 0.9}]
+            )
+        if name == "L3CapabilityResult":
+            return output_schema(
+                capabilities=[
+                    {
+                        "capability_name": "Quote Versioning",
+                        "parent_l2_capability_name": "Quote Management",
+                        "rationale": "Track versions.",
+                        "confidence": 0.7,
+                    }
+                ]
+            )
         return output_schema()
 
 
@@ -105,6 +120,11 @@ def test_composes_value_stream_stages_and_description() -> None:
     assert theme.theme_description == "A CPQ theme."
     assert theme.business_needs == "Faster quoting."
 
+    # L2 / L3 capabilities
+    assert [c.capability_name for c in theme.l2_capabilities] == ["Quote Management"]
+    assert [c.capability_name for c in theme.l3_capabilities] == ["Quote Versioning"]
+    assert theme.l3_capabilities[0].parent_l2_capability_name == "Quote Management"
+
 
 def test_public_to_dict_nests_agreed_contracts() -> None:
     result = _run(ThemeGenerationRequest(idea_card_text="idea"))
@@ -112,7 +132,27 @@ def test_public_to_dict_nests_agreed_contracts() -> None:
 
     assert set(payload) == {"themes", "warnings", "debug"}
     theme = payload["themes"][0]
-    assert set(theme) == {"value_stream", "stages", "theme_description", "business_needs"}
+    assert set(theme) == {
+        "value_stream",
+        "stages",
+        "theme_description",
+        "business_needs",
+        "l2_capabilities",
+        "l3_capabilities",
+    }
+    assert set(theme["l2_capabilities"][0]) == {
+        "capability_id",
+        "capability_name",
+        "rationale",
+        "confidence_score",
+    }
+    assert set(theme["l3_capabilities"][0]) == {
+        "capability_id",
+        "capability_name",
+        "parent_l2_capability_name",
+        "rationale",
+        "confidence_score",
+    }
 
     # nested Value Stream public contract
     assert set(theme["value_stream"]) == {

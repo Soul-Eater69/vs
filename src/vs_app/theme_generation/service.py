@@ -16,8 +16,14 @@ from typing import Any, Callable
 
 from vs_app.modules.rag.service import ValueStreamRagService
 from vs_app.modules.stages.stage_catalog import get_allowed_stages
+from vs_app.theme_generation.capabilities import (
+    generate_l2_capabilities,
+    generate_l3_capabilities,
+)
 from vs_app.theme_generation.descriptions import generate_theme_description
 from vs_app.theme_generation.models import (
+    GeneratedL2Capability,
+    GeneratedL3Capability,
     GeneratedTheme,
     ThemeGenerationRequest,
     ThemeGenerationResult,
@@ -56,17 +62,19 @@ async def generate_themes(
     stage_catalog: dict | None = None,
     rag_service: ValueStreamRagService | None = None,
     example_provider: ExampleProvider | None = None,
+    generate_capabilities: bool = True,
 ) -> ThemeGenerationResult:
     """Compose one Theme per selected Value Stream.
 
     Flow: Value Stream generation -> stage generation (per Value Stream) ->
-    theme description / business-needs. Each dependency is injectable so this is
-    fully testable with fakes:
+    theme description / business-needs -> L2/L3 capabilities. Each dependency is
+    injectable so this is fully testable with fakes:
     - ``rag_service`` drives Value Stream generation,
-    - ``llm`` drives stage selection and description generation,
+    - ``llm`` drives stage selection, description, and capability generation,
     - ``stage_catalog`` supplies the allowed stage dropdown per Value Stream,
     - ``example_provider`` optionally supplies historic theme examples (no stage
-      context); when omitted, generation proceeds without historic examples.
+      context); when omitted, generation proceeds without historic examples,
+    - ``generate_capabilities`` toggles L2/L3 capability generation (default on).
     """
     catalog = stage_catalog or {}
 
@@ -89,6 +97,7 @@ async def generate_themes(
             catalog=catalog,
             llm=llm,
             example_provider=example_provider,
+            generate_capabilities=generate_capabilities,
         )
         themes.append(theme)
 
@@ -110,6 +119,7 @@ def _theme_for_value_stream(
     catalog: dict,
     llm: Any | None,
     example_provider: ExampleProvider | None,
+    generate_capabilities: bool,
 ) -> GeneratedTheme:
     allowed_stages = get_allowed_stages(value_stream.name, catalog)
 
@@ -136,14 +146,44 @@ def _theme_for_value_stream(
         examples=examples,
         llm=llm,
     )
+    theme_description = str(theme_text.get("theme_description") or "").strip()
+    business_needs = str(theme_text.get("business_needs") or "").strip()
 
-    warnings = _dedupe(list(stage_result.warnings) + list(theme_text.get("warnings") or []))
+    warnings = list(stage_result.warnings) + list(theme_text.get("warnings") or [])
+
+    l2_capabilities = []
+    l3_capabilities = []
+    if generate_capabilities:
+        # L2 first, then L3 with the generated L2 capabilities as parent context.
+        l2_capabilities, l2_warnings = generate_l2_capabilities(
+            idea_context=idea_context,
+            value_stream_name=value_stream.name,
+            selected_stages=selected_stages,
+            theme_description=theme_description,
+            business_needs=business_needs,
+            examples=examples,
+            llm=llm,
+        )
+        warnings.extend(l2_warnings)
+        l3_capabilities, l3_warnings = generate_l3_capabilities(
+            idea_context=idea_context,
+            value_stream_name=value_stream.name,
+            selected_stages=selected_stages,
+            theme_description=theme_description,
+            business_needs=business_needs,
+            l2_capabilities=l2_capabilities,
+            llm=llm,
+        )
+        warnings.extend(l3_warnings)
+
     return GeneratedTheme(
         value_stream=value_stream,
         stages=stage_result.stages,
-        theme_description=str(theme_text.get("theme_description") or "").strip(),
-        business_needs=str(theme_text.get("business_needs") or "").strip(),
-        warnings=warnings,
+        theme_description=theme_description,
+        business_needs=business_needs,
+        l2_capabilities=l2_capabilities,
+        l3_capabilities=l3_capabilities,
+        warnings=_dedupe(warnings),
     )
 
 
@@ -166,5 +206,7 @@ __all__ = [
     "ValueStreamGenerationResult",
     "ThemeGenerationRequest",
     "GeneratedTheme",
+    "GeneratedL2Capability",
+    "GeneratedL3Capability",
     "ThemeGenerationResult",
 ]

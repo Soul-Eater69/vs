@@ -29,4 +29,4 @@ user: |
   - Do not use historic stage context or historic examples to infer facts.
   - Do not copy ticket/group/epic IDs (IDMT-..., GROUP-..., EPIC-...) into the text.
 
-  Return a JSON object with a single field "business_needs".
+  Produce the structured response according to the schema.

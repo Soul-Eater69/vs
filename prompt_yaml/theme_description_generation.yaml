@@ -38,4 +38,4 @@ user: |
   - Do not use historic stage context.
   - Do not copy ticket/group/epic IDs (IDMT-..., GROUP-..., EPIC-...) into the text.
 
-  Return a JSON object with a single field "theme_description".
+  Produce the structured response according to the schema.

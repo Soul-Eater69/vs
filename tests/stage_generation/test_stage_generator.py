@@ -142,3 +142,135 @@ def test_match_allowed_stage_unit() -> None:
     assert match_allowed_stage("  Account   Configuration ", ALLOWED) == "Account Configuration"
     assert match_allowed_stage("Invented", ALLOWED) is None
     assert match_allowed_stage("", ALLOWED) is None
+
+
+# --- summary-only alignment ------------------------------------------------------
+
+
+def test_uses_summary_only_prompt_and_summary_input() -> None:
+    captured: dict = {}
+    _run(
+        StageGenerationRequest(
+            value_stream_name=VS,
+            allowed_stages=ALLOWED,
+            generated_summary="Generated ticket summary text.",
+        ),
+        captured=captured,
+    )
+    # summary-only prompt is selected explicitly
+    assert captured["prompt_name"] == "value_stage_prediction_summary"
+    # only the generated summary flows in as the ticket context
+    assert captured["idea_card_text"] == "Generated ticket summary text."
+    # only summary-only inputs are passed to the predictor — no leakage fields
+    assert set(captured) == {
+        "idea_card_text",
+        "value_stream_name",
+        "allowed_stages",
+        "value_stream_description",
+        "llm",
+        "max_output_stages",
+        "prompt_name",
+    }
+
+
+def test_generated_summary_preferred_over_idea_card_text() -> None:
+    captured: dict = {}
+    _run(
+        StageGenerationRequest(
+            value_stream_name=VS,
+            allowed_stages=ALLOWED,
+            generated_summary="THE SUMMARY",
+            idea_card_text="raw idea card body",
+        ),
+        captured=captured,
+    )
+    assert captured["idea_card_text"] == "THE SUMMARY"
+
+
+def test_support_maps_to_support_type() -> None:
+    def predict_fn(**kwargs):
+        return {
+            "value_stream_name": VS,
+            "allowed_stages": ALLOWED,
+            "predicted_stages": [
+                {"stage": "Account Configuration", "confidence": 0.9, "reason": "r", "support": "direct"},
+                {"stage": "Generate Quote and Present to Customer", "confidence": 0.4, "reason": "r", "support": "implied"},
+            ],
+            "warnings": [],
+        }
+
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name=VS, allowed_stages=ALLOWED, generated_summary="s"),
+        llm=object(),
+        predict_fn=predict_fn,
+    )
+    assert [s.support_type for s in result.stages] == ["direct", "implied"]
+
+
+def test_rejected_stages_never_surfaced() -> None:
+    def predict_fn(**kwargs):
+        return {
+            "value_stream_name": VS,
+            "allowed_stages": ALLOWED,
+            "predicted_stages": [{"stage": "Account Configuration", "confidence": 0.9, "reason": "r"}],
+            "rejected_stages": [{"stage": "Generate Quote and Present to Customer", "reason": "not supported"}],
+            "warnings": [],
+        }
+
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name=VS, allowed_stages=ALLOWED, generated_summary="s"),
+        llm=object(),
+        predict_fn=predict_fn,
+    )
+    public = result.to_dict()
+    # no rejection keys anywhere in the public output
+    assert "rejected_stages" not in public
+    for stage in public["stages"]:
+        assert "rejected_stages" not in stage
+        assert "rejection_reason" not in stage
+        assert "rejection_rationale" not in stage
+
+
+def test_request_does_not_accept_leakage_fields() -> None:
+    import pytest
+
+    for bad in ("theme_description", "business_needs", "l2_capabilities", "raw_description"):
+        with pytest.raises(TypeError):
+            StageGenerationRequest(value_stream_name=VS, allowed_stages=ALLOWED, **{bad: "x"})
+
+
+def test_real_predictor_loads_summary_prompt_and_returns_support() -> None:
+    # Exercises the real predictor (default predict_fn) so the summary prompt is
+    # actually loaded and rendered. Fake structured llm — no network.
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.query = ""
+
+        def generate_structured(self, *, query, output_schema, system_prompt=None, reasoning_effort=None):
+            self.query = query
+            return output_schema(
+                picks=[
+                    {
+                        "stage": "Account Configuration",
+                        "confidence": 0.9,
+                        "reason": "Summary mentions account setup.",
+                        "support": "direct",
+                        "evidence_summary": "configure accounts",
+                    }
+                ]
+            )
+
+    llm = FakeLLM()
+    result = generate_stages(
+        StageGenerationRequest(
+            value_stream_name=VS,
+            allowed_stages=ALLOWED,
+            generated_summary="Configure accounts and produce quotes.",
+        ),
+        llm=llm,
+    )
+    # prompt rendered cleanly and used the generated summary
+    assert "Generated summary" in llm.query
+    assert "Configure accounts and produce quotes." in llm.query
+    assert [s.stage_name for s in result.stages] == ["Account Configuration"]
+    assert result.stages[0].support_type == "direct"

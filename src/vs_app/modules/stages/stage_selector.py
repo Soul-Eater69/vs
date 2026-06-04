@@ -12,6 +12,10 @@ class ValueStagePick(BaseModel):
     stage: str = ""
     confidence: float = 0.0
     reason: str = ""
+    # Optional summary-mode fields. Populated by value_stage_prediction_summary;
+    # blank under the legacy value_stage_selection prompt.
+    support: str = ""
+    evidence_summary: str = ""
 
 
 class ValueStageSelectionResult(BaseModel):
@@ -26,6 +30,7 @@ def predict_value_stream_stages(
     value_stream_description: str = "",
     llm: Any | None = None,
     max_output_stages: int | None = None,
+    prompt_name: str = "value_stage_selection",
 ) -> dict[str, Any]:
     allowed = _dedupe_exact([str(stage).strip() for stage in allowed_stages or [] if str(stage).strip()])
     warnings: list[str] = []
@@ -53,6 +58,7 @@ def predict_value_stream_stages(
             allowed_stages=allowed,
             value_stream_description=value_stream_description,
             llm=llm,
+            prompt_name=prompt_name,
         )
     except Exception as exc:
         return {
@@ -83,6 +89,8 @@ def predict_value_stream_stages(
                 "stage": stage,
                 "confidence": _clamp_float(pick.get("confidence")),
                 "reason": str(pick.get("reason") or "").strip(),
+                "support": _norm_support(pick.get("support")),
+                "evidence_summary": str(pick.get("evidence_summary") or "").strip(),
             }
         )
         if max_output_stages is not None and len(selected) >= max_output_stages:
@@ -104,8 +112,9 @@ def _call_stage_selector_llm(
     allowed_stages: list[str],
     value_stream_description: str,
     llm: Any,
+    prompt_name: str = "value_stage_selection",
 ) -> tuple[dict[str, Any], str]:
-    payload = load_prompt_yaml("value_stage_selection")
+    payload = load_prompt_yaml(prompt_name)
     prompt = render_prompt(
         str(payload.get("user") or payload.get("template") or ""),
         idea_card_text=str(idea_card_text or "").strip(),
@@ -162,6 +171,12 @@ def _dedupe_exact(values: list[str]) -> list[str]:
             seen.add(value)
             out.append(value)
     return out
+
+
+def _norm_support(value: Any) -> str:
+    """Normalize stage support to ``direct`` / ``implied`` / ``""``."""
+    text = str(value or "").strip().lower()
+    return text if text in {"direct", "implied"} else ""
 
 
 def _clamp_float(value: Any) -> float:

@@ -68,6 +68,9 @@ class ThemeGenerationRequest:
     idea_card_text: str | None = None
     ticket_id: str | None = None
     idmt_title: str = ""
+    # Summary-only context for stage prediction (ticket/generated summary). Stage
+    # generation uses this, never the idea card body or description.
+    generated_summary: str = ""
     top_n_value_streams: int = 10
     custom_instruction: str | None = None
 

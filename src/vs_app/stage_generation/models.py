@@ -46,10 +46,18 @@ class GeneratedStage:
 
 @dataclass(slots=True)
 class StageGenerationRequest:
-    """Input for runtime stage generation under a single Value Stream."""
+    """Input for runtime stage generation under a single Value Stream.
+
+    Stage prediction is summary-only: ``generated_summary`` is the authoritative
+    (and only) ticket context handed to the LLM, alongside the selected value
+    stream and its approved stages. ``idea_card_text`` is kept only as a
+    backward-compatible fallback for existing direct callers; new callers should
+    pass ``generated_summary`` and must not pass the raw idea card body here.
+    """
 
     value_stream_name: str
     allowed_stages: list[str] = field(default_factory=list)
+    generated_summary: str = ""
     idea_card_text: str | None = None
     value_stream_description: str = ""
     max_output_stages: int | None = None

@@ -32,14 +32,21 @@ def generate_stages(
     ``llm`` and ``predict_fn`` are injectable so tests can supply fakes; the
     default predictor performs a live LLM call only when actually run with an
     ``llm``.
+
+    Stage prediction is summary-only: the only ticket context passed to the
+    predictor is ``generated_summary`` (falling back to ``idea_card_text`` for
+    legacy callers) — never the raw description, theme text, capabilities, or any
+    historic stage context. The summary-only prompt is selected explicitly.
     """
+    summary_text = request.generated_summary or (request.idea_card_text or "")
     prediction = predict_fn(
-        idea_card_text=request.idea_card_text or "",
+        idea_card_text=summary_text,
         value_stream_name=request.value_stream_name,
         allowed_stages=request.allowed_stages,
         value_stream_description=request.value_stream_description,
         llm=llm,
         max_output_stages=request.max_output_stages,
+        prompt_name="value_stage_prediction_summary",
     )
     return _result_from_prediction(prediction, request=request)
 
@@ -71,6 +78,11 @@ def _result_from_prediction(
             continue
         seen.add(key)
 
+        # Map the selector's summary-mode support to support_type when present;
+        # blank otherwise. Rejected-stage buckets are never surfaced here.
+        support = str(pick.get("support") or "").strip().lower()
+        support_type = support if support in {"direct", "implied"} else ""
+
         stages.append(
             GeneratedStage(
                 stage_name=canonical,
@@ -78,7 +90,7 @@ def _result_from_prediction(
                 rationale=str(pick.get("reason") or "").strip(),
                 confidence=_float(pick.get("confidence")),
                 stage_id="",
-                support_type="",
+                support_type=support_type,
             )
         )
 

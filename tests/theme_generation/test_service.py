@@ -60,6 +60,17 @@ def test_facade_returns_generation_contract() -> None:
     assert vs.support_type == "direct"
     assert vs.historic_idmt_ids == ["IDMT-1001"]
 
+    # API-facing public contract shape.
+    public = vs.to_dict()
+    assert public == {
+        "value_stream_id": "VS-CPQ",
+        "value_stream_name": "Configure, Price, and Quote",
+        "rationale": "Quoting automation.",
+        "confidence_score": 90,
+        "support_type": "direct",
+        "historic_idmt_ids": ["IDMT-1001"],
+    }
+
 
 def test_facade_delegates_to_generator(monkeypatch) -> None:
     sentinel = ValueStreamGenerationResult(value_streams=[], warnings=["delegated"], debug={})

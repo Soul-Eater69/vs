@@ -113,6 +113,56 @@ def test_normalizes_rag_payload_into_contract() -> None:
     assert cpq.historic_idmt_ids == ["IDMT-1001"]
 
 
+def test_to_dict_emits_exact_public_contract() -> None:
+    result = _run(ValueStreamGenerationRequest(idea_card_text="idea"))
+    public = result.value_streams[0].to_dict()
+
+    # Exact public key set — no internal fields (no entity_id/name/confidence/evidence).
+    assert set(public) == {
+        "value_stream_id",
+        "value_stream_name",
+        "rationale",
+        "confidence_score",
+        "support_type",
+        "historic_idmt_ids",
+    }
+    assert public["value_stream_id"] == "VS-CPQ"
+    assert public["value_stream_name"] == "Configure, Price, and Quote"
+    assert public["rationale"] == "Aligns to quoting and account configuration."
+    assert public["support_type"] == "direct"
+    assert public["historic_idmt_ids"] == ["IDMT-1001"]
+    # 0–1 confidence -> 0–100 integer score.
+    assert public["confidence_score"] == 92
+    assert isinstance(public["confidence_score"], int)
+
+
+def test_confidence_score_scaling_and_clamping() -> None:
+    from vs_app.value_stream_generation.models import GeneratedValueStream
+
+    assert GeneratedValueStream("n", "i", "direct", 0.0, "r").to_dict()["confidence_score"] == 0
+    assert GeneratedValueStream("n", "i", "direct", 0.4, "r").to_dict()["confidence_score"] == 40
+    assert GeneratedValueStream("n", "i", "direct", 1.0, "r").to_dict()["confidence_score"] == 100
+    # defensive clamp if an out-of-range confidence ever slips through
+    assert GeneratedValueStream("n", "i", "direct", 1.5, "r").to_dict()["confidence_score"] == 100
+
+
+def test_result_to_dict_wraps_public_value_streams() -> None:
+    result = _run(ValueStreamGenerationRequest(idea_card_text="idea"))
+    payload = result.to_dict()
+    assert set(payload) == {"value_streams", "warnings", "debug"}
+    assert all(
+        set(vs) == {
+            "value_stream_id",
+            "value_stream_name",
+            "rationale",
+            "confidence_score",
+            "support_type",
+            "historic_idmt_ids",
+        }
+        for vs in payload["value_streams"]
+    )
+
+
 def test_dropped_non_approved_name_emits_warning() -> None:
     result = _run(ValueStreamGenerationRequest(idea_card_text="idea"))
     assert any("Totally Fake Stream XYZ" in w for w in result.warnings)

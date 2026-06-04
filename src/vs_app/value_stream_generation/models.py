@@ -17,7 +17,12 @@ SupportType = str  # "direct" | "implied"
 
 @dataclass(slots=True)
 class GeneratedValueStream:
-    """One runtime Value Stream candidate for a new IDMT request."""
+    """One runtime Value Stream candidate for a new IDMT request.
+
+    Internal fields keep the natural shapes (``confidence`` stays a 0–1 float,
+    ``evidence`` is retained for debug). ``to_dict`` emits the API-facing public
+    contract, which renames fields and scales confidence to 0–100.
+    """
 
     name: str
     entity_id: str
@@ -27,14 +32,23 @@ class GeneratedValueStream:
     evidence: list[str] = field(default_factory=list)
     historic_idmt_ids: list[str] = field(default_factory=list)
 
+    @property
+    def confidence_score(self) -> int:
+        """Internal 0–1 confidence rendered as a 0–100 integer score."""
+        return max(0, min(100, round(float(self.confidence or 0.0) * 100)))
+
     def to_dict(self) -> dict:
+        """API-facing public contract for one value stream.
+
+        ``evidence`` is intentionally omitted here — it stays internal/debug and
+        is not part of the required public output.
+        """
         return {
-            "name": self.name,
-            "entity_id": self.entity_id,
-            "support_type": self.support_type,
-            "confidence": self.confidence,
+            "value_stream_id": self.entity_id,
+            "value_stream_name": self.name,
             "rationale": self.rationale,
-            "evidence": list(self.evidence),
+            "confidence_score": self.confidence_score,
+            "support_type": self.support_type,
             "historic_idmt_ids": list(self.historic_idmt_ids),
         }
 

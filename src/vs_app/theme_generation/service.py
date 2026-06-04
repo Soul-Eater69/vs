@@ -21,6 +21,7 @@ from vs_app.theme_generation.capabilities import (
     generate_l3_capabilities,
 )
 from vs_app.theme_generation.descriptions import generate_theme_description
+from vs_app.theme_generation.title import generate_theme_title
 from vs_app.theme_generation.models import (
     GeneratedL2Capability,
     GeneratedL3Capability,
@@ -63,18 +64,20 @@ async def generate_themes(
     rag_service: ValueStreamRagService | None = None,
     example_provider: ExampleProvider | None = None,
     generate_capabilities: bool = True,
+    generate_title: bool = True,
 ) -> ThemeGenerationResult:
     """Compose one Theme per selected Value Stream.
 
     Flow: Value Stream generation -> stage generation (per Value Stream) ->
-    theme description / business-needs -> L2/L3 capabilities. Each dependency is
-    injectable so this is fully testable with fakes:
+    theme description / business-needs -> L2/L3 capabilities -> theme title. Each
+    dependency is injectable so this is fully testable with fakes:
     - ``rag_service`` drives Value Stream generation,
-    - ``llm`` drives stage selection, description, and capability generation,
+    - ``llm`` drives stage selection, description, capability, and title generation,
     - ``stage_catalog`` supplies the allowed stage dropdown per Value Stream,
     - ``example_provider`` optionally supplies historic theme examples (no stage
       context); when omitted, generation proceeds without historic examples,
-    - ``generate_capabilities`` toggles L2/L3 capability generation (default on).
+    - ``generate_capabilities`` toggles L2/L3 capability generation (default on),
+    - ``generate_title`` toggles theme-title generation (default on).
     """
     catalog = stage_catalog or {}
 
@@ -98,6 +101,7 @@ async def generate_themes(
             llm=llm,
             example_provider=example_provider,
             generate_capabilities=generate_capabilities,
+            generate_title=generate_title,
         )
         themes.append(theme)
 
@@ -120,6 +124,7 @@ def _theme_for_value_stream(
     llm: Any | None,
     example_provider: ExampleProvider | None,
     generate_capabilities: bool,
+    generate_title: bool,
 ) -> GeneratedTheme:
     allowed_stages = get_allowed_stages(value_stream.name, catalog)
 
@@ -176,9 +181,24 @@ def _theme_for_value_stream(
         )
         warnings.extend(l3_warnings)
 
+    theme_title = ""
+    if generate_title:
+        theme_title, title_warnings = generate_theme_title(
+            idea_context=idea_context,
+            value_stream_name=value_stream.name,
+            selected_stages=selected_stages,
+            theme_description=theme_description,
+            business_needs=business_needs,
+            l2_capabilities=l2_capabilities,
+            l3_capabilities=l3_capabilities,
+            llm=llm,
+        )
+        warnings.extend(title_warnings)
+
     return GeneratedTheme(
         value_stream=value_stream,
         stages=stage_result.stages,
+        theme_title=theme_title,
         theme_description=theme_description,
         business_needs=business_needs,
         l2_capabilities=l2_capabilities,

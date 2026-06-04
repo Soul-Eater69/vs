@@ -12,6 +12,7 @@ from .capability import (
 from .stage import StageSupportItem, StageSupportResult
 from .summary import SummaryOutput
 from .theme import ThemeGenerationResult
+from .title import ThemeTitleResult
 from .value_stream import (
     InferenceType,
     ReviewPoolPick,
@@ -37,6 +38,8 @@ __all__ = [
     "SummaryOutput",
     # theme
     "ThemeGenerationResult",
+    # title
+    "ThemeTitleResult",
     # value_stream
     "InferenceType",
     "ReviewPoolPick",

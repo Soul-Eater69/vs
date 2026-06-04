@@ -86,6 +86,8 @@ class FakeLLM:
                     }
                 ]
             )
+        if name == "ThemeTitleResult":
+            return output_schema(theme_title="Automated Quoting Theme")
         return output_schema()
 
 
@@ -125,6 +127,9 @@ def test_composes_value_stream_stages_and_description() -> None:
     assert [c.capability_name for c in theme.l3_capabilities] == ["Quote Versioning"]
     assert theme.l3_capabilities[0].parent_l2_capability_name == "Quote Management"
 
+    # Title
+    assert theme.theme_title == "Automated Quoting Theme"
+
 
 def test_public_to_dict_nests_agreed_contracts() -> None:
     result = _run(ThemeGenerationRequest(idea_card_text="idea"))
@@ -133,6 +138,7 @@ def test_public_to_dict_nests_agreed_contracts() -> None:
     assert set(payload) == {"themes", "warnings", "debug"}
     theme = payload["themes"][0]
     assert set(theme) == {
+        "theme_title",
         "value_stream",
         "stages",
         "theme_description",
@@ -140,6 +146,7 @@ def test_public_to_dict_nests_agreed_contracts() -> None:
         "l2_capabilities",
         "l3_capabilities",
     }
+    assert theme["theme_title"] == "Automated Quoting Theme"
     assert set(theme["l2_capabilities"][0]) == {
         "capability_id",
         "capability_name",

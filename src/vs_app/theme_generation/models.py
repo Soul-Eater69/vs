@@ -77,6 +77,7 @@ class GeneratedTheme:
 
     value_stream: GeneratedValueStream
     stages: list[GeneratedStage] = field(default_factory=list)
+    theme_title: str = ""
     theme_description: str = ""
     business_needs: str = ""
     l2_capabilities: list[GeneratedL2Capability] = field(default_factory=list)
@@ -85,6 +86,7 @@ class GeneratedTheme:
 
     def to_dict(self) -> dict:
         return {
+            "theme_title": self.theme_title,
             "value_stream": self.value_stream.to_dict(),
             "stages": [stage.to_dict() for stage in self.stages],
             "theme_description": self.theme_description,

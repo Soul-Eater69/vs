@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from vs_app.modules.stages.stage_selector import predict_value_stream_stages
+from vs_app.stage_generation.foundational import get_foundational_stages
 from vs_app.stage_generation.models import (
     GeneratedStage,
     StageGenerationRequest,
@@ -63,6 +64,21 @@ def _result_from_prediction(
 
     stages: list[GeneratedStage] = []
     seen: set[str] = set()
+
+    # Foundational (default) stages first — deterministic, no LLM. They are kept on
+    # dedup, so an LLM pick of the same stage is dropped in favor of the
+    # foundational version.
+    foundational_stages, foundational_warnings = get_foundational_stages(
+        value_stream_name, request.allowed_stages
+    )
+    warnings.extend(foundational_warnings)
+    for stage in foundational_stages:
+        key = stage.stage_name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        stages.append(stage)
+
     for pick in prediction.get("predicted_stages") or []:
         if not isinstance(pick, dict):
             continue
@@ -97,6 +113,7 @@ def _result_from_prediction(
     warnings.extend(str(w) for w in prediction.get("warnings") or [])
     debug = {
         "predicted_count": len(prediction.get("predicted_stages") or []),
+        "foundational_count": len(foundational_stages),
         "generated_count": len(stages),
     }
     return StageGenerationResult(

@@ -63,8 +63,12 @@ def _fake_rag_service(captured: dict | None = None) -> ValueStreamRagService:
 class FakeLLM:
     """generate_structured keyed on the requested output schema."""
 
+    def __init__(self) -> None:
+        self.seen_schemas: list[str] = []
+
     def generate_structured(self, *, query, output_schema, system_prompt=None, reasoning_effort=None):
         name = output_schema.__name__
+        self.seen_schemas.append(name)
         if name == "ValueStageSelectionResult":
             return output_schema(
                 picks=[{"stage": "Account Configuration", "confidence": 0.88, "reason": "Set up accounts."}]
@@ -101,7 +105,18 @@ def _run(request: ThemeGenerationRequest, *, captured: dict | None = None) -> Th
 
 
 def test_composes_value_stream_stages_and_description() -> None:
-    result = _run(ThemeGenerationRequest(idea_card_text="quote automation idea"))
+    llm = FakeLLM()
+    result = asyncio.run(
+        service.generate_themes(
+            ThemeGenerationRequest(
+                idea_card_text="quote automation idea",
+                idmt_title="Improve Prior Authorization",
+            ),
+            llm=llm,
+            stage_catalog=STAGE_CATALOG,
+            rag_service=_fake_rag_service(),
+        )
+    )
 
     assert isinstance(result, ThemeGenerationResult)
     assert len(result.themes) == 1
@@ -125,6 +140,10 @@ def test_composes_value_stream_stages_and_description() -> None:
     assert [c.capability_name for c in theme.l3_capabilities] == ["Quote Versioning"]
     assert theme.l3_capabilities[0].parent_l2_capability_name == "Quote Management"
 
+    # Title is deterministic (IDMT title + Value Stream name), no LLM call.
+    assert theme.theme_title == "Improve Prior Authorization - Configure, Price, and Quote"
+    assert "ThemeTitleResult" not in llm.seen_schemas
+
 
 def test_public_to_dict_nests_agreed_contracts() -> None:
     result = _run(ThemeGenerationRequest(idea_card_text="idea"))
@@ -133,6 +152,7 @@ def test_public_to_dict_nests_agreed_contracts() -> None:
     assert set(payload) == {"themes", "warnings", "debug"}
     theme = payload["themes"][0]
     assert set(theme) == {
+        "theme_title",
         "value_stream",
         "stages",
         "theme_description",
@@ -140,6 +160,8 @@ def test_public_to_dict_nests_agreed_contracts() -> None:
         "l2_capabilities",
         "l3_capabilities",
     }
+    # No idmt_title supplied -> title falls back to the Value Stream name.
+    assert theme["theme_title"] == VS
     assert set(theme["l2_capabilities"][0]) == {
         "capability_id",
         "capability_name",

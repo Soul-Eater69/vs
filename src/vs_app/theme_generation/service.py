@@ -21,6 +21,7 @@ from vs_app.theme_generation.capabilities import (
     generate_l3_capabilities,
 )
 from vs_app.theme_generation.descriptions import generate_theme_description
+from vs_app.theme_generation.title import build_theme_title
 from vs_app.theme_generation.models import (
     GeneratedL2Capability,
     GeneratedL3Capability,
@@ -67,8 +68,10 @@ async def generate_themes(
     """Compose one Theme per selected Value Stream.
 
     Flow: Value Stream generation -> stage generation (per Value Stream) ->
-    theme description / business-needs -> L2/L3 capabilities. Each dependency is
-    injectable so this is fully testable with fakes:
+    theme description / business-needs -> L2/L3 capabilities -> theme title. The
+    title is built deterministically (IDMT title + Value Stream name); it does not
+    use the llm. Each dependency is injectable so this is fully testable with
+    fakes:
     - ``rag_service`` drives Value Stream generation,
     - ``llm`` drives stage selection, description, and capability generation,
     - ``stage_catalog`` supplies the allowed stage dropdown per Value Stream,
@@ -94,6 +97,7 @@ async def generate_themes(
         theme = _theme_for_value_stream(
             value_stream=value_stream,
             idea_context=idea_context,
+            idmt_title=request.idmt_title,
             catalog=catalog,
             llm=llm,
             example_provider=example_provider,
@@ -116,6 +120,7 @@ def _theme_for_value_stream(
     *,
     value_stream: GeneratedValueStream,
     idea_context: str,
+    idmt_title: str,
     catalog: dict,
     llm: Any | None,
     example_provider: ExampleProvider | None,
@@ -176,9 +181,16 @@ def _theme_for_value_stream(
         )
         warnings.extend(l3_warnings)
 
+    # Deterministic title: IDMT ticket title + Value Stream name (no llm).
+    theme_title = build_theme_title(
+        idmt_title=idmt_title,
+        value_stream_name=value_stream.name,
+    )
+
     return GeneratedTheme(
         value_stream=value_stream,
         stages=stage_result.stages,
+        theme_title=theme_title,
         theme_description=theme_description,
         business_needs=business_needs,
         l2_capabilities=l2_capabilities,

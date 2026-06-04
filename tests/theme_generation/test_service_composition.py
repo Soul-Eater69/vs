@@ -65,11 +65,13 @@ class FakeLLM:
 
     def __init__(self) -> None:
         self.seen_schemas: list[str] = []
+        self.stage_query: str = ""
 
     def generate_structured(self, *, query, output_schema, system_prompt=None, reasoning_effort=None):
         name = output_schema.__name__
         self.seen_schemas.append(name)
         if name == "ValueStageSelectionResult":
+            self.stage_query = query
             return output_schema(
                 picks=[{"stage": "Account Configuration", "confidence": 0.88, "reason": "Set up accounts."}]
             )
@@ -109,7 +111,8 @@ def test_composes_value_stream_stages_and_description() -> None:
     result = asyncio.run(
         service.generate_themes(
             ThemeGenerationRequest(
-                idea_card_text="quote automation idea",
+                idea_card_text="SECRET idea card body that must not reach the stage prompt",
+                generated_summary="Generated ticket summary about quoting.",
                 idmt_title="Improve Prior Authorization",
             ),
             llm=llm,
@@ -130,6 +133,11 @@ def test_composes_value_stream_stages_and_description() -> None:
     # Stages (from the new stage_generation wrapper, validated against catalog)
     assert [s.stage_name for s in theme.stages] == ["Account Configuration"]
     assert theme.stages[0].value_stream_name == VS
+
+    # Stage prediction is summary-only: the generated summary reaches the stage
+    # prompt; the idea card body never does.
+    assert "Generated ticket summary about quoting." in llm.stage_query
+    assert "SECRET idea card body" not in llm.stage_query
 
     # Description / business needs
     assert theme.theme_description == "A CPQ theme."

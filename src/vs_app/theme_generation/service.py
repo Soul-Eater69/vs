@@ -97,6 +97,7 @@ async def generate_themes(
         theme = _theme_for_value_stream(
             value_stream=value_stream,
             idea_context=idea_context,
+            generated_summary=request.generated_summary,
             idmt_title=request.idmt_title,
             catalog=catalog,
             llm=llm,
@@ -120,6 +121,7 @@ def _theme_for_value_stream(
     *,
     value_stream: GeneratedValueStream,
     idea_context: str,
+    generated_summary: str,
     idmt_title: str,
     catalog: dict,
     llm: Any | None,
@@ -128,11 +130,13 @@ def _theme_for_value_stream(
 ) -> GeneratedTheme:
     allowed_stages = get_allowed_stages(value_stream.name, catalog)
 
+    # Stage prediction is summary-only: pass the generated summary, never the
+    # idea card body / description.
     stage_result = generate_stages(
         StageGenerationRequest(
             value_stream_name=value_stream.name,
             allowed_stages=allowed_stages,
-            idea_card_text=idea_context,
+            generated_summary=generated_summary,
         ),
         llm=llm,
     )

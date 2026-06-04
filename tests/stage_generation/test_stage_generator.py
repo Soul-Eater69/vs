@@ -7,6 +7,7 @@ payload, and one test exercises the real default predictor with ``llm=None``
 
 from __future__ import annotations
 
+from vs_app.stage_generation.foundational import get_foundational_stages
 from vs_app.stage_generation.generator import generate_stages
 from vs_app.stage_generation.models import GeneratedStage, StageGenerationRequest
 from vs_app.stage_generation.validators import match_allowed_stage
@@ -274,3 +275,120 @@ def test_real_predictor_loads_summary_prompt_and_returns_support() -> None:
     assert "Configure accounts and produce quotes." in llm.query
     assert [s.stage_name for s in result.stages] == ["Account Configuration"]
     assert result.stages[0].support_type == "direct"
+
+
+# --- foundational (default) stages -----------------------------------------------
+
+CPQ_FOUNDATIONAL = ["Price Products and Manage Approvals", "Generate Quote"]
+CPQ_ALLOWED = CPQ_FOUNDATIONAL + ["Account Configuration"]
+
+
+def _predict_fn(picks):
+    def predict_fn(**kwargs):
+        return {
+            "value_stream_name": kwargs.get("value_stream_name"),
+            "allowed_stages": kwargs.get("allowed_stages"),
+            "predicted_stages": picks,
+            "warnings": [],
+        }
+
+    return predict_fn
+
+
+def test_foundational_stages_auto_added_for_cpq() -> None:
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name=VS, allowed_stages=CPQ_ALLOWED, generated_summary="s"),
+        llm=object(),
+        predict_fn=_predict_fn([]),
+    )
+    assert [s.stage_name for s in result.stages] == CPQ_FOUNDATIONAL
+    for stage in result.stages:
+        assert stage.confidence == 1.0
+        assert stage.to_dict()["confidence_score"] == 100
+        assert stage.rationale == "Foundational stage for selected Value Stream."
+        assert stage.support_type == "direct"
+    assert result.debug["foundational_count"] == 2
+
+
+def test_foundational_manage_leads_adds_both() -> None:
+    vs = "Manage Leads and Opportunities"
+    allowed = ["Perform Outreach", "Manage Pipeline & Reporting Analytics", "Unrelated Stage"]
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name=vs, allowed_stages=allowed, generated_summary="s"),
+        llm=object(),
+        predict_fn=_predict_fn([]),
+    )
+    assert [s.stage_name for s in result.stages] == [
+        "Perform Outreach",
+        "Manage Pipeline & Reporting Analytics",
+    ]
+
+
+def test_unknown_value_stream_adds_no_foundational() -> None:
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name="Totally Unknown VS", allowed_stages=["Stage A"], generated_summary="s"),
+        llm=object(),
+        predict_fn=_predict_fn([{"stage": "Stage A", "confidence": 0.9, "reason": "r"}]),
+    )
+    assert [s.stage_name for s in result.stages] == ["Stage A"]
+    assert result.debug["foundational_count"] == 0
+
+
+def test_foundational_missing_from_allowed_skipped_with_warning() -> None:
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name=VS, allowed_stages=["Generate Quote"], generated_summary="s"),
+        llm=object(),
+        predict_fn=_predict_fn([]),
+    )
+    assert [s.stage_name for s in result.stages] == ["Generate Quote"]
+    assert any(
+        "foundational stage not in allowed stages: Price Products and Manage Approvals" in w
+        for w in result.warnings
+    )
+
+
+def test_llm_duplicate_of_foundational_is_deduped_to_foundational() -> None:
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name=VS, allowed_stages=CPQ_ALLOWED, generated_summary="s"),
+        llm=object(),
+        predict_fn=_predict_fn(
+            [{"stage": "Generate Quote", "confidence": 0.5, "reason": "llm pick", "support": "implied"}]
+        ),
+    )
+    names = [s.stage_name for s in result.stages]
+    assert names.count("Generate Quote") == 1
+    gq = next(s for s in result.stages if s.stage_name == "Generate Quote")
+    # foundational version is kept (deterministic), not the LLM duplicate
+    assert gq.rationale == "Foundational stage for selected Value Stream."
+    assert gq.to_dict()["confidence_score"] == 100
+    assert gq.support_type == "direct"
+
+
+def test_llm_can_add_extra_allowed_stages_beyond_foundational() -> None:
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name=VS, allowed_stages=CPQ_ALLOWED, generated_summary="s"),
+        llm=object(),
+        predict_fn=_predict_fn(
+            [{"stage": "Account Configuration", "confidence": 0.8, "reason": "r", "support": "direct"}]
+        ),
+    )
+    assert [s.stage_name for s in result.stages] == CPQ_FOUNDATIONAL + ["Account Configuration"]
+
+
+def test_foundational_stages_do_not_require_llm() -> None:
+    # llm=None -> real predictor returns no picks; foundational stages still appear.
+    result = generate_stages(
+        StageGenerationRequest(value_stream_name=VS, allowed_stages=CPQ_ALLOWED, generated_summary="s"),
+        llm=None,
+    )
+    assert [s.stage_name for s in result.stages] == CPQ_FOUNDATIONAL
+    assert any("no llm provided" in w for w in result.warnings)
+
+
+def test_get_foundational_stages_unit() -> None:
+    stages, warnings = get_foundational_stages(VS, CPQ_ALLOWED)
+    assert [s.stage_name for s in stages] == CPQ_FOUNDATIONAL
+    assert warnings == []
+    # unknown value stream -> nothing
+    stages2, warnings2 = get_foundational_stages("Unknown VS", ["X"])
+    assert stages2 == [] and warnings2 == []

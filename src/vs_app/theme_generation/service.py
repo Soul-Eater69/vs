@@ -20,6 +20,7 @@ from vs_app.theme_generation.capabilities import (
     generate_l2_capabilities,
     generate_l3_capabilities,
 )
+from vs_app.theme_generation.business_needs import generate_business_needs
 from vs_app.theme_generation.descriptions import generate_theme_description
 from vs_app.theme_generation.title import build_theme_title
 from vs_app.theme_generation.models import (
@@ -147,7 +148,9 @@ def _theme_for_value_stream(
     ]
     examples = example_provider(value_stream.name) if example_provider else []
 
-    theme_text = generate_theme_description(
+    # Theme Description and Business Needs are independent LLM calls with
+    # different Jira formats. Description first, then business needs.
+    description_result = generate_theme_description(
         idea_context=idea_context,
         value_stream_name=value_stream.name,
         allowed_stages=allowed_stages,
@@ -155,10 +158,21 @@ def _theme_for_value_stream(
         examples=examples,
         llm=llm,
     )
-    theme_description = str(theme_text.get("theme_description") or "").strip()
-    business_needs = str(theme_text.get("business_needs") or "").strip()
+    theme_description = str(description_result.get("theme_description") or "").strip()
 
-    warnings = list(stage_result.warnings) + list(theme_text.get("warnings") or [])
+    business_needs_result = generate_business_needs(
+        idea_context=idea_context,
+        value_stream_name=value_stream.name,
+        selected_stages=selected_stages,
+        llm=llm,
+    )
+    business_needs = str(business_needs_result.get("business_needs") or "").strip()
+
+    warnings = (
+        list(stage_result.warnings)
+        + list(description_result.get("warnings") or [])
+        + list(business_needs_result.get("warnings") or [])
+    )
 
     l2_capabilities = []
     l3_capabilities = []

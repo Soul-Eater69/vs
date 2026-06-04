@@ -1,13 +1,12 @@
-"""Tests for pure theme text generation (Feature 14B1; fake LLM only)."""
+"""Tests for Theme Description generation (split from Business Needs; fake LLM)."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
+from vs_app.modules.prompts.schemas import ThemeDescriptionResult, ThemeGenerationResult
 from vs_app.theme_generation.descriptions import generate_theme_description
-from vs_app.modules.prompts.loader import build_theme_generation_prompt
-from vs_app.modules.prompts.schemas import ThemeGenerationResult
 
 VS = "Configure, Price, and Quote"
 ALLOWED = ["Account Configuration", "Generate Quote and Present to Customer"]
@@ -25,17 +24,15 @@ EXAMPLES = [
 
 
 class FakeStructuredLLM:
-    """Mirrors the generate_structured(...) duck-type used by the stage selector."""
+    """generate_structured(...) duck-type returning a theme description."""
 
-    def __init__(self, theme_description="A CPQ theme.", business_needs="Faster quoting.") -> None:
-        self.result = ThemeGenerationResult(
-            theme_description=theme_description, business_needs=business_needs
-        )
+    def __init__(self, theme_description="A CPQ theme.") -> None:
+        self.theme_description = theme_description
         self.calls: list[dict] = []
 
     def generate_structured(self, *, query, output_schema, system_prompt, reasoning_effort):
         self.calls.append({"query": query, "system_prompt": system_prompt})
-        return self.result
+        return ThemeDescriptionResult(theme_description=self.theme_description)
 
 
 class FakeTextLLM:
@@ -63,25 +60,29 @@ def _gen(llm, **overrides):
     return generate_theme_description(**kwargs)
 
 
-# --- prompt assembly --------------------------------------------------------
+# --- prompt content --------------------------------------------------------
 
 
-def test_prompt_includes_all_sections() -> None:
-    prompt = build_theme_generation_prompt(
-        idea_context="MY IDEA CONTEXT",
-        value_stream_name=VS,
-        allowed_stages=json.dumps(ALLOWED),
-        selected_stages=json.dumps(["Account Configuration"]),
-        examples=json.dumps(EXAMPLES),
-    )
-    assert "MY IDEA CONTEXT" in prompt
-    assert VS in prompt
-    assert "Account Configuration" in prompt
-    assert "Generate Quote and Present to Customer" in prompt
-    assert "Prior CPQ theme." in prompt
+def test_description_prompt_has_theme_description_and_product_availability() -> None:
+    fake = FakeStructuredLLM()
+    _gen(fake)
+    sent = fake.calls[0]["query"]
+    assert "Theme Description" in sent
+    assert "Product Availability" in sent
+    assert "MY IDEA CONTEXT".lower() not in sent  # sanity
+    assert "Sales need faster account setup and quoting." in sent
 
 
-def test_prompt_excludes_content_vector_and_raw_content() -> None:
+def test_description_prompt_forbids_fabrication_assumptions_and_historic_stages() -> None:
+    fake = FakeStructuredLLM()
+    _gen(fake)
+    sent = fake.calls[0]["query"]
+    assert "fabricate" in sent.lower()
+    assert "assumption" in sent.lower()
+    assert "historic stage context" in sent.lower()
+
+
+def test_prompt_excludes_content_vector_raw_content_and_historic_stages() -> None:
     noisy = [
         {
             **EXAMPLES[0],
@@ -94,25 +95,25 @@ def test_prompt_excludes_content_vector_and_raw_content() -> None:
     sent = fake.calls[0]["query"]
     assert "content_vector" not in sent
     assert "RAW_BLOB_" not in sent
-    # but the safe example fields are still present
+    # historic example stages are never included
+    assert "stage_name" not in sent
+    # safe style field still present
     assert "Prior CPQ theme." in sent
 
 
 # --- generation behavior ----------------------------------------------------
 
 
-def test_successful_generation_returns_fields() -> None:
-    out = _gen(FakeStructuredLLM("A clear CPQ theme.", "Quoting needs."))
+def test_successful_generation_returns_description() -> None:
+    out = _gen(FakeStructuredLLM("A clear CPQ theme."))
     assert out["theme_description"] == "A clear CPQ theme."
-    assert out["business_needs"] == "Quoting needs."
+    assert "business_needs" not in out
     assert "empty theme_description" not in out["warnings"]
 
 
 def test_text_llm_with_valid_json_is_parsed() -> None:
-    payload = json.dumps({"theme_description": "From text LLM.", "business_needs": "Needs."})
-    out = _gen(FakeTextLLM(payload))
+    out = _gen(FakeTextLLM(json.dumps({"theme_description": "From text LLM."})))
     assert out["theme_description"] == "From text LLM."
-    assert out["business_needs"] == "Needs."
 
 
 def test_no_examples_still_works() -> None:
@@ -124,19 +125,17 @@ def test_no_examples_still_works() -> None:
 def test_llm_none_returns_blank_with_warning() -> None:
     out = _gen(None)
     assert out["theme_description"] == ""
-    assert out["business_needs"] == ""
-    assert "no llm provided for theme generation" in out["warnings"]
+    assert "no llm provided for theme description" in out["warnings"]
 
 
 def test_invalid_json_returns_blank_with_warning_no_raise() -> None:
     out = _gen(FakeTextLLM("this is not json at all"))
     assert out["theme_description"] == ""
-    assert out["business_needs"] == ""
-    assert any("invalid" in w or "empty" in w for w in out["warnings"])
+    assert any("empty" in w or "failed" in w for w in out["warnings"])
 
 
 def test_empty_theme_description_warns() -> None:
-    out = _gen(FakeStructuredLLM(theme_description="", business_needs="needs only"))
+    out = _gen(FakeStructuredLLM(theme_description=""))
     assert out["theme_description"] == ""
     assert "empty theme_description" in out["warnings"]
 
@@ -146,30 +145,15 @@ def test_jira_id_leakage_adds_warning() -> None:
     assert "generated text contains Jira-like IDs" in out["warnings"]
 
 
-def test_empty_allowed_and_selected_warn_but_still_generate() -> None:
-    out = _gen(FakeStructuredLLM(), allowed_stages=[], selected_stages=[])
-    assert out["theme_description"]  # still generated
-    assert "no allowed stages for value stream" in out["warnings"]
-    assert "no selected stages provided" in out["warnings"]
-
-
-def test_loader_and_schema_exports_work() -> None:
-    # schema is exported and lenient
-    assert ThemeGenerationResult().theme_description == ""
-    # loader function is importable and renders
-    prompt = build_theme_generation_prompt(
-        idea_context="x",
-        value_stream_name="y",
-        allowed_stages="[]",
-        selected_stages="[]",
-        examples="[]",
-    )
-    assert "JSON only" in prompt
+def test_schema_exports_work() -> None:
+    assert ThemeDescriptionResult().theme_description == ""
+    # legacy combined schema retained for backward compatibility
+    assert ThemeGenerationResult().business_needs == ""
 
 
 def test_no_retrieval_or_stage_prediction_imports() -> None:
-    # The generation module must not IMPORT retrieval / stage-prediction / azure /
-    # jira / embedding code (docstrings may reference them by name; imports may not).
+    # The description module must not IMPORT retrieval / stage-prediction / azure /
+    # jira / embedding code.
     import ast
 
     import vs_app.theme_generation.descriptions as gen

@@ -24,6 +24,10 @@ from vs_app.sources.jira.attachments import (
     combine_attachment_texts,
     normalize_attachment_metadata,
 )
+from vs_app.sources.jira.idea_card import (
+    select_idea_card_attachment,
+    select_processing_attachments,
+)
 from vs_app.sources.jira.models import (
     ExtractedEpicRecord,
     ExtractedIDMTRecord,
@@ -53,13 +57,25 @@ def extract_idmt_record(
     description = _text(fields.get("description") or issue.get("description"))
     idea_card_text = _text(fields.get("idea_card_text") or issue.get("idea_card_text"))
 
+    fallback_limit = 4
+    idea_card_selected = False
     attachment_text = ""
     attachments_meta: list[dict] = []
     if include_attachments:
         attachments = _call(client, "get_attachments", ticket_id, warnings=warnings) or []
         attachments_meta = [normalize_attachment_metadata(a) for a in attachments]
+
+        # Idea-card-first: when an idea-card attachment exists it is the sole
+        # authoritative input; otherwise fall back to the top-N attachments. Text
+        # is fetched only for the selected attachments.
+        process_list, select_warnings = select_processing_attachments(
+            attachments, fallback_limit=fallback_limit
+        )
+        warnings.extend(select_warnings)
+        idea_card_selected = select_idea_card_attachment(attachments) is not None
+
         texts: list[str] = []
-        for attachment in attachments:
+        for attachment in process_list:
             text = _call(client, "get_attachment_text", attachment, warnings=warnings)
             if text:
                 texts.append(str(text))
@@ -67,7 +83,14 @@ def extract_idmt_record(
         if not attachments:
             warnings.append("no attachments found")
 
-    extracted_text = combine_attachment_texts([idea_card_text, attachment_text])
+        if idea_card_selected:
+            # The idea-card attachment text is the authoritative idea card.
+            idea_card_text = attachment_text
+
+    if idea_card_selected:
+        extracted_text = idea_card_text
+    else:
+        extracted_text = combine_attachment_texts([idea_card_text, attachment_text])
 
     themes: list[ExtractedThemeRecord] = []
     if include_themes:
@@ -80,6 +103,8 @@ def extract_idmt_record(
     source_metadata = {
         "ticket_id": ticket_id,
         "attachments": attachments_meta,
+        "idea_card_selected": idea_card_selected,
+        "fallback_limit": fallback_limit,
         "theme_count": len(themes),
         "warnings": warnings,
     }

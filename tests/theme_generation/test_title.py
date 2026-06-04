@@ -1,90 +1,40 @@
-"""Fake-only tests for theme-title generation.
+"""Tests for deterministic theme-title construction.
 
-No live Azure / Jira / LLM: a fake LLM returns a structured title and records the
-prompt so we can assert no historic stage context leaks in.
+The title is built from the IDMT ticket title + Value Stream name — no LLM, no
+prompt, no network. These tests take no ``llm`` at all, proving title generation
+never calls a model.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from vs_app.theme_generation.models import GeneratedL2Capability, GeneratedL3Capability
-from vs_app.theme_generation.title import generate_theme_title
-
-VS = "Configure, Price, and Quote"
-SELECTED_STAGES = [{"stage": "Account Configuration", "confidence": 0.9, "reason": "set up"}]
-L2 = [GeneratedL2Capability("Quote Management", "Manage quotes.", 0.9)]
-L3 = [GeneratedL3Capability("Quote Versioning", "Quote Management", "Track versions.", 0.7)]
+from vs_app.theme_generation.title import build_theme_title
 
 
-class FakeLLM:
-    def __init__(self, title: str = "Automated Quoting and Account Configuration") -> None:
-        self.title = title
-        self.last_query = ""
-
-    def generate_structured(self, *, query, output_schema, system_prompt=None, reasoning_effort=None):
-        self.last_query = query
-        return output_schema(theme_title=self.title)
-
-
-class MalformedLLM:
-    def generate_structured(self, *, query, output_schema, system_prompt=None, reasoning_effort=None):
-        raise ValueError("gateway boom")
-
-
-def _args(**overrides) -> dict:
-    args = dict(
-        idea_context="quote automation idea",
-        value_stream_name=VS,
-        selected_stages=SELECTED_STAGES,
-        theme_description="A CPQ theme.",
-        business_needs="Faster quoting.",
-        l2_capabilities=L2,
-        l3_capabilities=L3,
+def test_title_joins_idmt_and_value_stream() -> None:
+    assert (
+        build_theme_title(
+            idmt_title="Improve Prior Authorization",
+            value_stream_name="Manage Utilization Management Program",
+        )
+        == "Improve Prior Authorization - Manage Utilization Management Program"
     )
-    args.update(overrides)
-    return args
 
 
-def test_generates_title() -> None:
-    title, warnings = generate_theme_title(**_args(), llm=FakeLLM())
-    assert title == "Automated Quoting and Account Configuration"
-    assert warnings == []
+def test_missing_idmt_title_returns_value_stream() -> None:
+    assert build_theme_title(idmt_title="", value_stream_name="Order to Cash") == "Order to Cash"
 
 
-def test_no_llm_returns_empty_with_warning() -> None:
-    title, warnings = generate_theme_title(**_args(), llm=None)
-    assert title == ""
-    assert any("no llm provided" in w for w in warnings)
+def test_missing_value_stream_returns_idmt_title() -> None:
+    assert build_theme_title(idmt_title="Improve Prior Authorization", value_stream_name="") == (
+        "Improve Prior Authorization"
+    )
 
 
-def test_malformed_returns_empty_with_warning() -> None:
-    title, warnings = generate_theme_title(**_args(), llm=MalformedLLM())
-    assert title == ""
-    assert any("title generation failed" in w for w in warnings)
+def test_both_missing_returns_empty() -> None:
+    assert build_theme_title(idmt_title="", value_stream_name="") == ""
 
 
-def test_empty_title_warns() -> None:
-    title, warnings = generate_theme_title(**_args(), llm=FakeLLM(title="   "))
-    assert title == ""
-    assert any("empty theme_title" in w for w in warnings)
-
-
-def test_jira_id_in_title_warns() -> None:
-    title, warnings = generate_theme_title(**_args(), llm=FakeLLM(title="Quoting for IDMT-1001"))
-    assert any("Jira-like IDs" in w for w in warnings)
-
-
-def test_prompt_has_context_but_no_historic_stage_keys() -> None:
-    llm = FakeLLM()
-    generate_theme_title(**_args(), llm=llm)
-    q = llm.last_query
-    # context present
-    assert "A CPQ theme." in q
-    assert "Quote Management" in q
-    assert "Quote Versioning" in q
-    # current selected stage name is allowed context (not historic)
-    assert "Account Configuration" in q
-    # no historic stage-context keys
-    assert "stage_name" not in q
-    assert "support_type" not in q
+def test_whitespace_is_normalized() -> None:
+    assert build_theme_title(idmt_title="  Improve   PA ", value_stream_name=" Order  to Cash ") == (
+        "Improve PA - Order to Cash"
+    )

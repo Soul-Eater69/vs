@@ -67,6 +67,7 @@ class ThemeGenerationRequest:
 
     idea_card_text: str | None = None
     ticket_id: str | None = None
+    idmt_title: str = ""
     top_n_value_streams: int = 10
     custom_instruction: str | None = None
 

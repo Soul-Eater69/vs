@@ -6,6 +6,8 @@ client supplies canned issue / linked-issue / attachment / epic data.
 
 from __future__ import annotations
 
+import pytest
+
 from vs_app.sources.jira import (
     ExtractedIDMTRecord,
     extract_idmt_record,
@@ -13,6 +15,10 @@ from vs_app.sources.jira import (
 from vs_app.sources.jira.attachments import (
     combine_attachment_texts,
     normalize_attachment_metadata,
+)
+from vs_app.sources.jira.idea_card import (
+    is_idea_card_attachment,
+    select_processing_attachments,
 )
 
 
@@ -205,3 +211,127 @@ def test_attachment_helpers_are_pure() -> None:
         "url": "",
     }
     assert normalize_attachment_metadata("not a dict") == {}
+
+
+# --- idea-card-first attachment selection ---------------------------------------
+
+
+class TrackingClient:
+    """Fake client that records which attachment ids had their text fetched."""
+
+    def __init__(self, *, attachments, attachment_texts, issue=None) -> None:
+        self._issue = issue or {"fields": {"summary": "T", "description": "D"}}
+        self._attachments = attachments
+        self._texts = attachment_texts
+        self.fetched_ids: list = []
+
+    def get_issue(self, ticket_id):
+        return self._issue
+
+    def get_attachments(self, ticket_id):
+        return self._attachments
+
+    def get_attachment_text(self, attachment):
+        att_id = attachment.get("id") if isinstance(attachment, dict) else None
+        self.fetched_ids.append(att_id)
+        return self._texts.get(att_id, "")
+
+    def get_linked_issues(self, ticket_id):
+        return []
+
+    def get_child_epics(self, group_id):
+        return []
+
+
+@pytest.mark.parametrize(
+    "fname",
+    ["Idea Card.docx", "ideacard.pdf", "idea_card_v2.txt", "idea-card.md", "MY IDEA CARD FINAL.PDF"],
+)
+def test_idea_card_variants_selected_as_sole_input(fname) -> None:
+    attachments = [
+        {"id": "a1", "filename": "spec.pdf"},
+        {"id": "ic", "filename": fname},
+        {"id": "a2", "filename": "notes.txt"},
+    ]
+    texts = {"a1": "SPEC TEXT", "ic": "IDEA CARD BODY", "a2": "NOTES TEXT"}
+    client = TrackingClient(attachments=attachments, attachment_texts=texts)
+    record = extract_idmt_record(ticket_id="IDMT-1", client=client)
+
+    assert record.source_metadata["idea_card_selected"] is True
+    # only the idea-card attachment is used, everywhere
+    assert record.idea_card_text == "IDEA CARD BODY"
+    assert record.attachment_text == "IDEA CARD BODY"
+    assert record.extracted_text == "IDEA CARD BODY"
+    # only the idea-card attachment had its text fetched
+    assert client.fetched_ids == ["ic"]
+    assert "SPEC TEXT" not in record.extracted_text
+    assert "NOTES TEXT" not in record.extracted_text
+
+
+def test_fallback_top4_when_no_idea_card() -> None:
+    attachments = [{"id": f"a{i}", "filename": f"doc{i}.pdf"} for i in range(6)]
+    texts = {f"a{i}": f"TEXT{i}" for i in range(6)}
+    client = TrackingClient(attachments=attachments, attachment_texts=texts)
+    record = extract_idmt_record(ticket_id="IDMT-1", client=client)
+
+    assert record.source_metadata["idea_card_selected"] is False
+    assert record.source_metadata["fallback_limit"] == 4
+    # only the top-4 attachments had their text fetched
+    assert client.fetched_ids == ["a0", "a1", "a2", "a3"]
+    for i in range(4):
+        assert f"TEXT{i}" in record.attachment_text
+    for i in (4, 5):
+        assert f"TEXT{i}" not in record.attachment_text
+    assert any("no idea card found" in w for w in record.source_metadata["warnings"])
+
+
+def test_missing_attachment_metadata_does_not_crash() -> None:
+    attachments = [{}, {"filename": None}, "not-a-dict"]
+    client = TrackingClient(attachments=attachments, attachment_texts={})
+    record = extract_idmt_record(ticket_id="IDMT-1", client=client)
+    assert record.source_metadata["idea_card_selected"] is False
+    assert isinstance(record, ExtractedIDMTRecord)
+
+
+def test_source_metadata_records_idea_card_selected_flag() -> None:
+    with_card = TrackingClient(
+        attachments=[{"id": "ic", "filename": "idea card.docx"}],
+        attachment_texts={"ic": "BODY"},
+    )
+    assert extract_idmt_record(ticket_id="X", client=with_card).source_metadata["idea_card_selected"] is True
+
+    without_card = TrackingClient(
+        attachments=[{"id": "a", "filename": "spec.pdf"}],
+        attachment_texts={"a": "SPEC"},
+    )
+    assert extract_idmt_record(ticket_id="X", client=without_card).source_metadata["idea_card_selected"] is False
+
+
+# --- pure selection helpers (unit) ----------------------------------------------
+
+
+def test_is_idea_card_attachment_unit() -> None:
+    assert is_idea_card_attachment({"filename": "Idea Card.docx"})
+    assert is_idea_card_attachment({"name": "ideacard"})
+    assert is_idea_card_attachment({"title": "idea_card template"})
+    assert is_idea_card_attachment({"filename": "idea-card.pdf"})
+    # bare "idea" without the card convention is NOT matched
+    assert not is_idea_card_attachment({"filename": "great_ideas.pdf"})
+    assert not is_idea_card_attachment({"filename": "spec.pdf"})
+    assert not is_idea_card_attachment("not a dict")
+
+
+def test_select_processing_attachments_unit() -> None:
+    attachments = [
+        {"id": "a", "filename": "spec.pdf"},
+        {"id": "ic", "filename": "idea card.docx"},
+        {"id": "b", "filename": "notes.txt"},
+    ]
+    selected, warnings = select_processing_attachments(attachments)
+    assert [a["id"] for a in selected] == ["ic"]
+    assert warnings == []
+
+    many = [{"id": str(i), "filename": f"d{i}.pdf"} for i in range(6)]
+    selected2, warnings2 = select_processing_attachments(many, fallback_limit=4)
+    assert [a["id"] for a in selected2] == ["0", "1", "2", "3"]
+    assert any("no idea card found" in w for w in warnings2)

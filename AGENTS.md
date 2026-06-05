@@ -93,3 +93,15 @@ The generation pipeline is the engine behind a backend API. Design for it:
 
 ## Where to start
 `docs/TDD_GAP_AND_TASKS.md` — TDD-vs-repo gap analysis and the epic/sub-task backlog.
+
+## Pending actions (resume here)
+
+- **Create the Linear tickets** for the 25-item backlog. Source: `docs/linear_tickets.csv`
+  (import-ready) / `docs/TDD_GAP_AND_TASKS.md`. The `linear-server` MCP is added +
+  connected; its tools load only on a fresh Claude session start. To create them:
+  read the CSV, confirm the target Linear **team** and whether the 4 epics (A/B/C/D)
+  should be **parent issues** with the tasks as **sub-issues** (vs. flat issues with
+  epic labels), create ONE ticket as a dry run, then the rest — report each URL.
+- Design source of truth: `docs/tdd_extracted.md` (text of `tdd_updated_final.docx`).
+- After the Linear tickets exist, start implementation in dependency order
+  (A6+A4+A5 schema/catalogues and B1 condense step first). One feature PR per task.
